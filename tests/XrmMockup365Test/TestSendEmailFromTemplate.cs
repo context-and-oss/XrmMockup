@@ -1,6 +1,8 @@
 using DG.XrmFramework.BusinessDomain.ServiceContext;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using System;
 using System.Linq;
@@ -29,6 +31,33 @@ namespace DG.XrmMockupTest
             };
         }
 
+        private int ObjectTypeCode(string logicalName)
+        {
+            var response = (RetrieveEntityResponse)orgAdminService.Execute(new RetrieveEntityRequest
+            {
+                LogicalName = logicalName,
+                EntityFilters = EntityFilters.Entity
+            });
+            return response.EntityMetadata.ObjectTypeCode.Value;
+        }
+
+        private Template CreateContactTemplate()
+        {
+            var template = new Template
+            {
+                Title = "Registration",
+                Subject = SubjectXslt,
+                Body = BodyXslt,
+                IsPersonal = false,
+                LanguageCode = 1033
+            };
+            // templatetypecode is an OptionSet-backed EntityName attribute, so XrmMockup stores it
+            // as the entity's integer object type code rather than the logical-name string.
+            template["templatetypecode"] = ObjectTypeCode(Contact.EntityLogicalName);
+            template.Id = orgAdminService.Create(template);
+            return template;
+        }
+
         [Fact]
         public void TestSendEmailFromTemplateCreatesAndSendsEmail()
         {
@@ -39,10 +68,12 @@ namespace DG.XrmMockupTest
             };
             contact.Id = orgAdminUIService.Create(contact);
 
+            var template = CreateContactTemplate();
+
             var request = new SendEmailFromTemplateRequest
             {
                 Target = BuildEmail(contact),
-                TemplateId = Guid.NewGuid(),
+                TemplateId = template.Id,
                 RegardingId = contact.Id,
                 RegardingType = Contact.EntityLogicalName
             };
@@ -78,16 +109,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestSendEmailFromTemplateRendersTemplateContent()
         {
-            var template = new Template
-            {
-                Title = "Registration",
-                TemplateTypeCode = "contact",
-                Subject = SubjectXslt,
-                Body = BodyXslt,
-                IsPersonal = false,
-                LanguageCode = 1033
-            };
-            template.Id = orgAdminService.Create(template);
+            var template = CreateContactTemplate();
 
             var contact = new Contact
             {
@@ -147,6 +169,50 @@ namespace DG.XrmMockupTest
             {
                 Target = BuildEmail(contact),
                 TemplateId = Guid.NewGuid()
+            };
+
+            Assert.Throws<FaultException>(() => orgAdminUIService.Execute(request));
+        }
+
+        [Fact]
+        public void TestSendEmailFromTemplateThrowsWhenTemplateDoesNotExist()
+        {
+            var contact = new Contact { FirstName = "Test", EMailAddress1 = "test@test.com" };
+            contact.Id = orgAdminUIService.Create(contact);
+
+            var request = new SendEmailFromTemplateRequest
+            {
+                Target = BuildEmail(contact),
+                TemplateId = Guid.NewGuid(),
+                RegardingId = contact.Id,
+                RegardingType = Contact.EntityLogicalName
+            };
+
+            Assert.Throws<FaultException>(() => orgAdminUIService.Execute(request));
+        }
+
+        [Fact]
+        public void TestSendEmailFromTemplateThrowsWhenTemplateTypeMismatch()
+        {
+            var contact = new Contact { FirstName = "Test", EMailAddress1 = "test@test.com" };
+            contact.Id = orgAdminUIService.Create(contact);
+
+            // Template is bound to 'account' but the regarding record is a contact.
+            var template = new Template
+            {
+                Title = "Mismatch",
+                Subject = SubjectXslt,
+                Body = BodyXslt
+            };
+            template["templatetypecode"] = ObjectTypeCode(Account.EntityLogicalName);
+            template.Id = orgAdminService.Create(template);
+
+            var request = new SendEmailFromTemplateRequest
+            {
+                Target = BuildEmail(contact),
+                TemplateId = template.Id,
+                RegardingId = contact.Id,
+                RegardingType = Contact.EntityLogicalName
             };
 
             Assert.Throws<FaultException>(() => orgAdminUIService.Execute(request));

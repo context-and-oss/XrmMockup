@@ -12,6 +12,31 @@ namespace DG.Tools.XrmMockup
     {
         public SendEmailFromTemplateRequestHandler(Core core, XrmDb db, MetadataSkeleton metadata, Security security) : base(core, db, metadata, security, "SendEmailFromTemplate") { }
 
+        // Dataverse throws when a referenced record does not exist; mirror that rather than
+        // silently sending an empty/unmerged e-mail.
+        private Entity RetrieveOrThrow(EntityReference reference)
+        {
+            return db.GetEntityOrNull(reference)
+                ?? throw new FaultException($"{reference.LogicalName} With Id = {reference.Id} Does Not Exist");
+        }
+
+        // A template is bound to an entity type via templatetypecode (an object type code).
+        // Dataverse rejects a regarding record of a different type.
+        private void ValidateTemplateType(Entity template, string regardingType)
+        {
+            var templateTypeCode = (template.GetAttributeValue<OptionSetValue>("templatetypecode"))?.Value
+                ?? template.GetAttributeValue<int?>("templatetypecode");
+            metadata.EntityMetadata.TryGetValue(regardingType, out var regardingMetadata);
+            var regardingTypeCode = regardingMetadata?.ObjectTypeCode;
+
+            if (templateTypeCode.HasValue && regardingTypeCode.HasValue &&
+                templateTypeCode.Value != regardingTypeCode.Value)
+            {
+                throw new FaultException(
+                    $"The template type does not match the regarding object type '{regardingType}'.");
+            }
+        }
+
         internal override OrganizationResponse Execute(OrganizationRequest orgRequest, EntityReference userRef)
         {
             var request = MakeRequest<SendEmailFromTemplateRequest>(orgRequest);
@@ -31,57 +56,33 @@ namespace DG.Tools.XrmMockup
             if (string.IsNullOrEmpty(request.RegardingType))
                 throw new FaultException("Regarding type should be set.");
 
+            var template = RetrieveOrThrow(new EntityReference("template", request.TemplateId));
+            var regardingRef = new EntityReference(request.RegardingType, request.RegardingId);
+            var regarding = RetrieveOrThrow(regardingRef);
+
+            ValidateTemplateType(template, request.RegardingType);
+
+            // The template's subject/body are XSLT stylesheets rendered against the regarding
+            // record and the sending user. Verified against a live org: the merged values (and
+            // XSLT whitespace handling) match the platform.
+            var entities = new Dictionary<string, Entity> { [request.RegardingType] = regarding };
+            var sender = db.GetEntityOrNull(userRef);
+            if (sender != null)
+                entities[sender.LogicalName] = sender;
+
             var email = request.Target;
-            email["regardingobjectid"] = new EntityReference(request.RegardingType, request.RegardingId);
-
-            // Merge the template content into the e-mail, mirroring Dataverse: the template's
-            // subject/body are XSLT stylesheets rendered against the regarding record and the
-            // sending user. This is guarded on metadata because looking up an entity that was
-            // not generated throws - in that case the caller-supplied subject/body are used.
-            //
-            // Verified against a live org: the merged values (and XSLT whitespace handling) match
-            // the platform. Two cosmetic decorations the platform adds are intentionally NOT
-            // reproduced, as they are environment/version specific: it wraps the rendered body in
-            // an <html><head/><body/></html> envelope, and appends an e-mail tracking token to the
-            // subject (e.g. "...with us CRM:0100002").
-            if (metadata.EntityMetadata.ContainsKey("template"))
-            {
-                var template = db.GetEntityOrNull(new EntityReference("template", request.TemplateId));
-                if (template != null)
-                {
-                    var entities = new Dictionary<string, Entity>();
-
-                    var regarding = db.GetEntityOrNull(new EntityReference(request.RegardingType, request.RegardingId));
-                    if (regarding != null)
-                        entities[request.RegardingType] = regarding;
-
-                    var sender = db.GetEntityOrNull(userRef);
-                    if (sender != null)
-                        entities[sender.LogicalName] = sender;
-
-                    var subject = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("subject"), entities);
-                    if (!string.IsNullOrEmpty(subject))
-                        email["subject"] = subject;
-
-                    var body = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities);
-                    if (!string.IsNullOrEmpty(body))
-                        email["description"] = body;
-                }
-            }
+            email["regardingobjectid"] = regardingRef;
+            email["subject"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("subject"), entities);
+            email["description"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities);
 
             // Delegate to the existing Create and SendEmail handlers so plugins, security
             // and status transitions are applied consistently.
-            var createResponse = (CreateResponse)core.Execute(new CreateRequest { Target = email }, userRef);
-            var emailId = createResponse.id;
-
+            var emailId = ((CreateResponse)core.Execute(new CreateRequest { Target = email }, userRef)).id;
             core.Execute(new SendEmailRequest { EmailId = emailId, IssueSend = true }, userRef);
 
             return new SendEmailFromTemplateResponse
             {
-                Results = new ParameterCollection
-                {
-                    { "Id", emailId }
-                }
+                Results = new ParameterCollection { { "Id", emailId } }
             };
         }
     }
