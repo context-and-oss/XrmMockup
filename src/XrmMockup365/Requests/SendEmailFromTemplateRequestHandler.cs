@@ -38,6 +38,12 @@ namespace DG.Tools.XrmMockup
             // subject/body are XSLT stylesheets rendered against the regarding record and the
             // sending user. This is guarded on metadata because looking up an entity that was
             // not generated throws - in that case the caller-supplied subject/body are used.
+            //
+            // Verified against a live org: the merged values (and XSLT whitespace handling) match
+            // the platform. Two cosmetic decorations the platform adds are intentionally NOT
+            // reproduced, as they are environment/version specific: it wraps the rendered body in
+            // an <html><head/><body/></html> envelope, and appends an e-mail tracking token to the
+            // subject (e.g. "...with us CRM:0100002").
             if (metadata.EntityMetadata.ContainsKey("template"))
             {
                 var template = db.GetEntityOrNull(new EntityReference("template", request.TemplateId));

@@ -64,11 +64,10 @@ namespace DG.XrmMockupTest
             var result = EmailTemplateRenderer.Render(RealBodyXslt, entities);
 
             // Values are merged from the regarding contact and the sending systemuser.
-            // (Standard XSLT whitespace-stripping removes whitespace-only stylesheet text
-            // nodes, so the salutation/lastname render as "MrSmith" rather than "Mr Smith";
-            // that conformant nuance is not asserted here.)
-            Assert.Contains("Dear Mr", result);
-            Assert.Contains("Smith", result);
+            // The "MrSmith" concatenation (no space) is verified against real Dataverse output:
+            // SendEmailFromTemplate against a live org renders this same template as "Dear MrSmith ,"
+            // because XSLT strips the whitespace-only stylesheet text node between the two values.
+            Assert.Contains("Dear MrSmith", result);
             Assert.Contains("Name: Admin User", result);
             Assert.Contains("Street Address: 123 Main St", result);
             Assert.Contains("E-mail Address: smith@test.com", result);

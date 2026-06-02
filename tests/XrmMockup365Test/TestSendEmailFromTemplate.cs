@@ -78,15 +78,14 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestSendEmailFromTemplateRendersTemplateContent()
         {
-            // No early-bound type is generated for the template entity, so it is created late-bound.
-            var template = new Entity("template")
+            var template = new Template
             {
-                ["title"] = "Registration",
-                ["templatetypecode"] = "contact",
-                ["subject"] = SubjectXslt,
-                ["body"] = BodyXslt,
-                ["ispersonal"] = false,
-                ["languagecode"] = 1033
+                Title = "Registration",
+                TemplateTypeCode = "contact",
+                Subject = SubjectXslt,
+                Body = BodyXslt,
+                IsPersonal = false,
+                LanguageCode = 1033
             };
             template.Id = orgAdminService.Create(template);
 
