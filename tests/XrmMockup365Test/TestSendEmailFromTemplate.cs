@@ -41,13 +41,15 @@ namespace DG.XrmMockupTest
             return response.EntityMetadata.ObjectTypeCode.Value;
         }
 
-        private Template CreateContactTemplate()
+        private Template CreateContactTemplate() => CreateContactTemplate(SubjectXslt, BodyXslt);
+
+        private Template CreateContactTemplate(string subject, string body)
         {
             var template = new Template
             {
                 Title = "Registration",
-                Subject = SubjectXslt,
-                Body = BodyXslt,
+                Subject = subject,
+                Body = body,
                 IsPersonal = false,
                 LanguageCode = 1033
             };
@@ -141,6 +143,71 @@ namespace DG.XrmMockupTest
             Assert.Contains("Smith", email.Description);
             Assert.Contains("smith@test.com", email.Description);
             Assert.Equal(EmailState.Completed, email.StateCode);
+        }
+
+        // A body stylesheet that merges a field from the sending systemuser rather than the
+        // regarding record. The handler adds the executing user to the render context.
+        private const string SenderBodyXslt =
+            "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
+            "<xsl:output method=\"text\" indent=\"no\"/><xsl:template match=\"/data\">" +
+            "<![CDATA[From: ]]><xsl:value-of select=\"systemuser/firstname\" /></xsl:template></xsl:stylesheet>";
+
+        [Fact]
+        public void TestSendEmailFromTemplateMergesSenderFields()
+        {
+            // Give the user that orgAdminUIService runs as a known, mergeable value, then verify
+            // it flows through the sender side of the render context (not the regarding record).
+            orgAdminService.Update(new Entity("systemuser", crm.AdminUser.Id) { ["firstname"] = "Sender" });
+
+            var contact = new Contact { FirstName = "Test", EMailAddress1 = "sender@test.com" };
+            contact.Id = orgAdminUIService.Create(contact);
+
+            var template = CreateContactTemplate(SubjectXslt, SenderBodyXslt);
+
+            var request = new SendEmailFromTemplateRequest
+            {
+                Target = BuildEmail(contact),
+                TemplateId = template.Id,
+                RegardingId = contact.Id,
+                RegardingType = Contact.EntityLogicalName
+            };
+
+            var response = orgAdminUIService.Execute(request) as SendEmailFromTemplateResponse;
+            Assert.NotNull(response);
+
+            var email = orgAdminService
+                .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("description"))
+                .ToEntity<Email>();
+
+            Assert.Equal("From: Sender", email.Description);
+        }
+
+        [Fact]
+        public void TestSendEmailFromTemplateRendersPlainTextTemplate()
+        {
+            var contact = new Contact { FirstName = "Test", EMailAddress1 = "plain@test.com" };
+            contact.Id = orgAdminUIService.Create(contact);
+
+            // Not every template is an XSLT stylesheet; literal text must pass through unchanged.
+            var template = CreateContactTemplate("Plain subject", "Plain body text");
+
+            var request = new SendEmailFromTemplateRequest
+            {
+                Target = BuildEmail(contact),
+                TemplateId = template.Id,
+                RegardingId = contact.Id,
+                RegardingType = Contact.EntityLogicalName
+            };
+
+            var response = orgAdminUIService.Execute(request) as SendEmailFromTemplateResponse;
+            Assert.NotNull(response);
+
+            var email = orgAdminService
+                .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("subject", "description"))
+                .ToEntity<Email>();
+
+            Assert.Equal("Plain subject", email.Subject);
+            Assert.Equal("Plain body text", email.Description);
         }
 
         [Fact]
