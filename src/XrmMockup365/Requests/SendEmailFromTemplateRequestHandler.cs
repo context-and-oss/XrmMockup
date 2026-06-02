@@ -3,6 +3,7 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using System;
+using System.Collections.Generic;
 using System.ServiceModel;
 
 namespace DG.Tools.XrmMockup
@@ -33,22 +34,32 @@ namespace DG.Tools.XrmMockup
             var email = request.Target;
             email["regardingobjectid"] = new EntityReference(request.RegardingType, request.RegardingId);
 
-            // Best-effort template merge: when the 'template' entity is present in metadata
-            // and the record exists, use its subject/body for fields the caller did not
-            // supply on the Target email. Token substitution (e.g. {!contact.firstname;})
-            // is not modelled - the template content is copied verbatim. Guarding on
-            // metadata keeps this safe in environments where 'template' was not generated
-            // (looking up an entity with no metadata throws).
+            // Merge the template content into the e-mail, mirroring Dataverse: the template's
+            // subject/body are XSLT stylesheets rendered against the regarding record and the
+            // sending user. This is guarded on metadata because looking up an entity that was
+            // not generated throws - in that case the caller-supplied subject/body are used.
             if (metadata.EntityMetadata.ContainsKey("template"))
             {
                 var template = db.GetEntityOrNull(new EntityReference("template", request.TemplateId));
                 if (template != null)
                 {
-                    if (!email.Contains("subject") && template.Contains("subject"))
-                        email["subject"] = template.GetAttributeValue<string>("subject");
+                    var entities = new Dictionary<string, Entity>();
 
-                    if (!email.Contains("description") && template.Contains("body"))
-                        email["description"] = template.GetAttributeValue<string>("body");
+                    var regarding = db.GetEntityOrNull(new EntityReference(request.RegardingType, request.RegardingId));
+                    if (regarding != null)
+                        entities[request.RegardingType] = regarding;
+
+                    var sender = db.GetEntityOrNull(userRef);
+                    if (sender != null)
+                        entities[sender.LogicalName] = sender;
+
+                    var subject = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("subject"), entities);
+                    if (!string.IsNullOrEmpty(subject))
+                        email["subject"] = subject;
+
+                    var body = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities);
+                    if (!string.IsNullOrEmpty(body))
+                        email["description"] = body;
                 }
             }
 
