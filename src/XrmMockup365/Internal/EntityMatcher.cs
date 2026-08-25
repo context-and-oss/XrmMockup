@@ -129,6 +129,10 @@ namespace DG.Tools.XrmMockup.Internal
                     return DateTimeCompareNow(attr, op, values);
 
                 case ConditionOperator.In:
+                    if (values != null && attr is OptionSetValueCollection optionSetValueCollection)
+                    {
+                        return string.Join(",", values.OrderBy(_ => _)) == string.Join(",", optionSetValueCollection.ToList().Select(_ => _.Value).OrderBy(_ => _));
+                    }
                     return values.Contains(ValueConverter.ConvertTo(attr, values.FirstOrDefault()?.GetType()));
 
                 case ConditionOperator.NotIn:
