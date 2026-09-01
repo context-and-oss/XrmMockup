@@ -5,6 +5,9 @@ All notable changes to XrmMockup.MetadataGenerator will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### v1.1.0 - 1 September 2026
+* Fix: Updated to DataverseConnection v1.2.5 (#347)
+
 ### v1.0.5 - 5 August 2026
 * Fix: Handle PrivilegeDepth.RecordFilter like PrivilegeDepth.Global instead of throwing exception
 
