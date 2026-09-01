@@ -122,7 +122,7 @@ namespace DG.Tools.XrmMockup.Database {
         {
             DbRow currentDbRow = null;
 
-            if (reference?.Id != Guid.Empty)
+            if (reference != null && reference.Id != Guid.Empty)
             {
                 currentDbRow = this[reference.LogicalName][reference.Id];
                 if (currentDbRow == null && OnlineDataService != null)
@@ -147,8 +147,7 @@ namespace DG.Tools.XrmMockup.Database {
 
             // Try fetching with key attributes if any
             else if (reference?.KeyAttributes?.Count > 0) {
-                // Use ToList to create a snapshot for thread-safe enumeration
-                currentDbRow = this[reference.LogicalName].ToList().FirstOrDefault(row => reference.KeyAttributes.All(kv => row[kv.Key] == kv.Value));
+                currentDbRow = this[reference.LogicalName].FirstOrDefault(row => MatchesKeyAttributes(row, reference.KeyAttributes));
 
                 if (currentDbRow == null) {
                     throw new FaultException($"The record of type '{reference.LogicalName}' with key attributes '{reference.KeyAttributes.ToPrettyString()}' " +
@@ -163,6 +162,28 @@ namespace DG.Tools.XrmMockup.Database {
             }
 
             return currentDbRow;
+        }
+
+        // Lookups are stored as DbRow, so convert before matching.
+        private static bool MatchesKeyAttributes(DbRow row, KeyAttributeCollection keyAttributes) {
+            return keyAttributes.All(kv => {
+                var rowValue = row[kv.Key];
+                if (rowValue is DbRow related) rowValue = related.ToXrmEntityReference();
+                return KeyValuesEqual(rowValue, kv.Value);
+            });
+        }
+
+        private static bool KeyValuesEqual(object rowValue, object keyValue) {
+            // Dataverse keys are only valid if every key field has a value
+            if (rowValue == null || keyValue == null) {
+                return false;
+            }
+
+            if (rowValue is EntityReference rowRef && keyValue is EntityReference keyRef) {
+                return rowRef.Id == keyRef.Id && rowRef.LogicalName == keyRef.LogicalName;
+            }
+
+            return ValueConverter.AreEqual(rowValue, keyValue);
         }
 
         internal DbRow GetDbRow(Entity xrmEntity) {
@@ -205,8 +226,7 @@ namespace DG.Tools.XrmMockup.Database {
             // Try fetching with key attributes if any
             else if (reference?.KeyAttributes?.Count > 0)
             {
-                // Use ToList to create a snapshot for thread-safe enumeration
-                currentDbRow = this[reference.LogicalName].ToList().FirstOrDefault(row => reference.KeyAttributes.All(kv => row[kv.Key] == kv.Value));
+                currentDbRow = this[reference.LogicalName].FirstOrDefault(row => MatchesKeyAttributes(row, reference.KeyAttributes));
 
                 if (currentDbRow == null)
                 {

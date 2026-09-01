@@ -176,21 +176,7 @@ namespace DG.Tools.XrmMockup.Internal
         {
             if (attr == null) return false;
 
-            if (attr is string attrStr)
-            {
-                var valueString = (string)ValueConverter.ConvertTo(values.First(), attr?.GetType());
-                return attrStr.Equals(valueString, StringComparison.OrdinalIgnoreCase);
-            }
-            else if (attr is DateTime attrDate)
-            {
-                var valueDate = (DateTime)ValueConverter.ConvertTo(values.First(), attr?.GetType());
-                return DateTime.Equals(valueDate.ToUniversalTime(), attrDate.ToUniversalTime());
-            }
-            else
-            {
-                var converted = ValueConverter.ConvertTo(values.First(), attr?.GetType());
-                return Equals(converted, attr);
-            }
+            return ValueConverter.AreEqual(attr, values.First());
         }
 
         private static bool DateTimeCompareNow(object attr, ConditionOperator op, IEnumerable<object> values)

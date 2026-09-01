@@ -7,25 +7,42 @@ namespace DG.Tools.XrmMockup.Internal
     {
         public static object ConvertToComparableObject(object obj)
         {
-            if (obj is EntityReference entityReference)
-                return entityReference.Id;
-
-            else if (obj is Money money)
-                return money.Value;
-
-            else if (obj is AliasedValue aliasedValue)
-                return ConvertToComparableObject(aliasedValue.Value);
-
-            else if (obj is OptionSetValue optionSetValue)
-                return optionSetValue.Value;
-
-            else if (obj != null && obj.GetType().IsEnum)
-                return (int)obj;
-
-            else
-                return obj;
+            switch (obj)
+            {
+                case EntityReference entityReference:
+                    return entityReference.Id;
+                case Money money:
+                    return money.Value;
+                case AliasedValue aliasedValue:
+                    return ConvertToComparableObject(aliasedValue.Value);
+                case OptionSetValue optionSetValue:
+                    return optionSetValue.Value;
+                case Enum _:
+                    return (int)obj;
+                default:
+                    return obj;
+            }
         }
 
+        public static bool AreEqual(object stored, object value)
+        {
+            stored = ConvertToComparableObject(stored);
+            value = ConvertToComparableObject(value);
+
+            if (stored == null || value == null) {
+                return false;
+            }
+            if (stored is string storedString) {
+                return storedString.Equals((string)ConvertTo(value, typeof(string)), StringComparison.OrdinalIgnoreCase);
+            }
+            if (stored is DateTime storedDate) {
+                var valueDate = (DateTime)ConvertTo(value, typeof(DateTime));
+                return DateTime.Equals(storedDate.ToUniversalTime(), valueDate.ToUniversalTime());
+            }
+
+            // Widen first, so an int key matches a decimal column
+            return Equals(stored, ConvertTo(value, stored.GetType()));
+        }
 
         public static object ConvertTo(object value, Type targetType)
         {
@@ -35,15 +52,18 @@ namespace DG.Tools.XrmMockup.Internal
                 return value;
             }
 
+            // Boxed values never report Nullable<T>, and Convert.ChangeType rejects it as a target
+            targetType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
             var valueType = value.GetType();
-            if (valueType == targetType || Nullable.GetUnderlyingType(targetType) != null && valueType == Nullable.GetUnderlyingType(targetType))
+            if (valueType == targetType)
             {
                 // If the types match, just return the object
                 return value;
             }
 
             // We might be trying to convert a string 0, or 1 to a bool
-            if ((targetType == typeof(bool) || targetType == typeof(bool?)) && value is string str && decimal.TryParse(str, out var numericValue))
+            if (targetType == typeof(bool) && value is string str && decimal.TryParse(str, out var numericValue))
             {
                 return numericValue != 0;
             }
