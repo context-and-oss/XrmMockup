@@ -1,3 +1,6 @@
+### 1.20.1 - 1 September 2026
+* Fix: Match alternate keys by value, not reference (#350)
+
 ### 1.20.0 - 23 August 2026
 * Breaking: XrmMockup365 now targets `net10.0` instead of `net8.0` (the `net462` target is unchanged). Required by DataverseConnection 1.2.x, which is a `net10.0` package
 * Change: Updated `DataverseConnection` to 1.2.5. A bare `AddDataverse()` now defaults to `InteractiveBrowserCredential` instead of `DefaultAzureCredential`; set `DataverseCredentialType` to `azcli` or `devicecode` in configuration to change it
