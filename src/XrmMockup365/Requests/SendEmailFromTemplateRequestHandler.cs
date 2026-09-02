@@ -20,11 +20,13 @@ namespace DG.Tools.XrmMockup
                 ?? throw new FaultException($"{reference.LogicalName} With Id = {reference.Id} Does Not Exist");
         }
 
-        // A template is bound to an entity type via templatetypecode (an object type code).
-        // Dataverse rejects a regarding record of a different type.
+        // A template is bound to an entity type via templatetypecode; Dataverse rejects a
+        // regarding record of a different type. templatetypecode is an EntityName attribute
+        // carrying an option set, which XrmMockup stores as the integer object type code (see
+        // DbAttributeTypeMap) rather than the logical name Dataverse itself exposes.
         private void ValidateTemplateType(Entity template, string regardingType)
         {
-            var templateTypeCode = (template.GetAttributeValue<OptionSetValue>("templatetypecode"))?.Value
+            var templateTypeCode = template.GetAttributeValue<OptionSetValue>("templatetypecode")?.Value
                 ?? template.GetAttributeValue<int?>("templatetypecode");
             metadata.EntityMetadata.TryGetValue(regardingType, out var regardingMetadata);
             var regardingTypeCode = regardingMetadata?.ObjectTypeCode;
