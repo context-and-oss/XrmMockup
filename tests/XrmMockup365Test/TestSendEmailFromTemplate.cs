@@ -19,11 +19,11 @@ namespace DG.XrmMockupTest
         {
             return new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty { PartyId = crm.AdminUser }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty { PartyId = recipient.ToEntityReference() }
                 },
@@ -89,8 +89,8 @@ namespace DG.XrmMockupTest
             {
                 var email = context.EmailSet.FirstOrDefault(e => e.Id == response.Id);
                 Assert.NotNull(email);
-                Assert.Equal(EmailState.Completed, email.StateCode);
-                Assert.Equal(Email_StatusCode.PendingSend, email.StatusCode);
+                Assert.Equal(email_statecode.Completed, email.StateCode);
+                Assert.Equal(email_statuscode.PendingSend, email.StatusCode);
                 Assert.Equal(contact.Id, email.RegardingObjectId.Id);
             }
         }
@@ -142,7 +142,7 @@ namespace DG.XrmMockupTest
             Assert.Contains("Dear", email.Description);
             Assert.Contains("Smith", email.Description);
             Assert.Contains("smith@test.com", email.Description);
-            Assert.Equal(EmailState.Completed, email.StateCode);
+            Assert.Equal(email_statecode.Completed, email.StateCode);
         }
 
         // A body stylesheet that merges a field from the sending systemuser rather than the
