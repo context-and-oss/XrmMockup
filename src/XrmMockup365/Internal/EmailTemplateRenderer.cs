@@ -116,9 +116,10 @@ namespace DG.Tools.XrmMockup
                 case bool boolean:
                     return boolean ? "1" : "0";
                 case DateTime dateTime:
-                    // Dataverse joins the user's date and time formats with a non-breaking space.
-                    return dateTime.ToString("M/d/yyyy", CultureInfo.InvariantCulture) + "&nbsp;" +
-                           dateTime.ToString("h:mm tt", CultureInfo.InvariantCulture);
+                    // Dataverse's 1033 defaults, in the user's time zone. The mock formats the
+                    // value as stored. (In a body the space arrives as &nbsp;, added by Dataverse's
+                    // HTML re-serialisation rather than by the merge itself.)
+                    return dateTime.ToString("M/d/yyyy h:mm tt", CultureInfo.InvariantCulture);
                 case Money money:
                     // Dataverse prefixes the currency symbol, e.g. "kr.1,234.50".
                     return money.Value.ToString("N2", CultureInfo.InvariantCulture);
