@@ -102,10 +102,10 @@ namespace DG.XrmMockupTest
             var result = EmailTemplateRenderer.Render(ValuesXslt, Context(contact));
 
             // Lookup, option set, boolean and integer match a live org. The date uses Dataverse's
-            // default user format; money lacks the currency symbol Dataverse prefixes.
+            // default user format without the time zone shift; money lacks the currency symbol.
             Assert.Equal(
                 "lookup={3C2E0869-D1A6-F111-B8DE-70A8A57D382B}|option=1|money=1,234.50|flag=1|" +
-                "date=1/2/2026&nbsp;3:04 AM|int=42|decimal=3.5",
+                "date=1/2/2026 3:04 AM|int=42|decimal=3.5",
                 result);
         }
 
