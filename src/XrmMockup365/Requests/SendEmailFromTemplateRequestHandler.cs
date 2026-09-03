@@ -12,8 +12,7 @@ namespace DG.Tools.XrmMockup
     {
         public SendEmailFromTemplateRequestHandler(Core core, XrmDb db, MetadataSkeleton metadata, Security security) : base(core, db, metadata, security, "SendEmailFromTemplate") { }
 
-        // Dataverse throws when a referenced record does not exist or the caller cannot read it;
-        // mirror that rather than silently sending an empty or unmerged e-mail.
+        // Dataverse fails the send rather than merging an unreadable record as blanks.
         private Entity RetrieveOrThrow(EntityReference reference, EntityReference userRef)
         {
             var entity = db.GetEntityOrNull(reference)
@@ -25,10 +24,9 @@ namespace DG.Tools.XrmMockup
             return entity;
         }
 
-        // A template is bound to an entity type via templatetypecode; Dataverse rejects a regarding
-        // record of a different type. templatetypecode is an EntityName attribute, stored as the
-        // integer object type code when its metadata carries an option set and as the logical name
-        // otherwise (see DbAttributeTypeMap), so both shapes are accepted.
+        // Dataverse rejects a regarding record whose type differs from the template's. Depending on
+        // the attribute's metadata (see DbAttributeTypeMap), templatetypecode arrives as an
+        // OptionSetValue, an int, or the logical name.
         private void ValidateTemplateType(Entity template, string regardingType)
         {
             if (!template.Attributes.TryGetValue("templatetypecode", out var rawTypeCode) || rawTypeCode == null)
@@ -83,8 +81,7 @@ namespace DG.Tools.XrmMockup
 
             var entities = new Dictionary<string, Entity> { [request.RegardingType] = regarding };
 
-            // The sending user is a second merge source, but never at the regarding record's
-            // expense: a template regarding a systemuser must merge that user, not the caller.
+            // A template regarding a systemuser must merge that user, not the caller.
             var sender = db.GetEntityOrNull(userRef);
             if (sender != null && !entities.ContainsKey(sender.LogicalName))
                 entities[sender.LogicalName] = sender;
@@ -94,8 +91,7 @@ namespace DG.Tools.XrmMockup
             email["subject"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("subject"), entities);
             email["description"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities);
 
-            // Delegate to the existing Create and SendEmail handlers so plugins, security
-            // and status transitions are applied consistently.
+            // Going through Create and SendEmail keeps plugins, security and status consistent.
             var emailId = ((CreateResponse)core.Execute(new CreateRequest { Target = email }, userRef)).id;
             core.Execute(new SendEmailRequest { EmailId = emailId, IssueSend = true }, userRef);
 
