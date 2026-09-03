@@ -1,5 +1,5 @@
 ### 1.20.2 - UNRELEASED
-* Chore: Refreshed the internal `workflow` option set enums against current Dataverse (`Workflow_Category` gained Modern Flow/Desktop Flow/AI Flow, `WorkflowState` gained Suspended, `Workflow_StatusCode` gained CompanyDLPViolation), and replaced the hardcoded `category`/`statecode` literals in the workflow manager and metadata generator with those enums. Also silences the CS8981 warning on `componentstate` (#352)
+* Chore: Refresh the internal `workflow` option set enums against current Dataverse, and use them in place of the hardcoded `category`/`statecode` literals in the workflow manager and metadata generator (#352)
 
 ### 1.20.1 - 1 September 2026
 * Fix: Match alternate keys by value, not reference (#350)
