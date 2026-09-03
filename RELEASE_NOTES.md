@@ -1,5 +1,6 @@
 ### 1.20.2 - UNRELEASED
 * Add: `SendEmailFromTemplate` request support, rendering the template's XSLT subject/body against the regarding record and the sending user (#331)
+* Change: `InstantiateTemplate` now returns the merged template content instead of an empty e-mail, and rejects a missing or mistyped record like Dataverse does (#351)
 
 ### 1.20.1 - 1 September 2026
 * Fix: Match alternate keys by value, not reference (#350)

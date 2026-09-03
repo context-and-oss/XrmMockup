@@ -1168,6 +1168,8 @@ namespace DG.Tools.XrmMockup.Internal
         public const string Quote = "quote";
         public const string QuoteDetail = "quotedetail";
         public const string QuoteClose = "quoteclose";
+        public const string Email = "email";
+        public const string Template = "template";
     }
 
     [DataContract()]
