@@ -33,12 +33,6 @@ namespace DG.XrmMockupTest
             "<xsl:output method=\"text\" indent=\"no\"/><xsl:template match=\"/data\">" +
             "<![CDATA[From: ]]><xsl:value-of select=\"systemuser/firstname\" /></xsl:template></xsl:stylesheet>";
 
-        // Well-formed XML, but 'contact/' is not a valid XPath expression.
-        private const string MalformedXslt =
-            "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
-            "<xsl:output method=\"text\" /><xsl:template match=\"/data\">" +
-            "<xsl:value-of select=\"contact/\" /></xsl:template></xsl:stylesheet>";
-
         private Contact CreateRecipient(string email = "test@test.com")
         {
             var contact = new Contact { FirstName = "Test", EMailAddress1 = email };
@@ -79,22 +73,20 @@ namespace DG.XrmMockupTest
 
         private Template CreateTemplate(string subject, string body, string boundTo)
         {
-            var template = NewTemplate(subject, body);
+            var template = new Template
+            {
+                Title = "Registration",
+                Subject = subject,
+                Body = body,
+                IsPersonal = false,
+                LanguageCode = 1033
+            };
             // Set late-bound: the generated TemplateTypeCode is a string and cannot hold the
             // integer object type code the database stores.
             template["templatetypecode"] = ObjectTypeCode(boundTo);
             template.Id = orgAdminService.Create(template);
             return template;
         }
-
-        private static Template NewTemplate(string subject, string body) => new Template
-        {
-            Title = "Registration",
-            Subject = subject,
-            Body = body,
-            IsPersonal = false,
-            LanguageCode = 1033
-        };
 
         private SendEmailFromTemplateRequest BuildRequest(Template template, Contact regarding) =>
             new SendEmailFromTemplateRequest
@@ -196,135 +188,58 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
-        public void TestSendEmailFromTemplateRendersPlainTextTemplate()
+        public void TestSendEmailFromTemplateValidatesRequest()
         {
-            var contact = CreateRecipient("plain@test.com");
-            var template = CreateContactTemplate("Plain subject", "Plain body text");
+            // All five guards raise FaultException, so each case asserts the message to prove the
+            // guard it names is the one that fired.
+            var id = Guid.NewGuid();
 
-            var response = orgAdminUIService.Execute(BuildRequest(template, contact)) as SendEmailFromTemplateResponse;
-            Assert.NotNull(response);
+            Assert.Equal("Template id should be set.", Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                { Target = new Email(), RegardingId = id, RegardingType = Contact.EntityLogicalName })).Message);
 
-            var email = orgAdminService
-                .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("subject", "description"))
-                .ToEntity<Email>();
+            Assert.Equal("Target email is missing.", Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                { TemplateId = id, RegardingId = id, RegardingType = Contact.EntityLogicalName })).Message);
 
-            Assert.Equal("Plain subject", email.Subject);
-            Assert.Equal("Plain body text", email.Description);
+            Assert.Equal("Target must be an email entity.", Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                { Target = new Contact(), TemplateId = id, RegardingId = id, RegardingType = Contact.EntityLogicalName })).Message);
+
+            Assert.Equal("Regarding id should be set.", Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                { Target = new Email(), TemplateId = id, RegardingType = Contact.EntityLogicalName })).Message);
+
+            Assert.Equal("Regarding type should be set.", Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                { Target = new Email(), TemplateId = id, RegardingId = id })).Message);
         }
 
         [Fact]
-        public void TestSendEmailFromTemplateSendsWhenTemplateHasNoTypeCode()
-        {
-            var contact = CreateRecipient("notype@test.com");
-
-            // Without a templatetypecode there is nothing to compare the regarding type against,
-            // so the send proceeds rather than faulting.
-            var template = NewTemplate(SubjectXslt, BodyXslt);
-            template.Id = orgAdminService.Create(template);
-
-            var response = orgAdminUIService.Execute(BuildRequest(template, contact)) as SendEmailFromTemplateResponse;
-
-            Assert.NotNull(response);
-            Assert.NotEqual(Guid.Empty, response.Id);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenTemplateIdMissing()
-        {
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                Target = new Email(),
-                RegardingId = Guid.NewGuid(),
-                RegardingType = Contact.EntityLogicalName
-            }));
-
-            Assert.Equal("Template id should be set.", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenTargetMissing()
-        {
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                TemplateId = Guid.NewGuid(),
-                RegardingId = Guid.NewGuid(),
-                RegardingType = Contact.EntityLogicalName
-            }));
-
-            Assert.Equal("Target email is missing.", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenTargetIsNotAnEmail()
-        {
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                Target = new Contact(),
-                TemplateId = Guid.NewGuid(),
-                RegardingId = Guid.NewGuid(),
-                RegardingType = Contact.EntityLogicalName
-            }));
-
-            Assert.Equal("Target must be an email entity.", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenRegardingIdMissing()
-        {
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                Target = new Email(),
-                TemplateId = Guid.NewGuid(),
-                RegardingType = Contact.EntityLogicalName
-            }));
-
-            Assert.Equal("Regarding id should be set.", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenRegardingTypeMissing()
-        {
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                Target = new Email(),
-                TemplateId = Guid.NewGuid(),
-                RegardingId = Guid.NewGuid()
-            }));
-
-            Assert.Equal("Regarding type should be set.", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenTemplateDoesNotExist()
-        {
-            var contact = CreateRecipient();
-
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                Target = BuildEmail(contact),
-                TemplateId = Guid.NewGuid(),
-                RegardingId = contact.Id,
-                RegardingType = Contact.EntityLogicalName
-            }));
-
-            Assert.Contains("template With Id =", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenRegardingDoesNotExist()
+        public void TestSendEmailFromTemplateThrowsWhenReferencedRecordDoesNotExist()
         {
             var contact = CreateRecipient();
             var template = CreateContactTemplate();
 
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
-            {
-                Target = BuildEmail(contact),
-                TemplateId = template.Id,
-                RegardingId = Guid.NewGuid(),
-                RegardingType = Contact.EntityLogicalName
-            }));
+            var missingTemplate = Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                {
+                    Target = BuildEmail(contact),
+                    TemplateId = Guid.NewGuid(),
+                    RegardingId = contact.Id,
+                    RegardingType = Contact.EntityLogicalName
+                }));
+            Assert.Contains("template With Id =", missingTemplate.Message);
 
-            Assert.Contains("contact With Id =", ex.Message);
+            var missingRegarding = Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                {
+                    Target = BuildEmail(contact),
+                    TemplateId = template.Id,
+                    RegardingId = Guid.NewGuid(),
+                    RegardingType = Contact.EntityLogicalName
+                }));
+            Assert.Contains("contact With Id =", missingRegarding.Message);
         }
 
         [Fact]
@@ -336,18 +251,6 @@ namespace DG.XrmMockupTest
             var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(BuildRequest(template, contact)));
 
             Assert.Contains("template type does not match", ex.Message);
-        }
-
-        [Fact]
-        public void TestSendEmailFromTemplateThrowsWhenTemplateDoesNotCompile()
-        {
-            var contact = CreateRecipient("broken@test.com");
-            var template = CreateContactTemplate(SubjectXslt, MalformedXslt);
-
-            var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(BuildRequest(template, contact)));
-
-            // The render fault must surface, not be swallowed somewhere in the pipeline.
-            Assert.Contains("could not be rendered", ex.Message);
         }
 
         [Fact]

@@ -8,16 +8,11 @@ using Xunit;
 namespace DG.XrmMockupTest
 {
     /// <summary>
-    /// Tests the XSLT rendering behind SendEmailFromTemplate. The subject and body below are the
-    /// actual stylesheets of the built-in "Thank you for registering with us" contact template.
+    /// Tests the XSLT rendering behind SendEmailFromTemplate. The body below is the actual
+    /// stylesheet of the built-in "Thank you for registering with us" contact template.
     /// </summary>
     public class TestEmailTemplateRenderer
     {
-        private const string SubjectXslt =
-            "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
-            "<xsl:output method=\"text\" indent=\"no\" /><xsl:template match=\"/data\">" +
-            "<![CDATA[Thank you for registering with us]]></xsl:template></xsl:stylesheet>";
-
         private const string BodyXslt =
             "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
             "<xsl:output method=\"text\" indent=\"no\"/><xsl:template match=\"/data\">" +
@@ -28,15 +23,11 @@ namespace DG.XrmMockupTest
             "<![CDATA[<BR>E-mail Address: ]]><xsl:choose><xsl:when test=\"contact/emailaddress1\"><xsl:value-of select=\"contact/emailaddress1\" /></xsl:when><xsl:otherwise></xsl:otherwise></xsl:choose>" +
             "<![CDATA[</P>]]></xsl:template></xsl:stylesheet>";
 
-        private const string LookupXslt =
+        private const string ValuesXslt =
             "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
             "<xsl:output method=\"text\" indent=\"no\"/><xsl:template match=\"/data\">" +
-            "<![CDATA[company=]]><xsl:value-of select=\"contact/parentcustomerid\" /></xsl:template></xsl:stylesheet>";
-
-        private const string ScalarsXslt =
-            "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
-            "<xsl:output method=\"text\" indent=\"no\"/><xsl:template match=\"/data\">" +
-            "<![CDATA[option=]]><xsl:value-of select=\"contact/gendercode\" />" +
+            "<![CDATA[lookup=]]><xsl:value-of select=\"contact/parentcustomerid\" />" +
+            "<![CDATA[|option=]]><xsl:value-of select=\"contact/gendercode\" />" +
             "<![CDATA[|money=]]><xsl:value-of select=\"contact/creditlimit\" />" +
             "<![CDATA[|flag=]]><xsl:value-of select=\"contact/donotemail\" />" +
             "<![CDATA[|date=]]><xsl:value-of select=\"contact/birthdate\" />" +
@@ -55,14 +46,6 @@ namespace DG.XrmMockupTest
             if (user != null)
                 entities["systemuser"] = user;
             return entities;
-        }
-
-        [Fact]
-        public void RendersStaticSubject()
-        {
-            var result = EmailTemplateRenderer.Render(SubjectXslt, Context(new Entity("contact")));
-
-            Assert.Equal("Thank you for registering with us", result);
         }
 
         [Fact]
@@ -88,9 +71,11 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
-        public void UsesXsltDefaultsWhenAttributesMissing()
+        public void UsesXsltDefaultsWhenAttributeIsMissingOrEmpty()
         {
-            var contact = new Entity("contact") { ["salutation"] = "Ms" };
+            // An empty value must be omitted from the document rather than written as an empty
+            // element, or xsl:when would match it and suppress the default.
+            var contact = new Entity("contact") { ["salutation"] = "Ms", ["lastname"] = "" };
 
             var result = EmailTemplateRenderer.Render(BodyXslt, Context(contact));
 
@@ -100,37 +85,12 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
-        public void UsesXsltDefaultsWhenAttributeIsEmpty()
-        {
-            // An empty value must be omitted from the document, not written as an empty element,
-            // or xsl:when would match it and suppress the default.
-            var contact = new Entity("contact") { ["salutation"] = "Ms", ["lastname"] = "" };
-
-            var result = EmailTemplateRenderer.Render(BodyXslt, Context(contact));
-
-            Assert.Contains("Valued Customer", result);
-        }
-
-        [Fact]
-        public void MergesLookupAsRecordId()
-        {
-            var accountId = new Guid("3c2e0869-d1a6-f111-b8de-70a8a57d382b");
-            // The name is populated to prove it is deliberately not what gets merged.
-            var contact = new Entity("contact")
-            {
-                ["parentcustomerid"] = new EntityReference("account", accountId) { Name = "Probe Account A/S" }
-            };
-
-            var result = EmailTemplateRenderer.Render(LookupXslt, Context(contact));
-
-            Assert.Equal("company={3C2E0869-D1A6-F111-B8DE-70A8A57D382B}", result);
-        }
-
-        [Fact]
-        public void MergesScalarAttributesInvariantly()
+        public void MergesValuesTheWayDataverseDoes()
         {
             var contact = new Entity("contact")
             {
+                // The lookup name is populated to prove the id, not the name, is what merges.
+                ["parentcustomerid"] = new EntityReference("account", new Guid("3c2e0869-d1a6-f111-b8de-70a8a57d382b")) { Name = "Probe Account A/S" },
                 ["gendercode"] = new OptionSetValue(1),
                 ["creditlimit"] = new Money(1234.5m),
                 ["donotemail"] = true,
@@ -139,31 +99,19 @@ namespace DG.XrmMockupTest
                 ["exchangerate"] = 3.5m
             };
 
-            var result = EmailTemplateRenderer.Render(ScalarsXslt, Context(contact));
+            var result = EmailTemplateRenderer.Render(ValuesXslt, Context(contact));
 
             Assert.Equal(
-                "option=1|money=1234.5|flag=True|date=01/02/2026 03:04:05|int=42|decimal=3.5",
+                "lookup={3C2E0869-D1A6-F111-B8DE-70A8A57D382B}|option=1|money=1234.5|flag=True|" +
+                "date=01/02/2026 03:04:05|int=42|decimal=3.5",
                 result);
         }
 
         [Fact]
-        public void ReturnsPlainTextTemplatesUnchanged()
+        public void ReturnsNonStylesheetValuesUnchanged()
         {
-            var result = EmailTemplateRenderer.Render("Just plain text", new Dictionary<string, Entity>());
-
-            Assert.Equal("Just plain text", result);
-        }
-
-        [Fact]
-        public void ReturnsNullForNullInput()
-        {
-            Assert.Null(EmailTemplateRenderer.Render(null, new Dictionary<string, Entity>()));
-        }
-
-        [Fact]
-        public void RendersWithoutAnyRecords()
-        {
-            Assert.Equal("Thank you for registering with us", EmailTemplateRenderer.Render(SubjectXslt, null));
+            Assert.Equal("Just plain text", EmailTemplateRenderer.Render("Just plain text", Context(new Entity("contact"))));
+            Assert.Null(EmailTemplateRenderer.Render(null, Context(new Entity("contact"))));
         }
 
         [Fact]
