@@ -1,5 +1,5 @@
 ### 1.20.2 - UNRELEASED
-* Add: `SendEmailFromTemplate` request support. The e-mail is created from the template and then sent through the existing `Create` and `SendEmail` handlers, so security, plugins and status transitions behave like a normal send. Template subject/body are stored by Dataverse as XSLT stylesheets, so they are rendered against the regarding record and the sending user; plain-text templates pass through unchanged (#331)
+* Add: `SendEmailFromTemplate` request support, rendering the template's XSLT subject/body against the regarding record and the sending user (#331)
 
 ### 1.20.1 - 1 September 2026
 * Fix: Match alternate keys by value, not reference (#350)
