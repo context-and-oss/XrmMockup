@@ -54,6 +54,18 @@ namespace DG.Tools.XrmMockup
             }
         }
 
+        // Dataverse returns the merged body wrapped in a minimal HTML document, with LF line
+        // breaks and a trailing newline, rather than as bare text.
+        private static string WrapInHtmlEnvelope(string body)
+        {
+            if (body == null)
+                return null;
+
+            return "<html>\n<head>\n" +
+                   "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\n" +
+                   "</head>\n<body>\n" + body + "\n</body>\n</html>\n";
+        }
+
         internal override OrganizationResponse Execute(OrganizationRequest orgRequest, EntityReference userRef)
         {
             var request = MakeRequest<SendEmailFromTemplateRequest>(orgRequest);
@@ -89,7 +101,8 @@ namespace DG.Tools.XrmMockup
             var email = request.Target;
             email["regardingobjectid"] = regardingRef;
             email["subject"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("subject"), entities);
-            email["description"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities);
+            email["description"] = WrapInHtmlEnvelope(
+                EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities));
 
             // Going through Create and SendEmail keeps plugins, security and status consistent.
             var emailId = ((CreateResponse)core.Execute(new CreateRequest { Target = email }, userRef)).id;

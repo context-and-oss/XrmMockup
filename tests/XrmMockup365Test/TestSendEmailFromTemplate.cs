@@ -88,6 +88,12 @@ namespace DG.XrmMockupTest
             return template;
         }
 
+        // Dataverse wraps the merged body in this envelope: LF line breaks, trailing newline.
+        private static string HtmlEnvelope(string body) =>
+            "<html>\n<head>\n" +
+            "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\n" +
+            "</head>\n<body>\n" + body + "\n</body>\n</html>\n";
+
         private SendEmailFromTemplateRequest BuildRequest(Template template, Contact regarding) =>
             new SendEmailFromTemplateRequest
             {
@@ -140,7 +146,7 @@ namespace DG.XrmMockupTest
 
             // The template replaces the caller's subject, and the body is fully determined by it.
             Assert.Equal("Thank you for registering with us", email.Subject);
-            Assert.Equal("<P>Dear Smith, your e-mail is smith@test.com.</P>", email.Description);
+            Assert.Equal(HtmlEnvelope("<P>Dear Smith, your e-mail is smith@test.com.</P>"), email.Description);
         }
 
         [Fact]
@@ -158,7 +164,7 @@ namespace DG.XrmMockupTest
                 .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("description"))
                 .ToEntity<Email>();
 
-            Assert.Equal("From: Sender", email.Description);
+            Assert.Equal(HtmlEnvelope("From: Sender"), email.Description);
         }
 
         [Fact]
@@ -184,7 +190,7 @@ namespace DG.XrmMockupTest
                 .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("description"))
                 .ToEntity<Email>();
 
-            Assert.Equal("From: Regarding", email.Description);
+            Assert.Equal(HtmlEnvelope("From: Regarding"), email.Description);
         }
 
         [Fact]
