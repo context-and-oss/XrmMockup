@@ -1,9 +1,12 @@
 using DG.Tools.XrmMockup.Database;
+using DG.Tools.XrmMockup.Internal;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.ServiceModel;
 
 namespace DG.Tools.XrmMockup
@@ -24,38 +27,65 @@ namespace DG.Tools.XrmMockup
             return entity;
         }
 
-        // Dataverse rejects a regarding record whose type differs from the template's. Depending on
-        // the attribute's metadata (see DbAttributeTypeMap), templatetypecode arrives as an
-        // OptionSetValue, an int, or the logical name.
-        private void ValidateTemplateType(Entity template, string regardingType)
+        // Depending on the attribute's metadata (see DbAttributeTypeMap), templatetypecode is stored
+        // as an OptionSetValue, an int or the logical name. Dataverse itself returns the logical name.
+        private int? GetTemplateTypeCode(Entity template)
         {
-            if (!template.Attributes.TryGetValue("templatetypecode", out var rawTypeCode) || rawTypeCode == null)
-                return;
-
-            metadata.EntityMetadata.TryGetValue(regardingType, out var regardingMetadata);
-            var regardingTypeCode = regardingMetadata?.ObjectTypeCode;
-            if (regardingTypeCode == null)
-                return;
-
-            bool matches;
-            if (rawTypeCode is OptionSetValue optionSet)
-                matches = optionSet.Value == regardingTypeCode.Value;
-            else if (rawTypeCode is int typeCode)
-                matches = typeCode == regardingTypeCode.Value;
-            else if (rawTypeCode is string logicalName)
-                matches = logicalName == regardingType;
-            else
-                return;
-
-            if (!matches)
+            switch (template.GetAttributeValue<object>("templatetypecode"))
             {
-                throw new FaultException(
-                    $"The template type does not match the regarding object type '{regardingType}'.");
+                case OptionSetValue optionSet:
+                    return optionSet.Value;
+                case int typeCode:
+                    return typeCode;
+                case string logicalName:
+                    metadata.EntityMetadata.TryGetValue(logicalName, out var typeMetadata);
+                    return typeMetadata?.ObjectTypeCode;
+                default:
+                    return null;
             }
         }
 
+        // Dataverse rejects a regarding record whose type differs from the template's, and does so
+        // before it looks the regarding record up.
+        private void ValidateTemplateType(Entity template, string regardingType)
+        {
+            var templateTypeCode = GetTemplateTypeCode(template);
+            metadata.EntityMetadata.TryGetValue(regardingType, out var regardingMetadata);
+            var regardingTypeCode = regardingMetadata?.ObjectTypeCode;
+
+            if (templateTypeCode == null || regardingTypeCode == null)
+                return;
+
+            if (templateTypeCode != regardingTypeCode)
+            {
+                throw new FaultException(
+                    $"Template type is incorrect for given objectType {regardingTypeCode} != {templateTypeCode} template.templatetypecode");
+            }
+        }
+
+        // Dataverse leaves regardingobjectid empty when the lookup cannot target the regarding
+        // type, as with a systemuser template.
+        private bool CanBeRegarding(string logicalName)
+        {
+            if (!metadata.EntityMetadata.TryGetValue("email", out var emailMetadata))
+                return true;
+
+            var regarding = emailMetadata.Attributes?
+                .OfType<LookupAttributeMetadata>()
+                .FirstOrDefault(a => a.LogicalName == "regardingobjectid");
+
+            return regarding?.Targets == null || regarding.Targets.Contains(logicalName);
+        }
+
+        private static bool HasSender(Entity email)
+        {
+            return email.GetAttributeValue<EntityCollection>("from")?.Entities.Count > 0;
+        }
+
         // Dataverse returns the merged body wrapped in a minimal HTML document, with LF line
-        // breaks and a trailing newline, rather than as bare text.
+        // breaks and a trailing newline, rather than as bare text. It also re-serialises the
+        // markup inside (lower-cased tags, line breaks around block elements), which the mock
+        // leaves as the stylesheet produced it.
         private static string WrapInHtmlEnvelope(string body)
         {
             if (body == null)
@@ -70,36 +100,54 @@ namespace DG.Tools.XrmMockup
         {
             var request = MakeRequest<SendEmailFromTemplateRequest>(orgRequest);
 
+            // Messages and their order follow Dataverse.
             if (request.TemplateId == Guid.Empty)
                 throw new FaultException("Template id should be set.");
 
             if (request.Target == null)
-                throw new FaultException("Target email is missing.");
+                throw new FaultException("Required field 'Target' is missing for RequestName='SendEmailFromTemplate'");
 
             if (request.Target.LogicalName != "email")
-                throw new FaultException("Target must be an email entity.");
+                throw new FaultException($"Cannot merge 2 Business entities of different types. Current Entity Type: {request.Target.LogicalName}, Entity To Merge Type: email");
 
             if (request.RegardingId == Guid.Empty)
-                throw new FaultException("Regarding id should be set.");
+                throw new FaultException("Object id should be set.");
 
-            if (string.IsNullOrEmpty(request.RegardingType))
-                throw new FaultException("Regarding type should be set.");
+            if (request.RegardingType == null)
+                throw new FaultException("Required field 'RegardingType' is missing for RequestName='SendEmailFromTemplate'");
+
+            if (request.RegardingType.Length == 0)
+                throw new FaultException("Expected non-empty string.");
 
             var template = RetrieveOrThrow(new EntityReference("template", request.TemplateId), userRef);
+            ValidateTemplateType(template, request.RegardingType);
+
             var regardingRef = new EntityReference(request.RegardingType, request.RegardingId);
             var regarding = RetrieveOrThrow(regardingRef, userRef);
 
-            ValidateTemplateType(template, request.RegardingType);
-
+            // The stylesheet addresses the regarding record by its logical name and the sending
+            // user as "systemuser". When the regarding record is itself a systemuser, Dataverse
+            // still merges the sender, so the sender is added last and wins the key.
             var entities = new Dictionary<string, Entity> { [request.RegardingType] = regarding };
-
-            // A template regarding a systemuser must merge that user, not the caller.
             var sender = db.GetEntityOrNull(userRef);
-            if (sender != null && !entities.ContainsKey(sender.LogicalName))
+            if (sender != null)
                 entities[sender.LogicalName] = sender;
 
-            var email = request.Target;
-            email["regardingobjectid"] = regardingRef;
+            // Dataverse works on its own copy and leaves the caller's Target untouched.
+            var email = request.Target.CloneEntity();
+
+            if (CanBeRegarding(request.RegardingType))
+                email["regardingobjectid"] = regardingRef;
+
+            // Dataverse sends from the caller when the e-mail names no sender.
+            if (!HasSender(email))
+            {
+                email["from"] = new EntityCollection(new List<Entity>
+                {
+                    new Entity("activityparty") { ["partyid"] = userRef }
+                });
+            }
+
             email["subject"] = EmailTemplateRenderer.Render(template.GetAttributeValue<string>("subject"), entities);
             email["description"] = WrapInHtmlEnvelope(
                 EmailTemplateRenderer.Render(template.GetAttributeValue<string>("body"), entities));

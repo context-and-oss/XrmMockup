@@ -81,8 +81,9 @@ namespace DG.XrmMockupTest
                 IsPersonal = false,
                 LanguageCode = 1033
             };
-            // Set late-bound: the generated TemplateTypeCode is a string and cannot hold the
-            // integer object type code the database stores.
+            // Dataverse returns templatetypecode as the logical name, but the test metadata gives
+            // the attribute an option set, so the mock only stores the integer object type code
+            // (see DbAttributeTypeMap). The generated string property therefore cannot be used.
             template["templatetypecode"] = ObjectTypeCode(boundTo);
             template.Id = orgAdminService.Create(template);
             return template;
@@ -95,21 +96,28 @@ namespace DG.XrmMockupTest
             "</head>\n<body>\n" + body + "\n</body>\n</html>\n";
 
         private SendEmailFromTemplateRequest BuildRequest(Template template, Contact regarding) =>
+            BuildRequest(BuildEmail(regarding), template, regarding);
+
+        private SendEmailFromTemplateRequest BuildRequest(Email target, Template template, Contact regarding) =>
             new SendEmailFromTemplateRequest
             {
-                Target = BuildEmail(regarding),
+                Target = target,
                 TemplateId = template.Id,
                 RegardingId = regarding.Id,
                 RegardingType = Contact.EntityLogicalName
             };
+
+        private Email RetrieveEmail(Guid id, params string[] columns) =>
+            orgAdminService.Retrieve(Email.EntityLogicalName, id, new ColumnSet(columns)).ToEntity<Email>();
 
         [Fact]
         public void TestSendEmailFromTemplateCreatesAndSendsEmail()
         {
             var contact = CreateRecipient();
             var template = CreateContactTemplate();
+            var target = BuildEmail(contact);
 
-            var response = orgAdminUIService.Execute(BuildRequest(template, contact)) as SendEmailFromTemplateResponse;
+            var response = orgAdminUIService.Execute(BuildRequest(target, template, contact)) as SendEmailFromTemplateResponse;
 
             Assert.NotNull(response);
             Assert.NotEqual(Guid.Empty, response.Id);
@@ -122,6 +130,11 @@ namespace DG.XrmMockupTest
                 Assert.Equal(email_statuscode.PendingSend, email.StatusCode);
                 Assert.Equal(contact.Id, email.RegardingObjectId.Id);
             }
+
+            // The caller's entity is left as it was; Dataverse merges into its own copy.
+            Assert.Equal("Test Email From Template", target.Subject);
+            Assert.False(target.Contains("description"));
+            Assert.False(target.Contains("regardingobjectid"));
         }
 
         [Fact]
@@ -140,11 +153,11 @@ namespace DG.XrmMockupTest
             var response = orgAdminUIService.Execute(BuildRequest(template, contact)) as SendEmailFromTemplateResponse;
             Assert.NotNull(response);
 
-            var email = orgAdminService
-                .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("subject", "description"))
-                .ToEntity<Email>();
+            var email = RetrieveEmail(response.Id, "subject", "description");
 
             // The template replaces the caller's subject, and the body is fully determined by it.
+            // The envelope matches Dataverse byte for byte; the markup inside does not, since
+            // Dataverse re-serialises it (lower-cased tags, line breaks around block elements).
             Assert.Equal("Thank you for registering with us", email.Subject);
             Assert.Equal(HtmlEnvelope("<P>Dear Smith, your e-mail is smith@test.com.</P>"), email.Description);
         }
@@ -160,17 +173,17 @@ namespace DG.XrmMockupTest
             var response = orgAdminUIService.Execute(BuildRequest(template, contact)) as SendEmailFromTemplateResponse;
             Assert.NotNull(response);
 
-            var email = orgAdminService
-                .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("description"))
-                .ToEntity<Email>();
+            var email = RetrieveEmail(response.Id, "description");
 
             Assert.Equal(HtmlEnvelope("From: Sender"), email.Description);
         }
 
         [Fact]
-        public void TestSendEmailFromTemplateRegardingUserWinsOverSender()
+        public void TestSendEmailFromTemplateSenderWinsOverRegardingUser()
         {
             // Regarding record and sender compete for the systemuser key in the render context.
+            // Dataverse merges the sender and leaves regardingobjectid empty, since the lookup
+            // cannot target a systemuser.
             orgAdminService.Update(new SystemUser { Id = crm.AdminUser.Id, FirstName = "Caller" });
             orgAdminService.Update(new SystemUser { Id = testUser1.Id, FirstName = "Regarding" });
 
@@ -186,39 +199,59 @@ namespace DG.XrmMockupTest
             }) as SendEmailFromTemplateResponse;
             Assert.NotNull(response);
 
-            var email = orgAdminService
-                .Retrieve(Email.EntityLogicalName, response.Id, new ColumnSet("description"))
-                .ToEntity<Email>();
+            var email = RetrieveEmail(response.Id, "description", "regardingobjectid");
 
-            Assert.Equal(HtmlEnvelope("From: Regarding"), email.Description);
+            Assert.Equal(HtmlEnvelope("From: Caller"), email.Description);
+            Assert.Null(email.RegardingObjectId);
+        }
+
+        [Fact]
+        public void TestSendEmailFromTemplateSendsFromCallerWhenSenderIsMissing()
+        {
+            var contact = CreateRecipient("nosender@test.com");
+            var template = CreateContactTemplate();
+            var target = BuildEmail(contact);
+            target.from = null;
+
+            var response = orgAdminUIService.Execute(BuildRequest(target, template, contact)) as SendEmailFromTemplateResponse;
+            Assert.NotNull(response);
+
+            var email = RetrieveEmail(response.Id, "from", "statuscode");
+
+            Assert.Equal(crm.AdminUser.Id, Assert.Single(email.from).PartyId.Id);
+            Assert.Equal(email_statuscode.PendingSend, email.StatusCode);
         }
 
         [Fact]
         public void TestSendEmailFromTemplateValidatesRequest()
         {
-            // All five guards raise FaultException, so each case asserts the message to prove the
-            // guard it names is the one that fired.
+            // All guards raise FaultException, so each case asserts the message to prove the guard
+            // it names is the one that fired. The messages are Dataverse's own.
             var id = Guid.NewGuid();
 
             Assert.Equal("Template id should be set.", Assert.Throws<FaultException>(() =>
                 orgAdminUIService.Execute(new SendEmailFromTemplateRequest
                 { Target = new Email(), RegardingId = id, RegardingType = Contact.EntityLogicalName })).Message);
 
-            Assert.Equal("Target email is missing.", Assert.Throws<FaultException>(() =>
+            Assert.Equal("Required field 'Target' is missing for RequestName='SendEmailFromTemplate'", Assert.Throws<FaultException>(() =>
                 orgAdminUIService.Execute(new SendEmailFromTemplateRequest
                 { TemplateId = id, RegardingId = id, RegardingType = Contact.EntityLogicalName })).Message);
 
-            Assert.Equal("Target must be an email entity.", Assert.Throws<FaultException>(() =>
+            Assert.Equal("Cannot merge 2 Business entities of different types. Current Entity Type: contact, Entity To Merge Type: email", Assert.Throws<FaultException>(() =>
                 orgAdminUIService.Execute(new SendEmailFromTemplateRequest
                 { Target = new Contact(), TemplateId = id, RegardingId = id, RegardingType = Contact.EntityLogicalName })).Message);
 
-            Assert.Equal("Regarding id should be set.", Assert.Throws<FaultException>(() =>
+            Assert.Equal("Object id should be set.", Assert.Throws<FaultException>(() =>
                 orgAdminUIService.Execute(new SendEmailFromTemplateRequest
                 { Target = new Email(), TemplateId = id, RegardingType = Contact.EntityLogicalName })).Message);
 
-            Assert.Equal("Regarding type should be set.", Assert.Throws<FaultException>(() =>
+            Assert.Equal("Required field 'RegardingType' is missing for RequestName='SendEmailFromTemplate'", Assert.Throws<FaultException>(() =>
                 orgAdminUIService.Execute(new SendEmailFromTemplateRequest
                 { Target = new Email(), TemplateId = id, RegardingId = id })).Message);
+
+            Assert.Equal("Expected non-empty string.", Assert.Throws<FaultException>(() =>
+                orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+                { Target = new Email(), TemplateId = id, RegardingId = id, RegardingType = "" })).Message);
         }
 
         [Fact]
@@ -253,10 +286,20 @@ namespace DG.XrmMockupTest
         {
             var contact = CreateRecipient();
             var template = CreateTemplate(SubjectXslt, BodyXslt, Account.EntityLogicalName);
+            var expected = $"Template type is incorrect for given objectType {ObjectTypeCode("contact")} != {ObjectTypeCode("account")} template.templatetypecode";
 
             var ex = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(BuildRequest(template, contact)));
+            Assert.Equal(expected, ex.Message);
 
-            Assert.Contains("template type does not match", ex.Message);
+            // The type is checked before the regarding record is looked up, as in Dataverse.
+            var missing = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(new SendEmailFromTemplateRequest
+            {
+                Target = BuildEmail(contact),
+                TemplateId = template.Id,
+                RegardingId = Guid.NewGuid(),
+                RegardingType = Contact.EntityLogicalName
+            }));
+            Assert.Equal(expected, missing.Message);
         }
 
         [Fact]

@@ -85,7 +85,7 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
-        public void MergesValuesTheWayDataverseDoes()
+        public void FlattensAttributeValuesForTheStylesheet()
         {
             var contact = new Entity("contact")
             {
@@ -101,17 +101,28 @@ namespace DG.XrmMockupTest
 
             var result = EmailTemplateRenderer.Render(ValuesXslt, Context(contact));
 
+            // Lookup, option set, boolean and integer match a live org. The date uses Dataverse's
+            // default user format; money lacks the currency symbol Dataverse prefixes.
             Assert.Equal(
-                "lookup={3C2E0869-D1A6-F111-B8DE-70A8A57D382B}|option=1|money=1234.5|flag=True|" +
-                "date=01/02/2026 03:04:05|int=42|decimal=3.5",
+                "lookup={3C2E0869-D1A6-F111-B8DE-70A8A57D382B}|option=1|money=1,234.50|flag=1|" +
+                "date=1/2/2026&nbsp;3:04 AM|int=42|decimal=3.5",
                 result);
         }
 
         [Fact]
-        public void ReturnsNonStylesheetValuesUnchanged()
+        public void PassesMissingValueThrough()
         {
-            Assert.Equal("Just plain text", EmailTemplateRenderer.Render("Just plain text", Context(new Entity("contact"))));
             Assert.Null(EmailTemplateRenderer.Render(null, Context(new Entity("contact"))));
+            Assert.Equal("", EmailTemplateRenderer.Render("", Context(new Entity("contact"))));
+        }
+
+        [Fact]
+        public void ThrowsForPlainTextLikeDataverse()
+        {
+            var ex = Assert.Throws<FaultException>(
+                () => EmailTemplateRenderer.Render("Just plain text", Context(new Entity("contact"))));
+
+            Assert.Contains("xslXml is Just plain text", ex.Message);
         }
 
         [Fact]
