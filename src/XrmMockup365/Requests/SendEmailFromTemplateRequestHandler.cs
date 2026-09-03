@@ -12,27 +12,44 @@ namespace DG.Tools.XrmMockup
     {
         public SendEmailFromTemplateRequestHandler(Core core, XrmDb db, MetadataSkeleton metadata, Security security) : base(core, db, metadata, security, "SendEmailFromTemplate") { }
 
-        // Dataverse throws when a referenced record does not exist; mirror that rather than
-        // silently sending an empty/unmerged e-mail.
-        private Entity RetrieveOrThrow(EntityReference reference)
+        // Dataverse throws when a referenced record does not exist or the caller cannot read it;
+        // mirror that rather than silently sending an empty or unmerged e-mail.
+        private Entity RetrieveOrThrow(EntityReference reference, EntityReference userRef)
         {
-            return db.GetEntityOrNull(reference)
+            var entity = db.GetEntityOrNull(reference)
                 ?? throw new FaultException($"{reference.LogicalName} With Id = {reference.Id} Does Not Exist");
+
+            if (!security.HasPermission(entity, AccessRights.ReadAccess, userRef))
+                throw new FaultException($"Calling user with id '{userRef.Id}' does not have permission to read entity '{reference.LogicalName}'");
+
+            return entity;
         }
 
-        // A template is bound to an entity type via templatetypecode; Dataverse rejects a
-        // regarding record of a different type. templatetypecode is an EntityName attribute
-        // carrying an option set, which XrmMockup stores as the integer object type code (see
-        // DbAttributeTypeMap) rather than the logical name Dataverse itself exposes.
+        // A template is bound to an entity type via templatetypecode; Dataverse rejects a regarding
+        // record of a different type. templatetypecode is an EntityName attribute, stored as the
+        // integer object type code when its metadata carries an option set and as the logical name
+        // otherwise (see DbAttributeTypeMap), so both shapes are accepted.
         private void ValidateTemplateType(Entity template, string regardingType)
         {
-            var templateTypeCode = template.GetAttributeValue<OptionSetValue>("templatetypecode")?.Value
-                ?? template.GetAttributeValue<int?>("templatetypecode");
+            if (!template.Attributes.TryGetValue("templatetypecode", out var rawTypeCode) || rawTypeCode == null)
+                return;
+
             metadata.EntityMetadata.TryGetValue(regardingType, out var regardingMetadata);
             var regardingTypeCode = regardingMetadata?.ObjectTypeCode;
+            if (regardingTypeCode == null)
+                return;
 
-            if (templateTypeCode.HasValue && regardingTypeCode.HasValue &&
-                templateTypeCode.Value != regardingTypeCode.Value)
+            bool matches;
+            if (rawTypeCode is OptionSetValue optionSet)
+                matches = optionSet.Value == regardingTypeCode.Value;
+            else if (rawTypeCode is int typeCode)
+                matches = typeCode == regardingTypeCode.Value;
+            else if (rawTypeCode is string logicalName)
+                matches = logicalName == regardingType;
+            else
+                return;
+
+            if (!matches)
             {
                 throw new FaultException(
                     $"The template type does not match the regarding object type '{regardingType}'.");
@@ -58,18 +75,18 @@ namespace DG.Tools.XrmMockup
             if (string.IsNullOrEmpty(request.RegardingType))
                 throw new FaultException("Regarding type should be set.");
 
-            var template = RetrieveOrThrow(new EntityReference("template", request.TemplateId));
+            var template = RetrieveOrThrow(new EntityReference("template", request.TemplateId), userRef);
             var regardingRef = new EntityReference(request.RegardingType, request.RegardingId);
-            var regarding = RetrieveOrThrow(regardingRef);
+            var regarding = RetrieveOrThrow(regardingRef, userRef);
 
             ValidateTemplateType(template, request.RegardingType);
 
-            // The template's subject/body are XSLT stylesheets rendered against the regarding
-            // record and the sending user. Verified against a live org: the merged values (and
-            // XSLT whitespace handling) match the platform.
             var entities = new Dictionary<string, Entity> { [request.RegardingType] = regarding };
+
+            // The sending user is a second merge source, but never at the regarding record's
+            // expense: a template regarding a systemuser must merge that user, not the caller.
             var sender = db.GetEntityOrNull(userRef);
-            if (sender != null)
+            if (sender != null && !entities.ContainsKey(sender.LogicalName))
                 entities[sender.LogicalName] = sender;
 
             var email = request.Target;

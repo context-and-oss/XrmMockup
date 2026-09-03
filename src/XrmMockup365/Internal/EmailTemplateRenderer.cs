@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.ServiceModel;
 using System.Xml;
 using System.Xml.Xsl;
 
@@ -17,19 +18,14 @@ namespace DG.Tools.XrmMockup
     /// </summary>
     internal static class EmailTemplateRenderer
     {
-        /// <summary>
-        /// Renders a single template field (subject or body).
-        /// </summary>
-        /// <param name="templateField">The raw template attribute value (an XSLT stylesheet in Dataverse).</param>
+        /// <param name="templateField">The raw template attribute value.</param>
         /// <param name="entitiesByLogicalName">
         /// The records available to the template, keyed by logical name. Each becomes a child of
         /// <c>&lt;data&gt;</c> (e.g. <c>&lt;contact&gt;</c>, <c>&lt;systemuser&gt;</c>) with one
         /// element per populated attribute.
         /// </param>
-        /// <returns>
-        /// The merged text. If the field is not an XSLT stylesheet, or the transform fails, the
-        /// raw value is returned unchanged so plain-text templates still work.
-        /// </returns>
+        /// <returns>The merged text, or the value unchanged if it is not a stylesheet.</returns>
+        /// <exception cref="FaultException">The value is a stylesheet but does not compile or apply.</exception>
         public static string Render(string templateField, IReadOnlyDictionary<string, Entity> entitiesByLogicalName)
         {
             if (string.IsNullOrWhiteSpace(templateField))
@@ -45,25 +41,27 @@ namespace DG.Tools.XrmMockup
                 using (var stringReader = new StringReader(templateField))
                 using (var xsltReader = XmlReader.Create(stringReader))
                 {
-                    // Default XsltSettings: scripts and the document() function are disabled.
-                    transform.Load(xsltReader);
+                    // A template is data, so it gets no script blocks, no document() and no
+                    // resolver for xsl:import/include - a mock run must stay offline.
+                    transform.Load(xsltReader, XsltSettings.Default, null);
                 }
-
-                var dataDocument = BuildDataDocument(entitiesByLogicalName);
 
                 using (var writer = new StringWriter(CultureInfo.InvariantCulture))
                 {
-                    transform.Transform(dataDocument, null, writer);
+                    transform.Transform(BuildDataDocument(entitiesByLogicalName), null, writer);
                     return writer.ToString();
                 }
             }
             catch (Exception e) when (e is XmlException || e is XsltException)
             {
-                // Not valid XSLT - fall back to the raw value rather than failing the send.
-                return templateField;
+                // Returning the raw stylesheet instead would put markup in the sent e-mail.
+                throw new FaultException($"The e-mail template could not be rendered: {e.Message}");
             }
         }
 
+        /// <summary>
+        /// Builds the <c>&lt;data&gt;</c> document the stylesheet selects its merge values from.
+        /// </summary>
         private static XmlDocument BuildDataDocument(IReadOnlyDictionary<string, Entity> entitiesByLogicalName)
         {
             var document = new XmlDocument();
@@ -96,6 +94,9 @@ namespace DG.Tools.XrmMockup
             return document;
         }
 
+        /// <summary>
+        /// Flattens an attribute to the text a stylesheet's <c>xsl:value-of</c> would select.
+        /// </summary>
         private static string AttributeToString(object value)
         {
             switch (value)
@@ -105,7 +106,9 @@ namespace DG.Tools.XrmMockup
                 case string s:
                     return s;
                 case EntityReference reference:
-                    return reference.Name;
+                    // Dataverse merges a lookup as the record id in registry format (verified
+                    // against a live org), not as the display name.
+                    return reference.Id.ToString("B").ToUpperInvariant();
                 case OptionSetValue optionSet:
                     return optionSet.Value.ToString(CultureInfo.InvariantCulture);
                 case Money money:

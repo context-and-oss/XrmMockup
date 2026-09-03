@@ -1,6 +1,8 @@
 using DG.Tools.XrmMockup;
 using Microsoft.Xrm.Sdk;
+using System;
 using System.Collections.Generic;
+using System.ServiceModel;
 using Xunit;
 
 namespace DG.XrmMockupTest
@@ -26,6 +28,17 @@ namespace DG.XrmMockupTest
             "<![CDATA[<BR>Street Address: ]]><xsl:choose><xsl:when test=\"contact/address1_line1\"><xsl:value-of select=\"contact/address1_line1\" /></xsl:when><xsl:otherwise>No Address Provided</xsl:otherwise></xsl:choose>" +
             "<![CDATA[<BR>E-mail Address: ]]><xsl:choose><xsl:when test=\"contact/emailaddress1\"><xsl:value-of select=\"contact/emailaddress1\" /></xsl:when><xsl:otherwise></xsl:otherwise></xsl:choose>" +
             "<![CDATA[</P>]]></xsl:template></xsl:stylesheet>";
+
+        private const string LookupXslt =
+            "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
+            "<xsl:output method=\"text\" indent=\"no\"/><xsl:template match=\"/data\">" +
+            "<![CDATA[company=]]><xsl:value-of select=\"contact/parentcustomerid\" /></xsl:template></xsl:stylesheet>";
+
+        // Well-formed XML, but 'contact/' is not a valid XPath expression.
+        private const string MalformedXslt =
+            "<?xml version=\"1.0\" ?><xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">" +
+            "<xsl:output method=\"text\" /><xsl:template match=\"/data\">" +
+            "<xsl:value-of select=\"contact/\" /></xsl:template></xsl:stylesheet>";
 
         [Fact]
         public void RendersStaticSubject()
@@ -63,10 +76,8 @@ namespace DG.XrmMockupTest
 
             var result = EmailTemplateRenderer.Render(RealBodyXslt, entities);
 
-            // Values are merged from the regarding contact and the sending systemuser.
-            // The "MrSmith" concatenation (no space) is verified against real Dataverse output:
-            // SendEmailFromTemplate against a live org renders this same template as "Dear MrSmith ,"
-            // because XSLT strips the whitespace-only stylesheet text node between the two values.
+            // "MrSmith" has no space because XSLT strips the whitespace-only text node the
+            // stylesheet places between the two values. Dataverse renders it the same way.
             Assert.Contains("Dear MrSmith", result);
             Assert.Contains("Name: Admin User", result);
             Assert.Contains("Street Address: 123 Main St", result);
@@ -103,6 +114,31 @@ namespace DG.XrmMockupTest
         public void ReturnsNullForNullInput()
         {
             Assert.Null(EmailTemplateRenderer.Render(null, new Dictionary<string, Entity>()));
+        }
+
+        [Fact]
+        public void ThrowsWhenStylesheetDoesNotCompile()
+        {
+            Assert.Throws<FaultException>(
+                () => EmailTemplateRenderer.Render(MalformedXslt, new Dictionary<string, Entity>()));
+        }
+
+        [Fact]
+        public void MergesLookupAsRecordId()
+        {
+            var accountId = new Guid("3c2e0869-d1a6-f111-b8de-70a8a57d382b");
+            var entities = new Dictionary<string, Entity>
+            {
+                // The name is populated to prove it is deliberately not what gets merged.
+                ["contact"] = new Entity("contact")
+                {
+                    ["parentcustomerid"] = new EntityReference("account", accountId) { Name = "Probe Account A/S" }
+                }
+            };
+
+            var result = EmailTemplateRenderer.Render(LookupXslt, entities);
+
+            Assert.Equal("company={3C2E0869-D1A6-F111-B8DE-70A8A57D382B}", result);
         }
     }
 }
