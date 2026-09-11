@@ -29,17 +29,34 @@ dotnet tool install XrmMockup.MetadataGenerator
 dotnet tool xrmmockup-metadata
 ```
 
-The tool will connect to Dataverse using interactive authentication and generate metadata files.
+The tool will connect to Dataverse using an interactive browser sign-in and generate metadata files.
 
 ## Authentication
 
-This tool uses the [DataverseConnection](https://github.com/delegateas/DataverseConnection) library for authentication via Azure Default Credentials. See the DataverseConnection documentation for configuration details.
+This tool uses the [DataverseConnection](https://github.com/context-and-oss/DataverseConnection) library
+for authentication. DataverseConnection owns these settings, so the tool reads them from the same
+flat configuration keys the library documents (see its
+[Configuration](https://github.com/context-and-oss/DataverseConnection#configuration) section), and
+passes any CLI override straight back to the library.
 
-Set the Dataverse URL via environment variable or appsettings.json:
+| Setting | Legacy key | Default | Description |
+|---------|------------|---------|-------------|
+| `DataverseUrl` | `DATAVERSE_URL` | required | Your Dataverse environment URL (e.g., `https://your-org.crm4.dynamics.com`) |
+| `DataverseCredentialType` | `DATAVERSE_CREDENTIAL_TYPE` | `browser` | Azure credential used to authenticate (see below) |
 
-| Variable | Description |
-|----------|-------------|
-| `DATAVERSE_URL` | Your Dataverse environment URL (e.g., `https://your-org.crm4.dynamics.com`) |
+Both keys can be set in `appsettings.json`, as environment variables, or on the command line
+(`--dataverse-url` / `--credential-type`). The legacy uppercase keys are still honoured, but the
+PascalCase names are preferred.
+
+### Credential types
+
+| Value | Credential | Notes |
+|-------|------------|-------|
+| `browser` (default) | `InteractiveBrowserCredential` | Opens a browser sign-in; tokens are cached between runs |
+| `devicecode` | `DeviceCodeCredential` | Prints a code to enter on another device — use when no browser is available (SSH, containers) |
+| `azcli` | `AzureCliCredential` | Reuses an existing `az login` session — useful for CI/CD and scripted runs |
+
+Values are case-insensitive. An unknown value fails at parse time and lists the valid ones.
 
 ## Configuration
 
@@ -49,7 +66,8 @@ Create an `appsettings.json` file in your working directory:
 
 ```json
 {
-  "DATAVERSE_URL": "https://your-org.crm4.dynamics.com",
+  "DataverseUrl": "https://your-org.crm4.dynamics.com",
+  "DataverseCredentialType": "browser",
   "XrmMockup": {
     "Metadata": {
       "OutputDirectory": "./Metadata",
@@ -73,6 +91,9 @@ Create an `appsettings.json` file in your working directory:
 | `SecurityRoles` | string[] | not set | Security role names to include (see [Security Role Filtering](#security-role-filtering)) |
 | `AllSecurityRoles` | bool | `false` | Include all security roles regardless of other filtering |
 | `PrettyPrint` | bool | `false` | Format XML output for readability (increases file size) |
+
+`DataverseUrl` and `DataverseCredentialType` sit at the root of the file, not under `XrmMockup:Metadata`,
+because they are read by DataverseConnection rather than by this tool.
 
 ### Environment-Specific Configuration
 
@@ -99,6 +120,9 @@ Options:
   -a, --all-security-roles   Include all security roles regardless of filtering
   -c, --config <path>        Path to appsettings.json configuration file
   -p, --pretty-print         Format XML output for readability
+  -u, --dataverse-url <url>  Dataverse environment URL
+  -t, --credential-type <browser|devicecode|azcli>
+                             Azure credential used to authenticate (default: browser)
   --help                     Show help information
   --version                  Show version information
 ```
@@ -145,6 +169,18 @@ Enable pretty-printed XML output:
 
 ```bash
 xrmmockup-metadata --pretty-print
+```
+
+Authenticate with a device code instead of a browser (e.g. over SSH):
+
+```bash
+xrmmockup-metadata --credential-type devicecode
+```
+
+Reuse an existing Azure CLI session and target a specific environment:
+
+```bash
+xrmmockup-metadata -u "https://your-org.crm4.dynamics.com" -t azcli
 ```
 
 ## Security Role Filtering
@@ -208,25 +244,39 @@ using var crm = XrmMockup365.GetInstance(settings);
 
 ## CI/CD Integration
 
-Configure Azure Default Credentials for your pipeline (see [DataverseConnection](https://github.com/delegateas/DataverseConnection) documentation) and set `DATAVERSE_URL`:
+The default `browser` credential cannot work unattended, so pipelines should select a
+non-interactive credential. Sign in with the Azure CLI first, then pass `--credential-type azcli`
+(or set `DataverseCredentialType`). See the
+[DataverseConnection](https://github.com/context-and-oss/DataverseConnection#configuration)
+documentation for the full set of credential options.
 
 ```yaml
 # Azure DevOps example
-- task: DotNetCoreCLI@2
+- task: AzureCLI@2
   displayName: 'Generate XrmMockup Metadata'
-  env:
-    DATAVERSE_URL: $(DataverseUrl)
   inputs:
-    command: 'custom'
-    custom: 'tool'
-    arguments: 'run xrmmockup-metadata -o ./tests/Metadata -s "$(SolutionName)"'
+    azureSubscription: $(ServiceConnection)
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      dotnet tool run xrmmockup-metadata \
+        -o ./tests/Metadata \
+        -s "$(SolutionName)" \
+        -u "$(DataverseUrl)" \
+        -t azcli
 ```
 
 ```yaml
 # GitHub Actions example
+- uses: azure/login@v2
+  with:
+    client-id: ${{ secrets.AZURE_CLIENT_ID }}
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 - name: Generate XrmMockup Metadata
   env:
-    DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+    DataverseUrl: ${{ secrets.DATAVERSE_URL }}
+    DataverseCredentialType: azcli
   run: dotnet tool run xrmmockup-metadata -o ./tests/Metadata -s "${{ vars.SOLUTION_NAME }}"
 ```
 
@@ -234,8 +284,9 @@ Configure Azure Default Credentials for your pipeline (see [DataverseConnection]
 
 ### Authentication Issues
 
-- Verify `DATAVERSE_URL` is correct and accessible
-- See [DataverseConnection](https://github.com/delegateas/DataverseConnection) documentation for authentication troubleshooting
+- Verify `DataverseUrl` is correct and accessible
+- If no browser can be opened (SSH session, container, CI agent), switch credential: `--credential-type devicecode` or `--credential-type azcli`
+- See [DataverseConnection](https://github.com/context-and-oss/DataverseConnection#configuration) documentation for authentication troubleshooting
 - Ensure the authenticating user/service principal has the System Administrator or System Customizer security role
 
 ### Missing Entities

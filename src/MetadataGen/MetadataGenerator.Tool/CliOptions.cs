@@ -53,4 +53,31 @@ internal static class CliOptions
         public const string Alias = "-a";
         public const string Description = "Include all security roles regardless of solution or named role filtering";
     }
+
+    /// <summary>
+    /// Overrides DataverseConnection's <c>DataverseCredentialType</c> setting, which selects the
+    /// Azure credential used to authenticate. DataverseConnection defaults to <c>browser</c>.
+    /// </summary>
+    internal static class CredentialType
+    {
+        public const string Primary = "--credential-type";
+        public const string Alias = "-t";
+        public const string ConfigurationKey = "DataverseCredentialType";
+        public const string HelpName = "browser|devicecode|azcli";
+        public const string Description =
+            "Azure credential used to authenticate with Dataverse: browser (default), devicecode or azcli";
+
+        /// <summary>
+        /// The values accepted by DataverseConnection's configuration binder.
+        /// </summary>
+        public static readonly string[] AllowedValues = ["browser", "devicecode", "azcli"];
+    }
+
+    internal static class DataverseUrl
+    {
+        public const string Primary = "--dataverse-url";
+        public const string Alias = "-u";
+        public const string ConfigurationKey = "DataverseUrl";
+        public const string Description = "Dataverse environment URL (e.g. https://your-org.crm4.dynamics.com)";
+    }
 }

@@ -19,8 +19,15 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds configuration services.
     /// </summary>
-    public static IServiceCollection AddToolConfiguration(this IServiceCollection services)
+    /// <param name="services">The service collection.</param>
+    /// <param name="configurationOverrides">
+    /// Flat configuration keys from the command line, applied with the highest precedence.
+    /// </param>
+    public static IServiceCollection AddToolConfiguration(
+        this IServiceCollection services,
+        ConfigurationOverrides? configurationOverrides = null)
     {
+        services.AddSingleton(configurationOverrides ?? ConfigurationOverrides.Empty);
         services.AddSingleton<IConfigReader, ConfigReader>();
         services.AddSingleton(sp => sp.GetRequiredService<IConfigReader>().GetConfiguration());
         return services;
@@ -74,10 +81,11 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddMetadataGeneratorTool(
         this IServiceCollection services,
-        Func<MetadataConfiguration, GeneratorOptions> optionsFactory)
+        Func<MetadataConfiguration, GeneratorOptions> optionsFactory,
+        ConfigurationOverrides? configurationOverrides = null)
     {
         return services
-            .AddToolConfiguration()
+            .AddToolConfiguration(configurationOverrides)
             .AddGeneratorOptions(optionsFactory)
             .AddToolLogging()
             .AddMetadataGenerator();

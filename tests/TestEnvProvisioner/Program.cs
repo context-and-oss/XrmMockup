@@ -12,9 +12,10 @@ using XrmMockup.TestEnvProvisioner;
 // XrmMockup test suite depends on, so that after running this tool you can regenerate metadata
 // (Regenerate-TestMetadata.ps1) and the corresponding tests can be migrated/un-skipped.
 //
-// Auth + target org: identical to the metadata generator. It reads DATAVERSE_URL from a config
-// file (default ./appsettings.json, override with --config <path>) or the DATAVERSE_URL env var,
-// and connects with the DataverseConnection package (Azure default credentials / interactive).
+// Auth + target org: identical to the metadata generator. It reads DataverseUrl (legacy:
+// DATAVERSE_URL) from a config file (default ./appsettings.json, override with --config <path>) or
+// the environment, and connects with the DataverseConnection package. Authentication defaults to
+// an interactive browser sign-in; override it with --credential-type browser|devicecode|azcli.
 //
 // Run:
 //   dotnet run --project tests/TestEnvProvisioner -- --config tests/appsettings.json
@@ -34,12 +35,25 @@ string solutionName = GetArg(args, "--solution") ?? "XrmMockup";
 //   --dump-formula <entitylogicalname>.<attributelogicalname>
 string? dumpTarget = GetArg(args, "--dump-formula");
 
+// Connection overrides, mirroring the metadata generator's --dataverse-url / --credential-type.
+// These are the values accepted by DataverseConnection's DataverseCredentialType setting.
+string[] credentialTypes = ["browser", "devicecode", "azcli"];
+string? dataverseUrlArg = GetArg(args, "--dataverse-url");
+string? credentialTypeArg = GetArg(args, "--credential-type");
+if (credentialTypeArg is not null &&
+    !credentialTypes.Contains(credentialTypeArg.Trim(), StringComparer.OrdinalIgnoreCase))
+{
+    Console.Error.WriteLine(
+        $"'{credentialTypeArg}' is not a valid --credential-type. Valid values: {string.Join(", ", credentialTypes)}.");
+    return 1;
+}
+
 // Build configuration the same way the metadata generator does — appsettings.json (from the
-// --config file's folder, or the current directory) plus environment variables. This IConfiguration
-// is registered in DI below, because DataverseConnection's AddDataverse() reads DataverseUrl (or the
-// legacy DATAVERSE_URL) from IConfiguration, NOT from the environment variable directly. The same
-// configuration selects the credential: DataverseCredentialType = browser (the default since
-// DataverseConnection 1.2.0), devicecode or azcli.
+// --config file's folder, or the current directory), environment variables, then the CLI overrides
+// above. This IConfiguration is registered in DI below, because DataverseConnection's AddDataverse()
+// reads DataverseUrl (or the legacy DATAVERSE_URL) from IConfiguration, NOT from the environment
+// variable directly. The same configuration selects the credential: DataverseCredentialType =
+// browser (the default since DataverseConnection 1.2.0), devicecode or azcli.
 var baseDir = Directory.GetCurrentDirectory();
 var jsonFile = "appsettings.json";
 if (!string.IsNullOrEmpty(configPath))
@@ -49,10 +63,18 @@ if (!string.IsNullOrEmpty(configPath))
     jsonFile = Path.GetFileName(full);
 }
 
+var cliOverrides = new Dictionary<string, string?>();
+if (!string.IsNullOrWhiteSpace(dataverseUrlArg))
+    cliOverrides["DataverseUrl"] = dataverseUrlArg;
+if (!string.IsNullOrWhiteSpace(credentialTypeArg))
+    cliOverrides["DataverseCredentialType"] = credentialTypeArg.Trim();
+
 IConfiguration configuration = new ConfigurationBuilder()
     .SetBasePath(baseDir)
     .AddJsonFile(jsonFile, optional: true)
     .AddEnvironmentVariables()
+    // Last source wins, so CLI overrides beat the file and the environment.
+    .AddInMemoryCollection(cliOverrides)
     .Build();
 
 // Work from the config folder so relative paths line up with the generator's behaviour.
@@ -61,18 +83,24 @@ if (!string.IsNullOrEmpty(configPath))
     Directory.SetCurrentDirectory(baseDir);
 }
 
-if (string.IsNullOrEmpty(configuration["DATAVERSE_URL"]))
+// DataverseConnection prefers DataverseUrl and falls back to the legacy DATAVERSE_URL, so accept both.
+var targetUrl = configuration["DataverseUrl"];
+if (string.IsNullOrWhiteSpace(targetUrl))
+    targetUrl = configuration["DATAVERSE_URL"];
+
+if (string.IsNullOrEmpty(targetUrl))
 {
-    Console.Error.WriteLine($"DATAVERSE_URL is not set. Looked in '{Path.Combine(baseDir, jsonFile)}' and " +
-        "environment variables. Pass --config <appsettings.json> or set the DATAVERSE_URL environment variable.");
+    Console.Error.WriteLine($"DataverseUrl is not set. Looked in '{Path.Combine(baseDir, jsonFile)}' and " +
+        "environment variables. Pass --dataverse-url <url>, --config <appsettings.json>, or set the " +
+        "DataverseUrl (legacy: DATAVERSE_URL) environment variable.");
     return 1;
 }
 
-Console.WriteLine($"Target environment: {configuration["DATAVERSE_URL"]}");
+Console.WriteLine($"Target environment: {targetUrl}");
 if (whatIf) Console.WriteLine("** --whatif: no changes will be written **");
 
 var services = new ServiceCollection();
-services.AddSingleton(configuration);   // AddDataverse() resolves DATAVERSE_URL from IConfiguration
+services.AddSingleton(configuration);   // AddDataverse() resolves the Dataverse settings from IConfiguration
 services.AddDataverse();
 await using var provider = services.BuildServiceProvider();
 var client = provider.GetRequiredService<ServiceClient>();
