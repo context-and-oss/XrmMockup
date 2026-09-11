@@ -5,6 +5,13 @@ All notable changes to XrmMockup.MetadataGenerator will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### v1.2.0 - 11 September 2026
+* Add: `--credential-type` (`-t`) to override DataverseConnection's `DataverseCredentialType` setting — `browser` (the default), `devicecode` or `azcli`
+* Add: `--dataverse-url` (`-u`) to override the `DataverseUrl` setting
+* Change: Documentation aligned with DataverseConnection's current configuration keys (`DataverseUrl`/`DataverseCredentialType`, legacy `DATAVERSE_URL`/`DATAVERSE_CREDENTIAL_TYPE` still honoured) and its browser-auth default. CI/CD examples now select a non-interactive credential
+* Change: Bumped the `xrmcontext` tool used by the regeneration scripts to 4.0.0-beta.26, which bundles the current DataverseConnection; the repo's own `appsettings.json` files now use the `DataverseUrl` key
+* Fix: The regeneration script now installs the pinned `xrmcontext` version on every run, and locates the tool manifest wherever the SDK writes it, so a version bump actually takes effect
+
 ### v1.1.0 - 1 September 2026
 * Fix: Updated to DataverseConnection v1.2.5 (#347)
 
