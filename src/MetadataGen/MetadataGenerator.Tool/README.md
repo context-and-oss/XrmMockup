@@ -267,6 +267,33 @@ documentation for the full set of credential options.
 ```
 
 ```yaml
+# Azure DevOps example (PowerPlatform SPN)
+- task: PowerPlatformSetConnectionVariables@2
+  displayName: 'Set Power Platform Connection Variables'
+  name: connectionVariables
+  inputs:
+    authenticationType: 'PowerPlatformSPN'
+    PowerPlatformSPN: ${{ parameters.powerPlatformEnvironment }}
+
+- task: PowerShell@2
+  displayName: 'Generate XrmMockup Metadata'
+  env:
+    AZURE_CLIENT_ID: '$(connectionVariables.BuildTools.ApplicationId)'
+    AZURE_CLIENT_SECRET: '$(connectionVariables.BuildTools.ClientSecret)'
+    AZURE_TENANT_ID: '$(connectionVariables.BuildTools.TenantId)'
+    DataverseUrl: '$(BuildTools.EnvironmentUrl)'
+    DataverseCredentialType: 'azcli'
+  inputs:
+    targetType: 'inline'
+    pwsh: true
+    script: |
+      az login --service-principal --username $env:AZURE_CLIENT_ID --password $env:AZURE_CLIENT_SECRET --tenant $env:AZURE_TENANT_ID --allow-no-subscriptions | Out-Null
+      dotnet tool run xrmmockup-metadata \
+        -o ./tests/Metadata \
+        -s "$(SolutionName)"
+```
+
+```yaml
 # GitHub Actions example
 - uses: azure/login@v2
   with:
