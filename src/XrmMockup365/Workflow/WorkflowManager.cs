@@ -51,9 +51,9 @@ namespace DG.Tools.XrmMockup {
             _core = core;
             _logger = logger ?? NullLogger.Instance;
             this.metadata = metadata;
-            this.actions = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == 3).ToList();
+            this.actions = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == (int)Workflow_Category.Action).ToList();
 
-            var workflows = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == 0).ToList();
+            var workflows = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == (int)Workflow_Category.Workflow).ToList();
             synchronousWorkflows = new List<Entity>();
             asynchronousWorkflows = new List<Entity>();
             waitingWorkflows = new List<WaitInfo>();
@@ -449,10 +449,10 @@ namespace DG.Tools.XrmMockup {
         internal void AddWorkflow(Entity workflow) {
             if (workflow.LogicalName != LogicalNames.Workflow) return;
             var name = workflow.GetAttributeValue<string>("name") ?? workflow.Id.ToString();
-            // Category 3 = Action. Register it so it can be invoked by message name (Core dispatches
+            // Register actions so they can be invoked by message name (Core dispatches
             // to ExecuteAction via GetActionDefaultNull); otherwise an added action would be mis-filed
             // as a workflow and never be reachable.
-            if (workflow.GetAttributeValue<OptionSetValue>("category")?.Value == 3) {
+            if (workflow.GetAttributeValue<OptionSetValue>("category")?.Value == (int)Workflow_Category.Action) {
                 actions.Add(workflow);
                 _logger.LogDebug("Added action: {WorkflowName}", name);
                 return;

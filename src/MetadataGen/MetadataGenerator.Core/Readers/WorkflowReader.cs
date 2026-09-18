@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using XrmMockup.MetadataGenerator.Core.Connection;
+using XrmMockup.MetadataGenerator.Tool.Context;
 
 namespace XrmMockup.MetadataGenerator.Core.Readers;
 
@@ -35,12 +36,11 @@ internal sealed class WorkflowReader(
             };
 
             query.Criteria.AddCondition("solutionid", ConditionOperator.Equal, activeSolutionId);
-            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 1);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, (int)workflow_statecode.Activated);
 
-            // Category: 0 = Workflow, 3 = Action
             var category = new FilterExpression(LogicalOperator.Or);
-            category.AddCondition("category", ConditionOperator.Equal, 0);
-            category.AddCondition("category", ConditionOperator.Equal, 3);
+            category.AddCondition("category", ConditionOperator.Equal, (int)workflow_category.Workflow);
+            category.AddCondition("category", ConditionOperator.Equal, (int)workflow_category.Action);
             query.Criteria.AddFilter(category);
 
             var workflows = _service.RetrieveMultiple(query).Entities
