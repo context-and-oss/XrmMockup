@@ -3,6 +3,8 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Xunit;
 namespace DG.XrmMockupTest
 {
@@ -10,6 +12,127 @@ namespace DG.XrmMockupTest
     {
         public TestFetchConditionOperators(XrmMockupFixture fixture) : base(fixture)
         {
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item3 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.checkmark });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item3 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+            CreateAccount(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+
+            void CreateAccount(List<Account_dg_Multiselect> list)
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    list.Reverse();
+                    var account = new Account();
+                    account.dg_Multiselect = list;
+                    account.Id = orgAdminUIService.Create(account);
+                }
+            }
+        }
+
+        private class MultiselectCases : TheoryData<List<Account_dg_Multiselect>>
+        {
+            public MultiselectCases()
+            {
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item3 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item3 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+                Add(new List<Account_dg_Multiselect> { Account_dg_Multiselect.Item1, Account_dg_Multiselect.Item2, Account_dg_Multiselect.Item3, Account_dg_Multiselect.Item4 });
+            }
+        }
+
+        [Theory]
+        [ClassData(typeof(MultiselectCases))]
+        public void TestMultiselectConditionOperatorIn(List<Account_dg_Multiselect> optionSetValueCollection)
+        {
+            using (var context = new Xrm(orgAdminUIService))
+            {
+                var optionSetValues = optionSetValueCollection.Select(_ => (int)_).ToList();
+                for (int i = 0; i < 2; i++)
+                {
+                    optionSetValues.Reverse();
+                    string values = string.Empty;
+                    foreach (var value in optionSetValues)
+                    {
+                        values += $"<value>{value}</value>";
+                    }
+
+                    var fetchXml =
+                    $@"<fetch mapping='logical' version='1.0'>
+                        <entity name='account'>
+                            <filter>
+                                <condition attribute='dg_multiselect' operator='in'>
+                                    {values}
+                                </condition>
+                            </filter>
+                        </entity>
+                    </fetch>";
+                    EntityCollection result = Fetch(fetchXml);
+                    Assert.Equal(2, result.Entities.Count);
+                }
+            }
+        }
+
+        [Theory]
+        [ClassData(typeof(MultiselectCases))]
+        public void TestMultiselectConditionOperatorNotIn(List<Account_dg_Multiselect> optionSetValueCollection)
+        {
+            using (var context = new Xrm(orgAdminUIService))
+            {
+                var fetchXmlCount =
+                    $@"<fetch mapping='logical' version='1.0'>
+                        <entity name='account'>
+                            <attribute name='name' />
+                        </entity>
+                    </fetch>";
+                var count = Fetch(fetchXmlCount).Entities.Count;
+                var optionSetValues = optionSetValueCollection.Select(_ => (int)_).ToList();
+                for (int i = 0; i < 2; i++)
+                {
+                    optionSetValues.Reverse();
+                    string values = string.Empty;
+                    foreach (var value in optionSetValues)
+                    {
+                        values += $"<value>{value}</value>";
+                    }
+
+                    var fetchXml =
+                    $@"<fetch mapping='logical' version='1.0'>
+                        <entity name='account'>
+                            <filter>
+                                <condition attribute='dg_multiselect' operator='not-in'>
+                                    {values}
+                                </condition>
+                            </filter>
+                        </entity>
+                    </fetch>";
+                    EntityCollection result = Fetch(fetchXml);
+                    Assert.Equal(count - 2, result.Entities.Count);
+                }
+            }
         }
 
         [Theory]
