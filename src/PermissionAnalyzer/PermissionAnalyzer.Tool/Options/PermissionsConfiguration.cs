@@ -26,4 +26,9 @@ public record PermissionsConfiguration
     /// (<c>*.Tests</c>), or against the path relative to the solution when they contain a slash (<c>tests/*</c>).
     /// </summary>
     public string[] ExcludeProjects { get; init; } = [];
+
+    /// <summary>
+    /// Methods to analyze as entry points besides the discovered ones, such as <c>Contoso.Sync.Importer.Run</c>.
+    /// </summary>
+    public string[] EntryPoints { get; init; } = [];
 }

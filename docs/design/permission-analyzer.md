@@ -124,7 +124,7 @@ solution ──► compile ──► discover entry points ──► extract ope
 | Kind | Detected by | Identity |
 |---|---|---|
 | Plugin step (XrmPluginCore) | `RegisterPluginStep<T>(EventOperation, ExecutionStage, handler)` and `RegisterStep<T, TService>(…, service => …)` / `nameof(TService.Method)` in plugin constructors; `.AddFilteredAttributes`, `.AddImage` read as well | `T` → table, operation, stage, handler method |
-| Plugin step (metadata) | `Metadata/` plugin registrations (`MetaPlugin`): message, entity, stage, `ImpersonatingUserId` | Matched to classes by `PluginTypeAssemblyName`; runs-as from impersonation |
+| Plugin step (metadata) | `Metadata/` plugin registrations (`MetaPlugin`): message, entity, stage, `ImpersonatingUserId` | Matched to classes by type name (`MetaPlugin.AssemblyName`) and `PluginTypeAssemblyName`, falling back to the type name alone; runs-as from impersonation. For classes that also register steps in code, only the impersonation is taken, onto the matching step |
 | Plain `IPlugin` | Classes implementing `IPlugin` with steps only in metadata | `Execute(IServiceProvider)` |
 | Custom API | `RegisterCustomAPI(...)` (XrmPluginCore) and custom API metadata | API unique name |
 | Code activity | `CodeActivity` subclasses (`Execute(CodeActivityContext)`) | Type name |
@@ -134,6 +134,15 @@ solution ──► compile ──► discover entry points ──► extract ope
 
 Discovery uses the semantic model (symbol names), not text matching, so aliases and partial
 classes work.
+
+Entry point ids: `plugin:{type}:{message}:{table|any}:{stage}` for steps (`{type}` is the
+reflection name, with `+` for nested types), `plugin:{type}` for a plain `IPlugin` without known
+steps, `custom-api:{name}`, `activity:{type}`, `function:{name}` and `method:{method id}`. Abstract
+plugin classes, and plugin classes that other plugin classes derive from, are not entry points
+themselves.
+
+Methods with operations that no entry point reaches are reported under `unreached`, analyzed as if
+called by the caller (assumed), so code called from outside the solution is never silently dropped.
 
 ### 5.2 Operation extraction
 
@@ -209,12 +218,13 @@ are checked:
 |---|---|
 | `factory.CreateOrganizationService(context.UserId)` / `localContext.OrganizationService` | **Caller** (or the step's impersonating user) |
 | `factory.CreateOrganizationService(null)` / `OrganizationAdminService` | **System**: no role privilege needed, listed for information |
-| `factory.CreateOrganizationService(<constant guid>)` | **Specific user** (by id) |
-| Step with `ImpersonatingUserId` in metadata | **Impersonated user** |
+| `factory.CreateOrganizationService(<constant guid>)` | **User** (by id) |
+| Step with `ImpersonatingUserId` in metadata, or `.SetUserContext(<guid>)` in XrmPluginCore | **User** (the impersonating user) replaces Caller for the step |
 | Azure Function / app code (`ServiceClient`, injected `IOrganizationService`) | **Application user**, mapped to roles in `XrmMockup:Permissions:Principals` (§6.3); a `CallerId` assignment switches it to **Caller (impersonated)** |
 
-When the source can't be determined, the operation defaults to **Caller** and is flagged
-(the conservative choice).
+When the source can't be determined, the operation defaults to the entry point's caller (Caller
+for plugins, custom APIs and activities; Application user for functions and `--entry` methods) and
+is flagged as assumed, with the reason listed under `assumptions`.
 
 ### 5.5 Call graph and dependency injection
 
@@ -248,6 +258,35 @@ impersonated. Mockup does the same through `RequestExecutionPipeline`. The analy
 This is what makes the "query a specific operation" mode useful: `Update account` gives the
 full set of privileges a user needs for that update to succeed, including every plugin that
 fires.
+
+**Cascades from Azure Functions and app code.** The same expansion applies to the operations an
+Azure Function (or an `--entry` method) performs, so `check --role "Integration App" --function
+ProcessOrder` and `required --function ProcessOrder --role …` cover the plugins the function's
+requests fire, not just the function's own calls. A request that fails in a plugin fails for the
+function too. Specifics:
+
+- **Identity**: fired steps run as the identity of the operation that fired them: the
+  application user, or the impersonated user when the function sets `CallerId` (Dataverse then
+  runs plugins as that user). A step's own impersonation (`ImpersonatingUserId`,
+  `SetUserContext`) overrides it, as in step 3, and is checked against the `Users` mapping
+  (§6.3) instead of the function's roles. Operations that run as System still fire plugins;
+  those run as System unless impersonated.
+- **Plugin code location**: function apps rarely reference their plugin projects, so the plugin
+  code isn't in the analyzed solution. The step registry still comes from `Metadata/`, and the
+  plugin code is added with a setting that lists extra solutions or projects to load for
+  cascades only (for example `XrmMockup:Permissions:PluginSolutions`, or a repeatable
+  `--plugins <path>`). Their own entry points aren't reported unless asked for.
+- **Steps without code**: a metadata step whose plugin type isn't in any loaded code is listed
+  as a finding ("step `X` fires but its code wasn't analyzed"), so missing plugin code is never
+  silently treated as needing nothing.
+- **Unresolved operations**: an operation whose table or message is unknown can't be matched to
+  steps. It is reported as a possible cascade (basis `cascade-unknown`) rather than ignored.
+- **Output**: plugin requirements keep the full path, from the function through the request to
+  the step and into the plugin code (`ProcessOrder → OrderService.Submit → Create
+  ctx_order → plugin:Contoso.OrderPostPlugin:Create:ctx_order:PostOperation → …`), and the
+  entry point lists the steps it fires under `triggers` (§7). Asynchronous steps are included
+  and marked, since they need the same privileges even though their failure doesn't fail the
+  request.
 
 Real-time workflows (XAML in `Metadata/Workflows`) are a later extension: mockup already
 parses them, and their create/update steps can be turned into operations with the same rules.
@@ -425,18 +464,23 @@ Command-line options override the matching setting, as in the metadata tool. For
 ```jsonc
 {
   "entryPoints": [{
-    "id": "plugin:AccountPostPlugin:Update:PostOperation",
+    "id": "plugin:Contoso.AccountPostPlugin:Update:account:PostOperation",
     "kind": "PluginStep",
+    "type": "Contoso.AccountPostPlugin", "assembly": "Contoso.Plugins",
     "trigger": { "message": "Update", "table": "account", "stage": "PostOperation" },
+    "impersonatingUserId": "…",          // only when the step impersonates
+    "declaration": { "file": "Plugins/AccountPostPlugin.cs", "line": 13, "column": 13 },
     "requirements": [{
       "table": "ctx_parent", "privilege": "Create",
-      "runsAs": "Caller", "basis": "direct",
-      "sources": [{ "file": "Plugins/AccountPostPlugin.cs", "line": 37,
+      "runsAs": "Caller", "basis": "direct",   // "userId" for User, "assumed": true when guessed
+      "sources": [{ "file": "Plugins/AccountPostPlugin.cs", "line": 37, "column": 21,
                     "path": ["AccountPostPlugin.Execute"] }]
     }],
-    "unresolved": [ /* operation + location + reason */ ],
-    "triggers": [ "plugin:ContactPostPlugin:Create:PostOperation" ]
+    "unresolved": [ /* operation + location + reason + path */ ],
+    "assumptions": [ /* reason + location */ ],
+    "triggers": [ "plugin:Contoso.ContactPostPlugin:Create:contact:PostOperation" ]   // phase 4
   }],
+  "unreached": [ /* per-method manifests, as in phase 1 */ ],
   "notRoleGoverned": ["activityparty"]
 }
 ```
@@ -480,7 +524,7 @@ location of each missing privilege.
 | 1 | Project skeleton, MSBuildWorkspace loading, role loading via MetadataSkeleton, direct `IOrganizationService` CRUD with early-bound/literal tables, per-method manifest, `required` (no scope). Also pulled forward: `QueryExpression`/`AddLink`/FetchXML tables, `Associate`/`Disassociate`, loops over `RetrieveMultiple` results, `Solution`/`MetadataDirectory` configuration | First useful manifest |
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
-| 4 | Plugin cascade expansion, `--operation` scope, FilteredAttributes | "What does a user need to do X" |
+| 4 | Plugin cascade expansion, `--operation` scope, FilteredAttributes; cascades from Azure Functions and app code, including plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | Queries (QueryExpression, LinkEntity, FetchXML, LINQ), Append/AppendTo via relationship metadata, Execute/ExecuteMultiple rule table; privilege catalog + global privileges in the metadata generator, custom API execute privileges | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |

@@ -4,7 +4,7 @@ namespace XrmMockup.PermissionAnalyzer.Core.Model;
 /// A data operation whose table could not be determined statically. It is reported instead of dropped,
 /// because a privilege can't be named without a table.
 /// </summary>
-public sealed class UnresolvedOperation(string operation, IReadOnlyList<Privilege> privileges, string reason, SourceLocation source)
+public sealed class UnresolvedOperation(string operation, IReadOnlyList<Privilege> privileges, string reason, RunsAs runsAs, RequirementSource source)
 {
     /// <summary>
     /// The service operation, e.g. <c>Create</c> or <c>RetrieveMultiple</c>.
@@ -21,5 +21,7 @@ public sealed class UnresolvedOperation(string operation, IReadOnlyList<Privileg
     /// </summary>
     public string Reason { get; } = reason;
 
-    public SourceLocation Source { get; } = source;
+    public RunsAs RunsAs { get; } = runsAs;
+
+    public RequirementSource Source { get; } = source;
 }

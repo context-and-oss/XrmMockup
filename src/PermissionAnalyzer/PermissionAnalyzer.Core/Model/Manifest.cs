@@ -1,11 +1,21 @@
 namespace XrmMockup.PermissionAnalyzer.Core.Model;
 
 /// <summary>
-/// The result of an analysis: every method that performs data operations, sorted by id.
+/// The result of an analysis: every entry point with what it needs, sorted by id, and the operations no entry
+/// point reaches.
 /// </summary>
-public sealed class Manifest(IReadOnlyList<MethodManifest> methods, IReadOnlyList<string>? notRoleGoverned = null)
+public sealed class Manifest(
+    IReadOnlyList<EntryPoint> entryPoints,
+    IReadOnlyList<MethodManifest> unreached,
+    IReadOnlyList<string>? notRoleGoverned = null)
 {
-    public IReadOnlyList<MethodManifest> Methods { get; } = methods;
+    public IReadOnlyList<EntryPoint> EntryPoints { get; } = entryPoints;
+
+    /// <summary>
+    /// Methods with data operations that no entry point reaches, sorted by id. Empty when the analysis was
+    /// scoped to some entry points.
+    /// </summary>
+    public IReadOnlyList<MethodManifest> Unreached { get; } = unreached;
 
     /// <summary>
     /// Required tables that no security role mentions. XrmMockup lets every operation on these through,
@@ -14,8 +24,14 @@ public sealed class Manifest(IReadOnlyList<MethodManifest> methods, IReadOnlyLis
     public IReadOnlyList<string>? NotRoleGoverned { get; } = notRoleGoverned;
 
     /// <summary>
+    /// Every requirement, of entry points and unreached methods.
+    /// </summary>
+    public IEnumerable<Requirement> AllRequirements =>
+        EntryPoints.SelectMany(e => e.Requirements).Concat(Unreached.SelectMany(m => m.Requirements));
+
+    /// <summary>
     /// Every table that appears in a requirement, sorted.
     /// </summary>
     public IReadOnlyList<string> Tables =>
-        Methods.SelectMany(m => m.Requirements).Select(r => r.Table).Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList();
+        AllRequirements.Select(r => r.Table).Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList();
 }

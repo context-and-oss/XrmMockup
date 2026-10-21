@@ -8,5 +8,11 @@ public enum RequirementBasis
     /// <summary>
     /// Table and privilege resolved from the call itself: types, constants or local data flow.
     /// </summary>
-    Direct
+    Direct,
+
+    /// <summary>
+    /// Reached through an interface or abstract call that no dependency injection registration resolves, so
+    /// every implementation in the solution is included.
+    /// </summary>
+    AllImplementations,
 }

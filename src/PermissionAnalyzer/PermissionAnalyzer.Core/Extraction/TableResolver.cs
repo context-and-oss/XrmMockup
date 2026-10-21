@@ -44,7 +44,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
                 when IsEntityOrReference(property.Property.ContainingType) => Entity(instance),
             IConditionalOperation { WhenFalse: { } whenFalse } conditional => Name(conditional.WhenTrue).Add(Name(whenFalse)),
             ICoalesceOperation coalesce => Name(coalesce.Value).Add(Name(coalesce.WhenNull)),
-            _ => TableResolution.Unresolved(Describe(op, "table name")),
+            _ => Unknown(op, "table name", TableShape.Name),
         };
     }
 
@@ -92,7 +92,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
                 return Entity(coalesce.Value).Add(Entity(coalesce.WhenNull));
 
             default:
-                return TableResolution.Unresolved(Describe(op, "entity"));
+                return Unknown(op, "entity", TableShape.Entity);
         }
     }
 
@@ -145,7 +145,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
                 return Query(coalesce.Value, includeLinks).Add(Query(coalesce.WhenNull, includeLinks));
 
             default:
-                return TableResolution.Unresolved(Describe(op, "query"));
+                return Unknown(op, "query", includeLinks ? TableShape.Query : TableShape.QueryMainTable);
         }
     }
 
@@ -193,11 +193,39 @@ internal sealed class TableResolver(XrmSymbols symbols)
     public TableResolution Fetch(IOperation? operation, bool includeLinks = true)
     {
         var result = TableResolution.Empty;
-        foreach (var template in Templates(operation, topLevel: true, result))
+        foreach (var template in Templates(operation, topLevel: true, result, includeLinks))
         {
             result.Add(ParseFetch(template, includeLinks));
         }
         return result;
+    }
+
+    /// <summary>
+    /// The tables of a value read as <paramref name="shape"/>, such as an argument bound to a parameter slot.
+    /// </summary>
+    public TableResolution Resolve(IOperation? operation, TableShape shape) => shape switch
+    {
+        TableShape.Name => Name(operation),
+        TableShape.Entity => Entity(operation),
+        TableShape.Query => Query(operation),
+        TableShape.QueryMainTable => Query(operation, includeLinks: false),
+        TableShape.Fetch => Fetch(operation),
+        TableShape.FetchMainTable => Fetch(operation, includeLinks: false),
+        TableShape.EntityReferences => EntityReferences(operation),
+        _ => Records(operation),
+    };
+
+    /// <summary>
+    /// The shapes a parameter of <paramref name="type"/> can be read as; empty when it can't name a table.
+    /// </summary>
+    public IReadOnlyList<TableShape> ShapesOf(ITypeSymbol type)
+    {
+        if (type.SpecialType == SpecialType.System_String) return [TableShape.Name, TableShape.Fetch, TableShape.FetchMainTable];
+        if (IsEntityOrReference(type) || type is ITypeParameterSymbol) return [TableShape.Entity];
+        if (symbols.Is(type, symbols.QueryBase)) return [TableShape.Query, TableShape.QueryMainTable];
+        if (symbols.Is(type, symbols.EntityReferenceCollection)) return [TableShape.EntityReferences];
+        if (symbols.Is(type, symbols.EntityCollection)) return [TableShape.Records];
+        return [];
     }
 
     /// <summary>
@@ -211,7 +239,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
             IInvocationOperation invocation when symbols.ServiceOperation(invocation.TargetMethod) == "RetrieveMultiple" =>
                 Query(invocation.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == 0), includeLinks: false).OrUnresolved("query has no table name"),
             ILocalReferenceOperation local => FromLocal(local, Records),
-            _ => TableResolution.Unresolved(Describe(op, "records")),
+            _ => Unknown(op, "records", TableShape.Records),
         };
     }
 
@@ -235,7 +263,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
         };
 
         return elements is null
-            ? TableResolution.Unresolved(Describe(op, "related records"))
+            ? Unknown(op, "related records", TableShape.EntityReferences)
             : elements.Aggregate(TableResolution.Empty, (result, element) => result.Add(Entity(element)));
     }
 
@@ -243,7 +271,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
     /// The possible texts of a FetchXML string. Runtime parts become <see cref="Hole"/>, so the structure around
     /// them can still be parsed. Values that are runtime as a whole are reported in <paramref name="failures"/>.
     /// </summary>
-    private List<string> Templates(IOperation? operation, bool topLevel, TableResolution failures)
+    private List<string> Templates(IOperation? operation, bool topLevel, TableResolution failures, bool includeLinks = true)
     {
         var op = Unwrap(operation);
         if (op is null)
@@ -292,7 +320,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
                     foreach (var value in LocalValues(local.Local, Root(local), failures))
                     {
                         if (value.IsLoopCollection) failures.Add(TableResolution.Unresolved($"local '{local.Local.Name}' is a loop variable"));
-                        else templates.AddRange(Templates(value.Operation, topLevel, failures));
+                        else templates.AddRange(Templates(value.Operation, topLevel, failures, includeLinks));
                     }
                     return templates.Distinct(StringComparer.Ordinal).ToList();
                 }
@@ -303,14 +331,14 @@ internal sealed class TableResolver(XrmSymbols symbols)
             }
 
             case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Templates(conditional.WhenTrue, topLevel, failures).Concat(Templates(whenFalse, topLevel, failures)).ToList();
+                return Templates(conditional.WhenTrue, topLevel, failures, includeLinks).Concat(Templates(whenFalse, topLevel, failures, includeLinks)).ToList();
 
             case ICoalesceOperation coalesce:
-                return Templates(coalesce.Value, topLevel, failures).Concat(Templates(coalesce.WhenNull, topLevel, failures)).ToList();
+                return Templates(coalesce.Value, topLevel, failures, includeLinks).Concat(Templates(coalesce.WhenNull, topLevel, failures, includeLinks)).ToList();
 
             default:
                 if (!topLevel) return [Hole.ToString()];
-                failures.Add(TableResolution.Unresolved(Describe(op, "FetchXML")));
+                failures.Add(Unknown(op, "FetchXML", includeLinks ? TableShape.Fetch : TableShape.FetchMainTable));
                 return [];
         }
     }
@@ -512,6 +540,14 @@ internal sealed class TableResolver(XrmSymbols symbols)
     }
 
     private readonly record struct LocalValue(IOperation Operation, bool IsLoopCollection);
+
+    /// <summary>
+    /// A value the resolver can't follow. A method parameter becomes a slot for the call graph to fill in.
+    /// </summary>
+    private static TableResolution Unknown(IOperation? operation, string what, TableShape shape) =>
+        operation is IParameterReferenceOperation { Parameter.ContainingSymbol: IMethodSymbol method } parameter
+            ? TableResolution.Slot(new TableSlot(Nodes.Id(method), parameter.Parameter.Ordinal, shape, Describe(operation, what)))
+            : TableResolution.Unresolved(Describe(operation, what));
 
     private static string Describe(IOperation? operation, string what) => operation switch
     {

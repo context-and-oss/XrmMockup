@@ -10,6 +10,20 @@ public class DeterminismTests
         {
             class B { void Z(IOrganizationService s) { s.Delete("contact", Guid.Empty); s.Create(new Account()); } }
             class A { void Y(IOrganizationService s, Entity e) { s.Update(e); s.Retrieve("account", Guid.Empty, new ColumnSet()); } }
+
+            public class P : Plugin
+            {
+                public P()
+                {
+                    RegisterPluginStep<Contact>(EventOperation.Update, ExecutionStage.PostOperation, c => new B2().Run(c.OrganizationService));
+                    RegisterPluginStep<Account>(EventOperation.Create, ExecutionStage.PreOperation, c => new B2().Run(c.OrganizationAdminService));
+                }
+            }
+
+            public interface IStore { void Save(IOrganizationService s); }
+            public class S1 : IStore { public void Save(IOrganizationService s) => s.Create(new Contact()); }
+            public class S2 : IStore { public void Save(IOrganizationService s) => s.Create(new Account()); }
+            class B2 { public IStore? Store; public void Run(IOrganizationService s) { Store!.Save(s); s.Delete("contact", Guid.Empty); } }
         }
         """;
 
@@ -18,11 +32,11 @@ public class DeterminismTests
     {
         // A multi-targeted project is analyzed once per target framework
         var once = new ManifestBuilder(Analyze.Root);
-        once.Add(Analyze.Compile(Source, "net462"));
+        once.Add(Analyze.Compile(Source));
 
         var twice = new ManifestBuilder(Analyze.Root);
-        twice.Add(Analyze.Compile(Source, "net10"));
-        twice.Add(Analyze.Compile(Source, "net462"));
+        twice.Add(Analyze.Compile(Source));
+        twice.Add(Analyze.Compile(Source));
 
         foreach (var writer in new IManifestWriter[] { new TextManifestWriter(), new JsonManifestWriter() })
         {
@@ -31,10 +45,27 @@ public class DeterminismTests
     }
 
     [Fact]
-    public void MethodsAreSortedOrdinally()
+    public void OutputDoesNotDependOnCompilationOrder()
+    {
+        var forward = new ManifestBuilder(Analyze.Root);
+        forward.Add(Analyze.Compile(Source, "Contoso.A"));
+        forward.Add(Analyze.Compile(Source, "Contoso.B"));
+
+        var backward = new ManifestBuilder(Analyze.Root);
+        backward.Add(Analyze.Compile(Source, "Contoso.B"));
+        backward.Add(Analyze.Compile(Source, "Contoso.A"));
+
+        foreach (var writer in new IManifestWriter[] { new TextManifestWriter(), new JsonManifestWriter() })
+        {
+            Assert.Equal(Write(writer, forward), Write(writer, backward));
+        }
+    }
+
+    [Fact]
+    public void UnreachedMethodsAreSortedOrdinally()
     {
         var manifest = Analyze.Code(Source);
-        Assert.Equal(["Contoso.A.Y(IOrganizationService, Entity)", "Contoso.B.Z(IOrganizationService)"], manifest.Methods.Select(m => m.Id));
+        Assert.Equal(["Contoso.A.Y(IOrganizationService, Entity)", "Contoso.B.Z(IOrganizationService)"], manifest.Unreached.Select(m => m.Id));
     }
 
     [Fact]
@@ -44,6 +75,19 @@ public class DeterminismTests
         builder.Add(Analyze.Compile(Source));
         var text = Write(new JsonManifestWriter(), builder) + Write(new TextManifestWriter(), builder);
         Assert.DoesNotContain('\r', text);
+    }
+
+    [Fact]
+    public void JsonListsEntryPointsWithIdentities()
+    {
+        var builder = new ManifestBuilder(Analyze.Root);
+        builder.Add(Analyze.Compile(Source));
+        var json = Write(new JsonManifestWriter(), builder);
+
+        Assert.Contains("\"id\": \"plugin:Contoso.P:Update:contact:PostOperation\"", json);
+        Assert.Contains("\"runsAs\": \"System\"", json);
+        Assert.Contains("\"basis\": \"all-implementations\"", json);
+        Assert.Contains("\"unreached\": [", json);
     }
 
     private static string Write(IManifestWriter writer, ManifestBuilder builder)

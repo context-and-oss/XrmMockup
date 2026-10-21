@@ -12,7 +12,7 @@ using XrmMockup.PermissionAnalyzer.Tool.Workspace;
 namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 
 /// <summary>
-/// <c>required</c>: the privileges the code needs, per method.
+/// <c>required</c>: the privileges the code needs, per entry point.
 /// </summary>
 internal static class RequiredCommand
 {
@@ -57,8 +57,17 @@ internal static class RequiredCommand
             Description = CliOptions.Output.Description
         };
 
-        var command = new Command(Name, "List the table privileges the code needs, per method")
+        var pluginOption = new Option<string?>(CliOptions.Plugin.Primary) { Description = CliOptions.Plugin.Description };
+        var customApiOption = new Option<string?>(CliOptions.CustomApi.Primary) { Description = CliOptions.CustomApi.Description };
+        var functionOption = new Option<string?>(CliOptions.Function.Primary) { Description = CliOptions.Function.Description };
+        var entryOption = new Option<string[]>(CliOptions.Entry.Primary) { Description = CliOptions.Entry.Description };
+
+        var command = new Command(Name, "List the table privileges the code needs, per entry point")
         {
+            pluginOption,
+            customApiOption,
+            functionOption,
+            entryOption,
             solutionOption,
             projectOption,
             metadataOption,
@@ -74,6 +83,12 @@ internal static class RequiredCommand
             {
                 result.AddError($"Use either {CliOptions.Solution.Primary} or {CliOptions.Project.Primary}, not both.");
             }
+
+            var scopes = new Option[] { pluginOption, customApiOption, functionOption, entryOption }.Count(o => result.GetResult(o) is not null);
+            if (scopes > 1)
+            {
+                result.AddError($"Use only one of {CliOptions.Plugin.Primary}, {CliOptions.CustomApi.Primary}, {CliOptions.Function.Primary} and {CliOptions.Entry.Primary}.");
+            }
         });
 
         command.SetAction((parseResult, cancellationToken) => RunAsync(
@@ -84,6 +99,8 @@ internal static class RequiredCommand
             parseResult.GetValue(configOption),
             parseResult.GetValue(formatOption)!,
             parseResult.GetValue(outputOption),
+            Scope(parseResult.GetValue(pluginOption), parseResult.GetValue(customApiOption), parseResult.GetValue(functionOption), parseResult.GetValue(entryOption)),
+            parseResult.GetValue(entryOption) ?? [],
             cancellationToken));
 
         return command;
@@ -97,6 +114,8 @@ internal static class RequiredCommand
         string? config,
         string format,
         string? output,
+        EntryPointSelector? scope,
+        string[] entryMethods,
         CancellationToken cancellationToken)
     {
         using var loggerFactory = ToolLogging.Create();
@@ -115,9 +134,27 @@ internal static class RequiredCommand
 
             var root = Path.GetDirectoryName(settings.Target)!;
             var builder = new ManifestBuilder(root);
+            if (settings.MetadataDirectory is { } metadataDirectory)
+            {
+                var steps = PluginStepLoader.Load(metadataDirectory);
+                logger.LogInformation("Loaded {Count} plugin steps from {Directory}", steps.Count, metadataDirectory);
+                builder.AddPluginSteps(steps);
+            }
+            builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(entryMethods).Distinct(StringComparer.Ordinal));
+
             var filter = new ProjectFilter(root, settings.ExcludeProjects);
             await new CodeLoader(loggerFactory.CreateLogger<CodeLoader>()).AddAsync(settings.Target, builder, filter, cancellationToken);
-            var manifest = builder.Build(roles?.SelectMany(r => r.Privileges.Keys));
+
+            foreach (var unmatched in builder.UnmatchedEntryMethods())
+            {
+                logger.LogWarning("No method in the solution matches entry point {Method}", unmatched);
+            }
+
+            var manifest = builder.Build(roles?.SelectMany(r => r.Privileges.Keys), scope);
+            if (scope is not null && manifest.EntryPoints.Count == 0)
+            {
+                throw new ToolException($"No entry point matches {scope}");
+            }
 
             IManifestWriter writer = format == "json" ? new JsonManifestWriter() : new TextManifestWriter();
             if (output is null)
@@ -146,11 +183,18 @@ internal static class RequiredCommand
         }
     }
 
+    private static EntryPointSelector? Scope(string? plugin, string? customApi, string? function, string[]? entry) =>
+        plugin is not null ? EntryPointSelector.Plugin(plugin)
+        : customApi is not null ? EntryPointSelector.CustomApi(customApi)
+        : function is not null ? EntryPointSelector.Function(function)
+        : entry is { Length: > 0 } ? EntryPointSelector.Methods(entry)
+        : null;
+
     private static IReadOnlyList<RoleDefinition>? LoadRoles(string? metadataDirectory, ILogger logger)
     {
         if (metadataDirectory is null)
         {
-            logger.LogInformation("No metadata folder found; analyzing without security roles");
+            logger.LogWarning("No metadata folder found, so security roles and plugin step registrations aren't used. Pass --metadata or set XrmMockup:Permissions:MetadataDirectory");
             return null;
         }
 

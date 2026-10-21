@@ -161,7 +161,7 @@ public class ExtractionTests
         Assert.Equal("Update", unresolved.Operation);
         Assert.Equal([Privilege.Write], unresolved.Privileges);
         Assert.Equal("entity comes from parameter 'target'", unresolved.Reason);
-        Assert.Equal(("Code.cs", 15, 74), (unresolved.Source.File, unresolved.Source.Line, unresolved.Source.Column));
+        Assert.Equal(("Code.cs", 18, 74), (unresolved.Source.Location.File, unresolved.Source.Location.Line, unresolved.Source.Location.Column));
     }
 
     [Fact]

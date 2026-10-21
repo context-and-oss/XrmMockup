@@ -32,10 +32,13 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
         else
         {
             await workspace.OpenProjectAsync(path, cancellationToken: cancellationToken);
-            // A project with several target frameworks loads as one project per framework, and the
-            // workspace also holds the projects it references. Analyze every framework of this project only.
+            // A project with several target frameworks loads as one project per framework. The projects it
+            // references are analyzed too, because entry points in this project call into them, such as
+            // function apps whose Dataverse calls are in a shared library
             var fullPath = Path.GetFullPath(path);
-            projects = workspace.CurrentSolution.Projects.Where(p => string.Equals(p.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
+            var solution = workspace.CurrentSolution;
+            var roots = solution.Projects.Where(p => string.Equals(p.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
+            projects = WithReferences(solution, roots);
         }
 
         var analyzed = 0;
@@ -117,6 +120,26 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
         {
             throw new ToolException($"No project in {path} references the Dataverse SDK, so there is nothing to analyze. If one should, restore or build it on this machine first: until then its package references don't resolve.");
         }
+    }
+
+    /// <summary>
+    /// The given projects and every project they reference, directly or not.
+    /// </summary>
+    private static IEnumerable<Project> WithReferences(Solution solution, IEnumerable<Project> roots)
+    {
+        var found = new Dictionary<ProjectId, Project>();
+        var pending = new Stack<Project>(roots);
+        while (pending.Count > 0)
+        {
+            var project = pending.Pop();
+            if (found.ContainsKey(project.Id)) continue;
+            found.Add(project.Id, project);
+            foreach (var reference in project.ProjectReferences)
+            {
+                if (solution.GetProject(reference.ProjectId) is { } referenced) pending.Push(referenced);
+            }
+        }
+        return found.Values;
     }
 
     private static bool IsSolution(string path) =>

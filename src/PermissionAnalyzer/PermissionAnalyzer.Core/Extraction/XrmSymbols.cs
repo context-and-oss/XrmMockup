@@ -25,11 +25,15 @@ internal sealed class XrmSymbols
         EntityReference = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.EntityReference");
         EntityReferenceCollection = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.EntityReferenceCollection");
         EntityCollection = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.EntityCollection");
+        QueryBase = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.QueryBase");
         QueryExpression = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.QueryExpression");
         QueryByAttribute = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.QueryByAttribute");
         FetchExpression = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.FetchExpression");
         LinkEntity = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.LinkEntity");
         EntityLogicalNameAttribute = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Client.EntityLogicalNameAttribute");
+        Plugin = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IPlugin");
+        OrganizationServiceFactory = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IOrganizationServiceFactory");
+        ExecutionContext = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IExecutionContext");
     }
 
     /// <summary>
@@ -41,11 +45,15 @@ internal sealed class XrmSymbols
     public INamedTypeSymbol? EntityReference { get; }
     public INamedTypeSymbol? EntityReferenceCollection { get; }
     public INamedTypeSymbol? EntityCollection { get; }
+    public INamedTypeSymbol? QueryBase { get; }
     public INamedTypeSymbol? QueryExpression { get; }
     public INamedTypeSymbol? QueryByAttribute { get; }
     public INamedTypeSymbol? FetchExpression { get; }
     public INamedTypeSymbol? LinkEntity { get; }
     public INamedTypeSymbol? EntityLogicalNameAttribute { get; }
+    public INamedTypeSymbol? Plugin { get; }
+    public INamedTypeSymbol? OrganizationServiceFactory { get; }
+    public INamedTypeSymbol? ExecutionContext { get; }
 
     /// <summary>
     /// Returns <c>null</c> when the compilation doesn't reference the Dataverse SDK, so it can't make service calls.
@@ -65,6 +73,20 @@ internal sealed class XrmSymbols
         }
         return false;
     }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> is, or implements, <paramref name="expected"/>, an interface.
+    /// </summary>
+    public static bool Implements(ITypeSymbol? type, INamedTypeSymbol? expected) =>
+        type is not null && expected is not null
+        && (SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, expected)
+            || type.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, expected)));
+
+    /// <summary>
+    /// Whether values of <paramref name="type"/> are organization services, so the identity they run as is tracked.
+    /// </summary>
+    public bool IsService(ITypeSymbol? type) =>
+        type is not null && ServiceInterfaces.Any(s => Implements(type, s));
 
     /// <summary>
     /// The table of an early-bound type, read from <c>[EntityLogicalName]</c> on the type or a base type.
