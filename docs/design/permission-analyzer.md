@@ -77,24 +77,30 @@ into their test projects.
 ```
 src/PermissionAnalyzer/
   PermissionAnalyzer.Core/      netstandard2.0
-    Model/                      Privilege, RequiredPrivilege, EntryPoint, Operation, Manifest
+    Model/                      Privilege, Requirement, RoleDefinition, EntryPoint, Manifest
     Discovery/                  Entry-point discovery (plugins, custom APIs, activities, functions)
     Extraction/                 Roslyn operation extraction + table/attribute resolution
     Rules/                      Message → privilege rule table (mirrors mockup handlers)
     Graph/                      Call graph, DI resolution, plugin cascade expansion
-    Roles/                      Role loading (MetadataSkeleton), coverage
+    Analysis/                   Manifest building, coverage of RoleDefinitions
   PermissionAnalyzer.Tool/      net10.0, PackAsTool, command `xrmmockup-permissions`
-  PermissionAnalyzer.Tests/     xUnit; analyzes tests/TestPluginAssembly365 + new fixtures
+    Metadata/                   Role loading (MetadataSkeleton) → RoleDefinition
+    Workspace/                  MSBuildWorkspace loading
+  PermissionAnalyzer.Tests/     xUnit; in-memory compilations against the real SDK + test metadata
 ```
 
 - Core targets `netstandard2.0` (Roslyn APIs only, no MSBuild) so the same rules can later
   ship as a `DiagnosticAnalyzer` package for IDE warnings, reading `Metadata/` via
   `AdditionalFiles`.
-- The Tool loads the consumer solution with `Microsoft.Build.Locator` +
-  `Microsoft.CodeAnalysis.Workspaces.MSBuild` (`MSBuildWorkspace`) and passes compilations to Core.
-- Role and metadata files are read with the shared `MetadataSkeleton.projitems` (same
-  `DataContractSerializer` format XrmMockup and the metadata generator use), so there is no
-  second definition of the model.
+- The Tool loads the consumer solution with `Microsoft.CodeAnalysis.Workspaces.MSBuild`
+  (`MSBuildWorkspace`) and passes compilations to Core. Since Roslyn 4.x the workspace builds
+  in an out-of-process build host, so `Microsoft.Build.Locator` isn't needed. A multi-targeted
+  project loads once per target framework; the duplicate findings merge into one.
+- Role and metadata files are read in the Tool with the shared `MetadataSkeleton.projitems`
+  (same `DataContractSerializer` format XrmMockup and the metadata generator use), so there is
+  no second definition of the model. The skeleton depends on the Dataverse SDK, so the Tool
+  converts each role to Core's SDK-free `RoleDefinition`, and Core stays `netstandard2.0` with
+  Roslyn as its only dependency.
 
 Pipeline:
 
@@ -316,6 +322,10 @@ xrmmockup-permissions check --role "Integration App" --function ProcessOrder
 
 - Repeating `--role` combines roles (union of privileges, highest depth wins), the same way
   mockup combines a principal's roles in `Security.JoinPrivileges`.
+- **Any depth counts**: a privilege is covered when the combined roles grant it at any depth
+  (`User`, `BusinessUnit`, `ParentChildBusinessUnit` or `Organization`). The granted depth is
+  shown next to the requirement, but it doesn't affect the result or the exit code (§8). A
+  minimum-depth option is a possible future feature (§10).
 - With no scope and an app-user mapping in `appsettings.json`, each Azure Function is checked against
   its configured roles.
 - Output: granted / missing per `(table, privilege)` with the depth the role grants, the
@@ -362,8 +372,12 @@ conventions:
 - Settings live under `XrmMockup:Permissions`, next to the existing `XrmMockup:Metadata`
   section. Each setting is a property on a `PermissionsConfiguration` record
   (`SectionPath = "XrmMockup:Permissions"`), like `MetadataConfiguration`.
-- The metadata folder defaults to `XrmMockup:Metadata:OutputDirectory`, so a project that
-  already generates metadata needs no extra path setting.
+- The metadata folder is, in order: `--metadata`, `XrmMockup:Permissions:MetadataDirectory`,
+  `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` when it exists. A project that already
+  generates metadata needs no extra path setting. Configured paths are relative to the config
+  file; command-line paths are relative to the current directory.
+- Without `--solution`, `--project` or `Solution`, the tool uses the single `*.sln`/`*.slnx` in
+  the current directory.
 - The tool makes no Dataverse connection, so it ignores `DataverseUrl` and
   `DataverseCredentialType`.
 
@@ -379,6 +393,10 @@ The section holds what static analysis can't know:
     },
     "Permissions": {
       "Solution": "./src/Contoso.sln",
+      "MetadataDirectory": "./tests/Metadata",   // optional, see above
+      // Projects to leave out, e.g. tests. Wildcards; a pattern with '/' matches the solution-relative path.
+      // --exclude/-x adds to these.
+      "ExcludeProjects": ["*.Tests", "tests/*"],
       // Azure Function apps / app code: which roles their application user has
       "Principals": {
         "Contoso.Functions": { "Roles": ["Integration App"] },
@@ -429,7 +447,8 @@ location of each missing privilege.
 
 - **Depth**: the report shows the depth each role grants (`User`, `BusinessUnit`,
   `ParentChildBusinessUnit`, `Organization`) next to each requirement, but can't prove it is
-  enough, because that depends on record ownership at runtime.
+  enough, because that depends on record ownership at runtime. For now any depth counts as
+  covered (§6.2).
 - Table names computed at runtime, reflection, `dynamic`, and requests built in other
   assemblies (binary-only references) come out as `Unresolved`.
 - Interface dispatch without DI registrations over-approximates (all implementations).
@@ -457,13 +476,21 @@ location of each missing privilege.
 
 | Phase | Scope | Outcome |
 |---|---|---|
-| 1 | Project skeleton, MSBuildWorkspace loading, role loading via MetadataSkeleton, direct `IOrganizationService` CRUD with early-bound/literal tables, per-method manifest, `required` (no scope) | First useful manifest |
+| 1 | Project skeleton, MSBuildWorkspace loading, role loading via MetadataSkeleton, direct `IOrganizationService` CRUD with early-bound/literal tables, per-method manifest, `required` (no scope). Also pulled forward: `QueryExpression`/`AddLink`/FetchXML tables, `Associate`/`Disassociate`, loops over `RetrieveMultiple` results, `Solution`/`MetadataDirectory` configuration | First useful manifest |
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
 | 4 | Plugin cascade expansion, `--operation` scope, FilteredAttributes | "What does a user need to do X" |
 | 5 | Queries (QueryExpression, LinkEntity, FetchXML, LINQ), Append/AppendTo via relationship metadata, Execute/ExecuteMultiple rule table; privilege catalog + global privileges in the metadata generator, custom API execute privileges | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
-| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |
+| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |
+
+**Idea: minimum required depth.** A `--min-depth` option (or per-table setting) that only
+counts a privilege as covered at or above a given depth, so CI could, for example, require
+`Organization` Read on reference tables. It needs a detailed specification before it is
+built: whether the minimum applies globally, per table, per privilege or per entry point;
+how it interacts with combined roles and with tables no role governs; how it relates to the
+ownership XrmMockup actually checks at runtime (owner, business unit, sharing); and how it is
+configured in `XrmMockup:Permissions`. Deferred until then.
 
 ## 11. Decisions
 
@@ -477,5 +504,7 @@ location of each missing privilege.
   catalog added to the metadata generator (§5.7).
 - **Configuration**: a `XrmMockup:Permissions` section in the shared `appsettings.json`,
   loaded the same way as the metadata tool. There is no separate config file (§6.3).
+- **Any depth counts**: role coverage treats a privilege granted at any depth as covered,
+  and only reports the depth. A minimum-depth check is deferred until it is specified (§10).
 - **Role suggestions deferred**: the first version answers "what is needed" and "do these
   roles cover it". Working out which roles would cover a requirement comes later.

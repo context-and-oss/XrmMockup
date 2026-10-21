@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- netstandard2.0 so the same rules can later run inside a Roslyn DiagnosticAnalyzer -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>XrmMockup.PermissionAnalyzer.Core</RootNamespace>
+    <AssemblyName>XrmMockup.PermissionAnalyzer.Core</AssemblyName>
+    <!-- Internal library, not published as NuGet -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+  </ItemGroup>
+</Project>

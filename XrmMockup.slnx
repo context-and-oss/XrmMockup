@@ -19,6 +19,11 @@
     <File Path="src/MetadataGen/scripts/Compare-MetadataGenerators.ps1" />
     <File Path="src/MetadataGen/scripts/Regenerate-Metadata.ps1" />
   </Folder>
+  <Folder Name="/PermissionAnalyzer/">
+    <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Core/PermissionAnalyzer.Core.csproj" />
+    <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Tests/PermissionAnalyzer.Tests.csproj" />
+    <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj" />
+  </Folder>
   <Folder Name="/project/">
     <File Path=".github/workflows/ci.yml" />
     <File Path=".github/workflows/release.yml" />

@@ -90,6 +90,16 @@ There are two metadata generators:
   - `MetadataGenerator.Tool` - CLI entry point, packaged as a .NET tool (`xrmmockup-metadata`)
   - `MetadataGenerator.Tool.Tests` - Integration tests using XrmMockup365. To regenerate test metadata and context classes, run: `.\scripts\Regenerate-TestMetadata.ps1` (use `-ContextOnly` to only regenerate context classes). Always use early-bound entity types in tests (e.g., `new Workflow { Name = "Test" }` instead of `new Entity("workflow") { ["name"] = "Test" }`).
 
+## Permission Analyzer
+
+`src/PermissionAnalyzer/` holds a separate .NET tool (`xrmmockup-permissions`) that statically analyzes a consumer codebase for the Dataverse table privileges it needs. Design: `docs/design/permission-analyzer.md`.
+
+- `PermissionAnalyzer.Core` (netstandard2.0, Roslyn only) - operation extraction (`Extraction/`), manifest building (`Analysis/`) and the SDK-free model
+- `PermissionAnalyzer.Tool` - CLI, `MSBuildWorkspace` loading, `appsettings.json` (`XrmMockup:Permissions`), and security role loading through the shared MetadataSkeleton
+- `PermissionAnalyzer.Tests` - compiles snippets in memory against the real SDK; `dotnet test src/PermissionAnalyzer/PermissionAnalyzer.Tests`
+
+Output must stay deterministic: use ordinal comparers, sort everything, and write `\n` line endings.
+
 Tests consume metadata files from a `Metadata/` directory. Configure metadata generation via `appsettings.json`:
 
 ```json
