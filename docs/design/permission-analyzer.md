@@ -378,7 +378,8 @@ conventions:
   file; command-line paths are relative to the current directory.
 - Without `--solution`, `--project` or `Solution`, the tool uses the single `*.sln`/`*.slnx` in
   the current directory.
-- The tool makes no Dataverse connection, so it ignores `DataverseUrl` and
+- The tool makes no Dataverse connection (a future `check --user` would be the exception,
+  §10), so it ignores `DataverseUrl` and
   `DataverseCredentialType`.
 
 The section holds what static analysis can't know:
@@ -482,7 +483,7 @@ location of each missing privilege.
 | 4 | Plugin cascade expansion, `--operation` scope, FilteredAttributes | "What does a user need to do X" |
 | 5 | Queries (QueryExpression, LinkEntity, FetchXML, LINQ), Append/AppendTo via relationship metadata, Execute/ExecuteMultiple rule table; privilege catalog + global privileges in the metadata generator, custom API execute privileges | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
-| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |
+| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |
 
 **Idea: minimum required depth.** A `--min-depth` option (or per-table setting) that only
 counts a privilege as covered at or above a given depth, so CI could, for example, require
@@ -491,6 +492,34 @@ built: whether the minimum applies globally, per table, per privilege or per ent
 how it interacts with combined roles and with tables no role governs; how it relates to the
 ownership XrmMockup actually checks at runtime (owner, business unit, sharing); and how it is
 configured in `XrmMockup:Permissions`. Deferred until then.
+
+**Idea: roles from a user's current assignments.** `check --user <username>` (e.g.
+`--user jane@contoso.com`) looks the user up in Dataverse and checks against the roles they
+actually hold, instead of a hand-written `--role` list:
+
+- Look up the `systemuser` by `domainname` (UPN), with `internalemailaddress` as a fallback.
+  An unknown or ambiguous user is an error.
+- Collect the user's directly assigned roles (`systemuserroles`) and the roles of every team
+  they belong to (`teammembership` → `teamroles`), including Microsoft Entra group teams. In
+  Dataverse, both kinds add privileges.
+- Match each role to the role definitions in `Metadata/` through its root role
+  (`parentrootroleid`), because every business unit has its own copy of a role with a
+  different id. A role that isn't in `Metadata/` is an error that suggests regenerating the
+  metadata, so the check never silently runs against fewer roles than the user has.
+- The output names each role and where it comes from (direct, or which team).
+
+Things to settle before building it:
+
+- It is the first feature that connects to Dataverse. It would reuse the metadata tool's
+  connection settings (`DataverseUrl`, `DataverseCredentialType`, `--credential-type`).
+  Only `check --user` connects; `required` stays offline (goal in §2, §6.3).
+- The result depends on live data, so it is not deterministic over time. The output should
+  record the environment URL, the user and when the roles were read. A `--save-roles` option
+  could write the resolved role list to a file, so a later run can reproduce the check
+  without connecting.
+- Whether to use the user's business unit, and the business units of the teams, once depth
+  matters (see minimum required depth above).
+- The signed-in identity needs read access to `systemuser`, `team` and `role`.
 
 ## 11. Decisions
 
