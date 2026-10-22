@@ -688,8 +688,8 @@ location of each missing privilege.
   reported privilege and expect an access-denied fault. This ties the rule table to mockup's
   real behavior and catches drift when handlers change.
 - A runtime permission recorder in XrmMockup (recording every check inside
-  `Security.HasPermission`) is a possible follow-up for automating this cross-check. It is not
-  part of this design.
+  `Security.HasPermission`) automates this cross-check. It is planned as phase 7, see
+  [role verification for scenarios](#future-role-verification-for-scenarios-in-xrmmockup-core).
 
 ## 10. Delivery plan
 
@@ -701,8 +701,28 @@ location of each missing privilege.
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
 | 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope, plugin code loaded from other solutions (§5.6)) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
+| 5.5 | Output clean-up (below): filtering, and verbosity levels where the default shows what needs attention and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
-| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |
+| 7 | Role verification for scenarios in XrmMockup core (below), after phase 5. A core feature: it changes XrmMockup365 itself, not only the analyzer | Tests run a scenario as a principal and get back what was checked, granted and denied, to compare with the analyzer's output |
+| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
+
+**Output clean-up (phase 5.5).** On a real solution the output is long, and most of it is
+requirements the roles already grant. That is rarely what a reader needs, but it must stay
+available, for example to review a role or to answer "why does this function need Write on
+account". Proposed direction, to settle when the phase starts:
+
+- **Verbosity**: a `--verbosity` option. The default shows what needs attention: missing
+  privileges, unresolved operations and the `Not checked` items, plus a summary line with how
+  many requirements are granted. A detailed level adds the granted requirements, and a full
+  level adds every source and call path, as today.
+- **Filtering**: options to narrow the output to some tables, privileges, identities
+  (`RunsAs`) or bases, such as the `--basis` option in §6 that isn't built yet. Filters, like
+  verbosity, apply after analysis, so they never change what is computed or whether `check`
+  fails.
+- **JSON** stays complete at every verbosity, so tools and the phase 7 comparison always get
+  the full result; filters may apply to it.
+- Without roles (`required` without `--role`), nothing is granted, so the default stays close
+  to today's output and filtering does most of the work.
 
 **Idea: minimum required depth.** A `--min-depth` option (or per-table setting) that only
 counts a privilege as covered at or above a given depth, so CI could, for example, require
@@ -743,6 +763,62 @@ Things to settle before building it:
 - Whether to use the user's business unit, and the business units of the teams, once depth
   matters (see minimum required depth above).
 - The signed-in identity needs read access to `systemuser`, `team` and `role`.
+
+### Future: role verification for scenarios in XrmMockup core
+
+**Goal.** Today the analyzer finds the privileges code needs by reading the code. XrmMockup could
+confirm those findings by running scenarios against roles. A test would state "run this as a
+user with these roles" and get back what was checked, granted and denied, not just pass or fail.
+
+**Scenarios to cover:**
+
+- **Azure Function execution**: run the function's code against a mockup service that acts as
+  an application user holding the configured roles, including any `CallerId` impersonation.
+- **Plugin triggering**: run a `Create` or `Update` (with given columns) as a user with given
+  roles. Every step it fires, including steps fired by other steps and steps with an
+  impersonating user, is checked under the identity it really runs as.
+- **Custom APIs and requests**: run a request as a principal and check what its handler and
+  plugins need.
+
+**Proposed API (sketch):**
+
+```csharp
+var result = crm.VerifyRoles(
+    principal: Principal.ApplicationUser(roles: ["Integration App"]),
+    scenario: svc => new OrderFunction(svc).Run(input));
+
+result.Denied      // (table, privilege, identity, call path) that failed
+result.Checked     // every privilege check made, with the depth granted
+result.Fired       // plugin steps run, with the identity of each
+```
+
+- `Principal.User(roles)`, `Principal.ApplicationUser(roles)` and
+  `Principal.Impersonating(caller, roles)` describe who runs the scenario.
+- The run records every privilege check rather than stopping at the first denial, so one run
+  reports everything that's missing.
+- Option `StrictUnenforced`: also check the rules XrmMockup doesn't enforce today
+  (`RequestRule.Enforced = false`, such as `SetState`, §5.3) and report them separately.
+
+**Link with the analyzer:**
+
+- The output uses the analyzer's terms: table, privilege, `RunsAs` and step ids. That lets a
+  test compare a run with `xrmmockup-permissions required` output and flag requirements the
+  analyzer missed (for example LINQ through an `OrganizationServiceContext`, until phase 5) or
+  included without need. This replaces the manual cross-check in §9.
+- The analyzer's `Principals` and `Users` settings in `appsettings.json` (§6.3) could feed the
+  scenario's principals, so code analysis and runtime checks use the same roles.
+
+**Open questions:**
+
+- How much of `Security` and `RequestExecutionPipeline` has to change to record checks instead
+  of throwing on the first denial?
+- How are asynchronous steps treated? They need the privileges, but their failure doesn't fail
+  the request.
+- How should depth (user, business unit, organization) be reported when the mockup's records
+  don't exercise every depth?
+
+**Phase:** 7, after phase 5, as its own core feature. It needs changes to XrmMockup365 itself,
+not only the analyzer.
 
 ## 11. Decisions
 
