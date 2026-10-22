@@ -79,6 +79,18 @@ internal static class CliOptions
         public const string Description = "Only analyze this method, e.g. Contoso.Sync.Importer.Run, as an entry point. Repeatable";
     }
 
+    internal static class Operation
+    {
+        public const string Primary = "--operation";
+        public const string Description = "Only analyze a user operation on a table and the plugin steps it fires: \"<message> <table>\", e.g. \"Update account\"";
+    }
+
+    internal static class Attributes
+    {
+        public const string Primary = "--attributes";
+        public const string Description = "The columns the --operation sets, which decide the Update steps filtered on columns it fires. Comma-separated or repeatable";
+    }
+
     internal static class Role
     {
         public const string Primary = "--role";

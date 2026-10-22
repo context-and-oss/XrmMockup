@@ -345,6 +345,22 @@ This is what makes the "query a specific operation" mode useful: `Update account
 full set of privileges a user needs for that update to succeed, including every plugin that
 fires.
 
+**`--operation`.** A user operation is an entry point of kind `Operation` with no code. It is
+evaluated as a request of its message whose first member check (usually `Target`) refers to the
+given table, run as `Caller`:
+
+- The privileges of the member checks on that member are needed on the table, and those of
+  fixed-table checks on their table. Checks on other members (`RelatedEntities`), access masks
+  and nested requests can't be known and are reported as unresolved. A message without a rule
+  is reported as unresolved and fires its message on the table.
+- It fires the rule's messages on the table, setting the `--attributes` columns when given, so
+  filtered Update steps match as for code (step 2). Without them, the columns set are unknown.
+- For a message that creates or writes the table, each lookup among the attributes needs `Append`
+  on the table and `AppendTo` on its targets from the metadata.
+
+Its own hits are reported at the location `--operation` with no path, so a fired step's path
+starts at the operation.
+
 **Cascades from Azure Functions and app code.** The same expansion applies to the operations an
 Azure Function (or an `--entry` method) performs, so `check --role "Integration App" --function
 ProcessOrder` and `required --function ProcessOrder --role …` cover the plugins the function's
@@ -676,7 +692,7 @@ location of each missing privilege.
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
-| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes), then `--operation` scope and plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
+| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope), then plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |

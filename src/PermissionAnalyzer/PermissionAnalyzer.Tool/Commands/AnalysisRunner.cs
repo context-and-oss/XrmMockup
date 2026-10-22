@@ -58,6 +58,7 @@ internal static class AnalysisRunner
                 builder.AddPluginSteps(steps);
             }
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
+            if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
             var filter = new ProjectFilter(root, settings.ExcludeProjects);
             await new CodeLoader(loggerFactory.CreateLogger<CodeLoader>()).AddAsync(settings.Target, builder, filter, cancellationToken);

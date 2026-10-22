@@ -31,4 +31,10 @@ public enum EntryPointKind
     /// A method given with <c>--entry</c> or <c>XrmMockup:Permissions:EntryPoints</c>.
     /// </summary>
     Method,
+
+    /// <summary>
+    /// A user operation on a table given with <c>--operation</c>, such as an update in an app, with the plugin
+    /// steps it fires.
+    /// </summary>
+    Operation,
 }

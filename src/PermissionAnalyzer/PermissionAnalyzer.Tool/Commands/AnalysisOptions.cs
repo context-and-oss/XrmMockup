@@ -18,6 +18,8 @@ internal sealed class AnalysisOptions
     private readonly Option<string?> _customApi = new(CliOptions.CustomApi.Primary) { Description = CliOptions.CustomApi.Description };
     private readonly Option<string?> _function = new(CliOptions.Function.Primary) { Description = CliOptions.Function.Description };
     private readonly Option<string[]> _entry = new(CliOptions.Entry.Primary) { Description = CliOptions.Entry.Description };
+    private readonly Option<string?> _operation = new(CliOptions.Operation.Primary) { Description = CliOptions.Operation.Description };
+    private readonly Option<string[]> _attributes = new(CliOptions.Attributes.Primary) { Description = CliOptions.Attributes.Description };
     private readonly Option<string[]> _role = new(CliOptions.Role.Primary, CliOptions.Role.Alias) { Description = CliOptions.Role.Description };
     private readonly Option<string[]> _callerRole = new(CliOptions.CallerRole.Primary) { Description = CliOptions.CallerRole.Description };
     private readonly Option<string> _format;
@@ -37,7 +39,7 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _role, _callerRole, _solution, _project, _metadata, _exclude, _config, _format, _output })
+        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _project, _metadata, _exclude, _config, _format, _output })
         {
             command.Options.Add(option);
         }
@@ -49,10 +51,19 @@ internal sealed class AnalysisOptions
                 result.AddError($"Use either {CliOptions.Solution.Primary} or {CliOptions.Project.Primary}, not both.");
             }
 
-            var scopes = new Option[] { _plugin, _customApi, _function, _entry }.Count(o => result.GetResult(o) is not null);
+            var scopes = new Option[] { _plugin, _customApi, _function, _entry, _operation }.Count(o => result.GetResult(o) is not null);
             if (scopes > 1)
             {
-                result.AddError($"Use only one of {CliOptions.Plugin.Primary}, {CliOptions.CustomApi.Primary}, {CliOptions.Function.Primary} and {CliOptions.Entry.Primary}.");
+                result.AddError($"Use only one of {CliOptions.Plugin.Primary}, {CliOptions.CustomApi.Primary}, {CliOptions.Function.Primary}, {CliOptions.Entry.Primary} and {CliOptions.Operation.Primary}.");
+            }
+
+            if (result.GetResult(_operation) is not null && OperationRequest.Parse(result.GetValue(_operation)!, null) is null)
+            {
+                result.AddError($"{CliOptions.Operation.Primary} takes a message and a table, such as \"Update account\".");
+            }
+            if (result.GetResult(_attributes) is not null && result.GetResult(_operation) is null)
+            {
+                result.AddError($"{CliOptions.Attributes.Primary} needs {CliOptions.Operation.Primary}.");
             }
         });
     }
@@ -63,11 +74,15 @@ internal sealed class AnalysisOptions
         var customApi = parseResult.GetValue(_customApi);
         var function = parseResult.GetValue(_function);
         var entry = parseResult.GetValue(_entry) ?? [];
+        var operationText = parseResult.GetValue(_operation);
+        var attributes = parseResult.GetValue(_attributes);
+        var operation = operationText is null ? null : OperationRequest.Parse(operationText, attributes?.SelectMany(a => a.Split(',')).ToList());
 
         var scope = plugin is not null ? EntryPointSelector.Plugin(plugin)
             : customApi is not null ? EntryPointSelector.CustomApi(customApi)
             : function is not null ? EntryPointSelector.Function(function)
             : entry.Length > 0 ? EntryPointSelector.Methods(entry)
+            : operation is not null ? EntryPointSelector.Operation(operationText!)
             : null;
 
         return new AnalysisRequest(
@@ -81,7 +96,8 @@ internal sealed class AnalysisOptions
             scope,
             entry,
             parseResult.GetValue(_role) ?? [],
-            parseResult.GetValue(_callerRole) ?? []);
+            parseResult.GetValue(_callerRole) ?? [],
+            operation);
     }
 }
 
@@ -99,4 +115,20 @@ internal sealed record AnalysisRequest(
     EntryPointSelector? Scope,
     IReadOnlyList<string> EntryMethods,
     IReadOnlyList<string> Roles,
-    IReadOnlyList<string> CallerRoles);
+    IReadOnlyList<string> CallerRoles,
+    OperationRequest? Operation = null);
+
+/// <summary>
+/// The user operation of <c>--operation</c>, with the columns of <c>--attributes</c> when given.
+/// </summary>
+internal sealed record OperationRequest(string Message, string Table, IReadOnlyList<string>? Columns)
+{
+    /// <summary>
+    /// Reads <c>"&lt;message&gt; &lt;table&gt;"</c>; <c>null</c> when it isn't two words.
+    /// </summary>
+    public static OperationRequest? Parse(string text, IReadOnlyList<string>? columns)
+    {
+        var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 2 ? new OperationRequest(parts[0], parts[1], columns) : null;
+    }
+}

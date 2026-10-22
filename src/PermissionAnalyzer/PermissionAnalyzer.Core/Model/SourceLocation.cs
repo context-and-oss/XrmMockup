@@ -17,5 +17,8 @@ public sealed record SourceLocation(string File, int Line, int Column) : ICompar
         return result != 0 ? result : Column.CompareTo(other.Column);
     }
 
-    public override string ToString() => $"{File}:{Line}";
+    /// <summary>
+    /// <c>File:Line</c>, or just <see cref="File"/> for a location outside the code, such as <c>--operation</c>.
+    /// </summary>
+    public override string ToString() => Line == 0 ? File : $"{File}:{Line}";
 }

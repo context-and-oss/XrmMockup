@@ -81,10 +81,12 @@ Lists the table privileges each entry point needs.
 | `--custom-api` | | Only one custom API, by unique name |
 | `--function` | | Only one Azure Function, by function name |
 | `--entry` | | Analyze a method as an entry point, such as `Contoso.Sync.Importer.Run`, and show only that. Repeatable |
+| `--operation` | | Only a user operation on a table and the plugin steps it fires: `"<message> <table>"`, such as `"Update account"` (see [User operations](#user-operations)) |
+| `--attributes` | | The columns the `--operation` sets, such as `name,statecode`. Comma-separated or repeatable |
 | `--role` | `-r` | Also show whether these roles grant each requirement (see [`check`](#check)). Repeatable |
 | `--caller-role` | | Roles of the user that app code acts for through `CallerId`. Repeatable |
 
-Use at most one of `--plugin`, `--custom-api`, `--function` and `--entry`. Without any, every entry
+Use at most one of `--plugin`, `--custom-api`, `--function`, `--entry` and `--operation`. Without any, every entry
 point is listed. A scope that matches nothing is an error. Type names may be simple or full and are
 matched case-insensitively.
 
@@ -103,6 +105,7 @@ Checks that security roles grant every privilege the code needs. It takes the sa
 xrmmockup-permissions check --role "Salesperson" --plugin AccountPostPlugin
 xrmmockup-permissions check --role "Salesperson" --role "Marketing"
 xrmmockup-permissions check --function ProcessOrder --role "Integration App" --caller-role "Salesperson"
+xrmmockup-permissions check --operation "Update account" --attributes statecode --role "Salesperson"
 xrmmockup-permissions check   # roles from Principals and Users in appsettings.json
 ```
 
@@ -169,10 +172,12 @@ Exit codes:
 | Code activity | Subclasses of `CodeActivity` |
 | Azure Function | Methods with `[Function]` (isolated worker) or `[FunctionName]` (in-process) |
 | Method | `--entry` and the `EntryPoints` setting |
+| Operation | `--operation` |
 
 Entry point ids look like `plugin:Contoso.AccountPostPlugin:Update:account:PostOperation` (the table
 is `any` for steps on every table), `custom-api:ctx_DoThing`, `activity:Contoso.MyActivity`,
-`function:ProcessOrder` and `method:Contoso.Sync.Importer.Run(IOrganizationService)`.
+`function:ProcessOrder`, `method:Contoso.Sync.Importer.Run(IOrganizationService)` and
+`operation:Update account(name,statecode)`.
 
 From each entry point, the tool follows calls into the rest of the solution, including across
 projects. Services and tables passed as arguments, stored in fields or set through constructors are
@@ -305,6 +310,30 @@ point. Steps come from code registrations and from the plugin steps in the metad
 The source path of a cascaded requirement runs from the entry point through the operation (such as
 `Create contact`) and the step id into the step's code. The JSON output lists a step's filter as
 `filteredAttributes` on its trigger.
+
+### User operations
+
+`--operation "<message> <table>"` answers "what does a user need to do this", such as updating an
+account in an app. The operation runs as `Caller` and needs the privileges of its request rule (see
+[Request rules](#request-rules)) on the table, plus those of every plugin step it fires:
+
+```bash
+xrmmockup-permissions required --operation "Update account" --attributes name,statecode
+xrmmockup-permissions check --operation "Create contact" --attributes parentcustomerid --role "Salesperson"
+```
+
+- The message may be any message with a rule, such as `Create`, `Update`, `Delete`, `Assign` or
+  `Upsert`, which fires the steps of `Create` and `Update` too. A message without a rule, such as a
+  custom API, is reported as unresolved, but still fires the steps registered on it.
+- `--attributes` are the columns the operation sets. They decide which Update steps filtered on
+  columns fire. Without them, those steps fire with basis `filter-unknown`.
+- A lookup column among them needs `Append` on the table and `AppendTo` on the tables it can refer
+  to, from the metadata (`all-lookup-targets` when there are several).
+- Request members other than the table, such as `RelatedEntities` of `Associate`, and access rights
+  granted by `GrantAccess`, aren't known and are reported as unresolved.
+
+Requirements of the operation itself have the source `--operation`; those of a step it fires have the
+step's code, with a path that starts at the operation.
 
 Calls inside lambdas and local functions count towards the method that contains them. A generic
 helper that no entry point calls is listed under unreached methods with its type parameter as the

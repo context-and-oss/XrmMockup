@@ -3,7 +3,8 @@ using XrmMockup.PermissionAnalyzer.Core.Model;
 namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 
 /// <summary>
-/// Limits an analysis to some entry points: <c>--plugin</c>, <c>--custom-api</c> or <c>--function</c>.
+/// Limits an analysis to some entry points: <c>--plugin</c>, <c>--custom-api</c>, <c>--function</c> or
+/// <c>--operation</c>.
 /// Explicit methods (<c>--entry</c>) are added with <see cref="ManifestBuilder.AddEntryMethods"/> instead.
 /// </summary>
 public sealed class EntryPointSelector
@@ -47,6 +48,12 @@ public sealed class EntryPointSelector
         new($"--entry {string.Join(" --entry ", methods)}", e =>
             e.Kind == EntryPointKind.Method
             && methods.Any(m => e.Id == "method:" + m || e.Id.StartsWith("method:" + m + "(", StringComparison.Ordinal)));
+
+    /// <summary>
+    /// Operations added with <see cref="ManifestBuilder.AddOperation"/>.
+    /// </summary>
+    public static EntryPointSelector Operation(string text) =>
+        new($"--operation {text}", e => e.Kind == EntryPointKind.Operation);
 
     public bool Matches(EntryPoint entryPoint) => _matches(entryPoint);
 

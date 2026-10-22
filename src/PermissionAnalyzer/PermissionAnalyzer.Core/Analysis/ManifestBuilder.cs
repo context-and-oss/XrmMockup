@@ -30,6 +30,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     private readonly Dictionary<string, PluginClass> _plugins = new(StringComparer.Ordinal);
     private readonly List<PluginStepRegistration> _steps = [];
     private readonly List<string> _entryMethods = [];
+    private readonly Dictionary<string, UserOperation> _operations = new(StringComparer.Ordinal);
     private readonly HashSet<string> _customApis = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -65,6 +66,25 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     public void AddEntryMethods(IEnumerable<string> methods) => _entryMethods.AddRange(methods);
 
     /// <summary>
+    /// Adds a user operation to analyze as an entry point, such as <c>Update</c> on <c>account</c> made in an app:
+    /// the privileges its request needs as the caller, and those of the plugin steps it fires. <paramref name="columns"/>
+    /// are the columns it sets, which decide the Update steps filtered on columns that it fires; without them those
+    /// steps fire with the basis <see cref="RequirementBasis.FilterUnknown"/>.
+    /// </summary>
+    public void AddOperation(string message, string table, IEnumerable<string>? columns = null)
+    {
+        var set = columns?
+            .Select(c => c.Trim().ToLowerInvariant())
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(c => c, StringComparer.Ordinal)
+            .ToList();
+        var operation = new UserOperation(RequestRules.MessageOf(message.Trim()), table.Trim().ToLowerInvariant(), set is { Count: > 0 } ? set : null);
+        var id = $"operation:{operation.Display}" + (operation.Columns is { } known ? $"({string.Join(",", known)})" : "");
+        _operations[id] = operation;
+    }
+
+    /// <summary>
     /// Builds the manifest. Pass the tables that at least one security role mentions to fill
     /// <see cref="Manifest.NotRoleGoverned"/>; leave it <c>null</c> when no roles are known. With a
     /// <paramref name="scope"/>, only the matching entry points are analyzed and nothing is reported as unreached.
@@ -74,11 +94,15 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         var candidates = new Dictionary<string, EntryCandidate>(_entries, StringComparer.Ordinal);
         var codeless = AddMetadataSteps(candidates);
         AddMethodEntries(candidates);
+        foreach (var operation in _operations)
+        {
+            candidates[operation.Key] = new EntryCandidate(operation.Key, EntryPointKind.Operation, "", null, new Trigger(operation.Value.Message, operation.Value.Table), null, null, []);
+        }
         var cascades = new Cascades(_graph, CascadeSteps(candidates.Values, codeless), (step, caller) => Context(caller, step.Trigger?.Table));
 
         // Messages the solution implements or registers steps on, which no rule knows, are its custom APIs
         _customApis.Clear();
-        _customApis.UnionWith(candidates.Values.Select(c => c.Trigger?.Message).Concat(_steps.Select(s => s.Message)).OfType<string>());
+        _customApis.UnionWith(candidates.Values.Where(c => c.Kind != EntryPointKind.Operation).Select(c => c.Trigger?.Message).Concat(_steps.Select(s => s.Message)).OfType<string>());
 
         var entryPoints = new List<EntryPoint>();
         var reached = new HashSet<string>(StringComparer.Ordinal);
@@ -87,7 +111,11 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             if (scope is not null && !scope.Matches(Describe(candidate, [], [], []))) continue;
 
             var context = Context(candidate);
-            var cascade = cascades.Expand(new Evaluator(_graph, context).Evaluate(candidate.Handlers), candidate.Id, context.Caller);
+            var evaluator = new Evaluator(_graph, context);
+            var evaluation = _operations.TryGetValue(candidate.Id, out var user)
+                ? Unprefixed(evaluator.EvaluateAlone(user.Node(candidate.Id, _rules, _lookups), user.Display))
+                : evaluator.Evaluate(candidate.Handlers);
+            var cascade = cascades.Expand(evaluation, candidate.Id, context.Caller);
             reached.UnionWith(cascade.Result.Reached);
             entryPoints.Add(Describe(candidate, cascade));
         }
@@ -98,6 +126,20 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
 
         var governed = new HashSet<string>(roleGovernedTables.Select(t => t.ToLowerInvariant()), StringComparer.Ordinal);
         return new Manifest(entryPoints, unreached, manifest.Tables.Where(t => !governed.Contains(t)).ToList());
+    }
+
+    /// <summary>
+    /// <paramref name="result"/> without call paths. A user operation's hits are at <see cref="UserOperation.Location"/>,
+    /// so the path of a step it fires starts at the operation.
+    /// </summary>
+    private static EvaluationResult Unprefixed(EvaluationResult result)
+    {
+        var unprefixed = new EvaluationResult { Truncated = result.Truncated };
+        unprefixed.Requirements.AddRange(result.Requirements.Select(h => h with { Source = h.Source with { Path = [] } }));
+        unprefixed.Unresolved.AddRange(result.Unresolved.Select(h => h with { Source = h.Source with { Path = [] } }));
+        unprefixed.Assumptions.AddRange(result.Assumptions.Select(h => h with { Source = h.Source with { Path = [] } }));
+        unprefixed.Triggers.AddRange(result.Triggers.Select(h => h with { Source = h.Source with { Path = [] } }));
+        return unprefixed;
     }
 
     private void AddEntry(EntryCandidate entry)
