@@ -3,12 +3,13 @@
 A .NET CLI tool that works out which Dataverse table privileges your code needs, by static analysis.
 It finds your entry points (plugin steps, custom APIs, code activities and Azure Functions), follows
 the calls from each one through your code without running any of it, and lists the privilege each
-`IOrganizationService` call needs on each table, together with the identity it runs as. It is a companion to
+`IOrganizationService` call needs on each table, together with the identity it runs as. It can then check
+those privileges against your security roles. It is a companion to
 [XrmMockup](https://github.com/delegateas/XrmMockup) and reads the security roles that
 `xrmmockup-metadata` downloads.
 
-> **Preview.** This release lists the privileges each entry point needs. Checking them against
-> security roles (the `check` command), plugin cascades and `Execute` requests are coming next.
+> **Preview.** This release lists the privileges each entry point needs and checks them against
+> security roles. Plugin cascades and `Execute` requests are coming next.
 
 ## Installation
 
@@ -45,8 +46,11 @@ Privileges per table
   contact   Create
   task      Create
 
-1 entry point, 0 unreached, 3 tables, 3 requirements, 1 unresolved
+1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
 ```
+
+The last line counts distinct table privileges, and separately each requirement once per entry point
+or unreached method that needs it.
 
 Each entry point lists its requirements with the identity they run as (see [Runs as](#runs-as)) and
 where the call is. A call in another method shows the call path from the entry point after it.
@@ -77,12 +81,83 @@ Lists the table privileges each entry point needs.
 | `--custom-api` | | Only one custom API, by unique name |
 | `--function` | | Only one Azure Function, by function name |
 | `--entry` | | Analyze a method as an entry point, such as `Contoso.Sync.Importer.Run`, and show only that. Repeatable |
+| `--role` | `-r` | Also show whether these roles grant each requirement (see [`check`](#check)). Repeatable |
+| `--caller-role` | | Roles of the user that app code acts for through `CallerId`. Repeatable |
 
 Use at most one of `--plugin`, `--custom-api`, `--function` and `--entry`. Without any, every entry
 point is listed. A scope that matches nothing is an error. Type names may be simple or full and are
 matched case-insensitively.
 
+Without `--role` or `--caller-role`, the output has no role data, so it only changes when the code or
+the metadata changes. That is the output to commit and diff. With them, each requirement is marked as
+`check` does, but the exit code stays `0`.
+
 Exit codes: `0` on success, `2` on errors (invalid options, missing files, or a solution that fails to load).
+
+### `check`
+
+Checks that security roles grant every privilege the code needs. It takes the same options as
+`required`, plus `--strict`.
+
+```bash
+xrmmockup-permissions check --role "Salesperson" --plugin AccountPostPlugin
+xrmmockup-permissions check --role "Salesperson" --role "Marketing"
+xrmmockup-permissions check --function ProcessOrder --role "Integration App" --caller-role "Salesperson"
+xrmmockup-permissions check   # roles from Principals and Users in appsettings.json
+```
+
+Example output:
+
+```
+plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation  src/Plugins/AccountPostPlugin.cs:14
+  roles for Caller: Salesperson (--role)
+  ✔ account   Read    Caller  BusinessUnit  src/Plugins/AccountPostPlugin.cs:20
+  ✘ contact   Create  Caller  missing       src/Services/ContactService.cs:31 (AccountPostPlugin.ctor (lambda, line 16) → ContactService.CreateFor)
+  · task      Create  System  SYSTEM        src/Plugins/AccountPostPlugin.cs:44
+...
+Result: 1 granted, 1 missing, 1 as SYSTEM
+Missing privileges:
+  ✘ contact  Create  Caller  Salesperson (--role)  in plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation
+Not checked: 1 unresolved operation (1 with an unknown table), Append and AppendTo on lookups (not analyzed yet)
+```
+
+Each requirement is checked against the roles of the identity it runs as:
+
+| Runs as | Checked against |
+|---------|-----------------|
+| `Caller` | `--role` |
+| `ApplicationUser` | `--role`, else the entry point's function app in `Principals` |
+| `User` | The user's roles in `Users` |
+| `ImpersonatedCaller` | `--caller-role`: the call runs with the privileges of the user in `CallerId` |
+| `System` | Nothing; SYSTEM needs no role |
+
+- Repeated roles combine as they do in Dataverse: a privilege is granted when any of them grants it,
+  at the highest depth any of them grants.
+- Any depth counts. The granted depth (`User`, `BusinessUnit`, `ParentChildBusinessUnit` or
+  `Organization`) is shown but doesn't affect the result.
+- Requirements with an `(assumed)` identity are checked like the rest.
+- `✔` is granted (or on a table no role governs, which XrmMockup doesn't check), `✘` is missing, `-` is
+  [suppressed](#configuration), and `·` is not checked or runs as SYSTEM. Each entry point first lists the
+  roles each identity was checked against, or why it wasn't checked.
+- Role names are matched exactly, then ignoring case. An unknown name is an error that suggests the
+  closest names.
+- `Missing privileges` lists each missing privilege once, with the identity, the roles that don't
+  grant it and every entry point or unreached method that needs it. The `check` error names them too.
+- `Not checked` lists what the result doesn't cover: unresolved operations (split into `Execute`
+  requests and calls with an unknown table), requirements whose identity has no roles, the
+  impersonation privilege, and Append/AppendTo on lookups, which aren't analyzed yet. When nothing is
+  missing but something wasn't checked, `check` exits with `0` and logs a warning; `--strict` makes it fail.
+- Setting `CallerId` also needs the `prvActOnBehalfOfAnotherUser` privilege on the identity that sets
+  it, usually the application user. The metadata has no global privileges yet, so this is shown as
+  `! … unverifiable` and you have to check it yourself.
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every checked privilege is granted, suppressed or on a table no role governs |
+| `1` | Some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, or a privilege is unverifiable |
+| `2` | Error: invalid options, missing files, an unknown role, or no roles at all (no `--role`, `--caller-role`, and nothing analyzed matches `Principals` or `Users`) |
 
 ## Entry points
 
@@ -143,9 +218,14 @@ The table is found from:
 - `QueryExpression`, `QueryByAttribute`, `AddLink` and FetchXML (including interpolated strings)
 - locals assigned in the same method, including both branches of `?:` and `??`
 - loops over the result of `RetrieveMultiple`
+- the value a helper method returns, resolved for each call with that call's arguments, such as
+  `service.Create(Build(flag))` or `RetrieveMultiple(Query<Contact>())`
+- type arguments of generic methods, such as `service.Get<Contact>(id)` where `Get<T>` uses
+  `new T().LogicalName` or `Activator.CreateInstance<T>()`
 
-Calls inside lambdas and local functions count towards the method that contains them. Generic
-helpers whose table is a type parameter are reported as unresolved for now.
+Calls inside lambdas and local functions count towards the method that contains them. A generic
+helper that no entry point calls is listed under unreached methods with its type parameter as the
+unresolved reason.
 
 ## Configuration
 
@@ -162,7 +242,17 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
       "Solution": "./src/Contoso.sln",
       "MetadataDirectory": "./tests/Metadata",
       "ExcludeProjects": ["*.Tests", "tests/*"],
-      "EntryPoints": ["Contoso.Sync.Importer.Run"]
+      "EntryPoints": ["Contoso.Sync.Importer.Run"],
+      "Principals": {
+        "Contoso.Functions": { "Roles": ["Integration App"] },
+        "Contoso.Functions/ProcessOrder": { "Roles": ["Integration App", "Order Processor"] }
+      },
+      "Users": {
+        "6a1e5c4d-2b3f-4a5e-8c7d-9e0f1a2b3c4d": { "Name": "svc-plugins", "Roles": ["Plugin Service"] }
+      },
+      "Suppress": [
+        { "Table": "ctx_auditlog", "Privilege": "Create", "Reason": "Created by SYSTEM via helper" }
+      ]
     }
   }
 }
@@ -174,6 +264,9 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
 | `MetadataDirectory` | Metadata folder. Defaults to `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` |
 | `ExcludeProjects` | Projects to leave out, such as test projects. See below |
 | `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds to these. A name that matches no method is reported as a warning |
+| `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
+| `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |
+| `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table. Suppressed privileges are shown but don't fail `check` |
 
 Configured paths are relative to the configuration file. `appsettings.{DOTNET_ENVIRONMENT}.json` and
 environment variables (for example `XrmMockup__Permissions__Solution`) override the file, and
@@ -202,7 +295,7 @@ The metadata folder is also where plugin step registrations are read from (`Meta
 
 When the metadata folder contains `SecurityRoles/`, the output also lists the required tables that no
 role mentions. XrmMockup doesn't check privileges on those tables, so tests pass even when no role
-grants them.
+grants them. `check` and `--role` use the roles from this folder, by name.
 
 ## Output
 
@@ -210,6 +303,14 @@ grants them.
 `trigger`, `requirements`, `unresolved` and `assumptions`), `unreached` and `notRoleGoverned`.
 Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, each with the call
 `path` from the entry point.
+
+With roles, each requirement also has `coverage` (`status`: `granted`, `not-governed`, `missing`,
+`suppressed`, `not-checked` or `system`, with `depth` or `reason`), each entry point has `roles` (the
+roles per identity, with their `origin`) and `impersonation` when it sets `CallerId`, and the document
+has a `result` with the counts, `unresolvedExecute` (the unresolved operations that are `Execute`
+requests) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
+with `table`, `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
+it). Without roles, none of these are written.
 
 Output is deterministic: entry points, methods, tables and source locations are sorted ordinally, paths are
 relative to the analyzed solution with forward slashes, and line endings are always `\n`. Running

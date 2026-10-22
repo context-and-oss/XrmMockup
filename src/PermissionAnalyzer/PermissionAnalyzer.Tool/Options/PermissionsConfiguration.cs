@@ -31,4 +31,50 @@ public record PermissionsConfiguration
     /// Methods to analyze as entry points besides the discovered ones, such as <c>Contoso.Sync.Importer.Run</c>.
     /// </summary>
     public string[] EntryPoints { get; init; } = [];
+
+    /// <summary>
+    /// Roles of the application user of app code, such as an Azure Function app, by assembly name
+    /// (<c>Contoso.Functions</c>) or by assembly and function name (<c>Contoso.Functions/ProcessOrder</c>), which wins.
+    /// </summary>
+    public Dictionary<string, PrincipalConfiguration> Principals { get; init; } = [];
+
+    /// <summary>
+    /// Roles of specific users, such as the impersonating user of a plugin step, by user id.
+    /// </summary>
+    public Dictionary<string, UserConfiguration> Users { get; init; } = [];
+
+    /// <summary>
+    /// Missing privileges that are accepted. They are reported as suppressed and don't fail <c>check</c>.
+    /// </summary>
+    public SuppressionConfiguration[] Suppress { get; init; } = [];
+}
+
+public record PrincipalConfiguration
+{
+    public string[] Roles { get; init; } = [];
+}
+
+public record UserConfiguration
+{
+    /// <summary>
+    /// A name for the user in the output, such as <c>svc-plugins</c>.
+    /// </summary>
+    public string? Name { get; init; }
+
+    public string[] Roles { get; init; } = [];
+}
+
+public record SuppressionConfiguration
+{
+    /// <summary>
+    /// Table logical name.
+    /// </summary>
+    public string? Table { get; init; }
+
+    /// <summary>
+    /// The privilege, such as <c>Create</c>. Every privilege on the table when not set.
+    /// </summary>
+    public string? Privilege { get; init; }
+
+    public string? Reason { get; init; }
 }

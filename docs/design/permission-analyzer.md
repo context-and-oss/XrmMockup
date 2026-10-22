@@ -169,7 +169,12 @@ Within each method body, the extractor finds:
    `link-entity` names.
 4. Local data flow inside the method: locals, `readonly` fields, constructor-assigned fields
    and `ToEntityReference()` on resolved entities.
-5. Otherwise the operation is recorded as **Unresolved**, with its source location. It is
+5. Values returned by methods in the solution: each method summary records the tables of its
+   `return` statements, which can depend on its parameters, and a call resolves them with its own
+   arguments. Type arguments of generic methods are bound like parameters, so
+   `Get<Contact>()` resolves `new T().LogicalName` or `Activator.CreateInstance<T>()` inside it.
+   Recursive helpers stop at the cycle, and the depth limit of the call graph applies.
+6. Otherwise the operation is recorded as **Unresolved**, with its source location. It is
    never dropped silently.
 
 **Attribute resolution** (for Append/AppendTo): lookup properties set on early-bound
@@ -367,6 +372,31 @@ xrmmockup-permissions check --role "Integration App" --function ProcessOrder
   minimum-depth option is a possible future feature (§10).
 - With no scope and an app-user mapping in `appsettings.json`, each Azure Function is checked against
   its configured roles.
+- Each requirement is checked against the roles of the identity it runs as (§5.4):
+
+  | Runs as | Checked against |
+  |---|---|
+  | Caller | `--role` |
+  | Application user | `--role`, else `Principals` for the function (`<assembly>/<function>`), else for its app (`<assembly>`) |
+  | User | `Users` for that user id; otherwise "not checked: runs as user X" |
+  | Caller (impersonated) | `--caller-role` (repeatable); otherwise "not checked" |
+  | System | Nothing; listed for information |
+
+  `--role` replaces `Principals`. Requirements with an assumed identity are checked like the
+  rest and keep their `(assumed)` label, so a missing privilege on one fails `check`.
+- **Impersonation**: a call made with `CallerId` set runs with the privileges of the
+  impersonated user, so its requirements are checked against `--caller-role`. The identity that
+  sets `CallerId` (the application user, for app code) must also hold
+  `prvActOnBehalfOfAnotherUser`. That is a global privilege, which the role metadata doesn't
+  contain until phase 5, so it is reported per entry point as unverifiable. It fails only
+  with `--strict`.
+- Without `--role` or `--caller-role`, and with no `Principals` or `Users` entry that matches
+  the analyzed code, `check` has nothing to check against and exits with `2`. A role name that
+  isn't in `Metadata/` is also an error (exit `2`), which suggests the closest names.
+- `Suppress` entries (§6.3) turn a missing privilege into "suppressed", which doesn't fail.
+  A table no role in `Metadata/` mentions counts as covered, because XrmMockup doesn't check it.
+- `--strict` also fails on unresolved operations, identities with no roles to check against
+  and unverifiable privileges.
 - Output: granted / missing per `(table, privilege)` with the depth the role grants, the
   source location and the call path. Exit code `0` = covered, `1` = missing privileges,
   `2` = analysis error. Unresolved operations alone don't fail the run unless `--strict` is set.
@@ -382,6 +412,30 @@ Update account (as caller) — role "Salesperson"
 Result: 2 missing, 1 unresolved
 ```
 
+As built in phase 3, the text output lists the roles per identity under each entry point
+(`roles for Caller: Salesperson (--role)`) and marks each requirement `✔` (granted, with the
+depth, or on a table no role governs), `✘` (missing), `-` (suppressed) or `·` (not checked, or
+SYSTEM). The impersonation privilege is a `!` line.
+
+The `Result:` line only counts what was checked. A `Missing privileges:` list follows it, then a
+`Not checked:` line, so a pass isn't read as proof that the roles are enough:
+
+```
+16 entry points, 12 unreached methods, 17 tables, 21 table privileges (52 requirements counted per entry point and method), 24 unresolved
+Result: 46 granted, 6 missing
+Missing privileges:
+  ✘ ctx_orderline  Create  ApplicationUser  Order API (--role)  in function:ProcessOrder, function:…
+  ✘ ctx_orderline  Read    ApplicationUser  Order API (--role)  in function:GetOrder
+Not checked: 24 unresolved operations (22 Execute requests, 2 with an unknown table), Append and AppendTo on lookups (not analyzed yet)
+```
+
+`Missing privileges` merges the missing requirements by table, privilege, identity and roles,
+so each gap is listed once with every entry point that needs it. `Not checked` lists unresolved
+operations (`Execute` requests apart from calls with an unknown table),
+requirements whose identity has no roles, entry points whose impersonation privilege is
+unverifiable, and Append/AppendTo until phase 5. When nothing is missing but something wasn't
+checked, `check` exits `0` with a warning, and `--strict` fails.
+
 **`required`**: exactly what is needed, optionally with role coverage.
 
 ```
@@ -393,8 +447,9 @@ xrmmockup-permissions required --function ProcessOrder --role "Integration App"
 - With no role options: the requirement manifest per entry point (table → privileges,
   identity, basis, locations). It contains no role data, so it depends only on code and
   metadata. This is the artifact to commit or diff in CI.
-- `--role <name>` (repeatable): the same manifest with a granted/missing column for the
-  given roles. It reports, like `check`, but doesn't change the exit code.
+- `--role <name>` and `--caller-role <name>` (repeatable): the same manifest with a
+  granted/missing column for the given roles, plus the `Principals` and `Users` settings. It
+  reports, like `check`, but doesn't change the exit code.
 
 Finding which downloaded roles, or smallest combination of roles, would cover a requirement
 is deferred (§10).
@@ -478,10 +533,19 @@ Command-line options override the matching setting, as in the metadata tool. For
     }],
     "unresolved": [ /* operation + location + reason + path */ ],
     "assumptions": [ /* reason + location */ ],
+    // With roles only (check, required --role): each requirement also gets
+    // "coverage": { "status": "granted", "depth": "User" }   (or missing, suppressed + reason, not-governed, not-checked, system)
+    "roles": [{ "runsAs": "Caller", "roles": ["Salesperson"], "origin": "--role" }],   // or "note" when not checked
+    "impersonation": { "privilege": "prvActOnBehalfOfAnotherUser", "runsAs": "ApplicationUser", "status": "unverifiable" },
     "triggers": [ "plugin:Contoso.ContactPostPlugin:Create:contact:PostOperation" ]   // phase 4
   }],
   "unreached": [ /* per-method manifests, as in phase 1 */ ],
-  "notRoleGoverned": ["activityparty"]
+  "notRoleGoverned": ["activityparty"],
+  "missing": [{ "table": "contact", "privilege": "Create", "runsAs": "Caller", "roles": ["Salesperson"],
+                "origin": "--role", "in": ["plugin:Contoso.AccountPostPlugin:Update:account:PostOperation"] }],   // with roles only
+  "result": { "granted": 12, "notGoverned": 0, "missing": 2, "suppressed": 0, "notChecked": 1,
+              "system": 1, "unresolved": 1, "unresolvedExecute": 0, "unverifiable": 0,
+              "incomplete": true }   // with roles only
 }
 ```
 
@@ -551,6 +615,10 @@ actually hold, instead of a hand-written `--role` list:
   different id. A role that isn't in `Metadata/` is an error that suggests regenerating the
   metadata, so the check never silently runs against fewer roles than the user has.
 - The output names each role and where it comes from (direct, or which team).
+- The same lookup serves impersonated calls: a `--caller-user <username>` option would give
+  the roles of the end user that app code acts for through `CallerId`, instead of a
+  hand-written `--caller-role` list. The impersonating identity still needs
+  `prvActOnBehalfOfAnotherUser` (§6.2).
 
 Things to settle before building it:
 
@@ -579,5 +647,8 @@ Things to settle before building it:
   loaded the same way as the metadata tool. There is no separate config file (§6.3).
 - **Any depth counts**: role coverage treats a privilege granted at any depth as covered,
   and only reports the depth. A minimum-depth check is deferred until it is specified (§10).
+- **Roles per identity**: `--role` covers the caller and the application user, `--caller-role`
+  the user acted for through `CallerId`, and `Users` specific users. A requirement whose
+  identity has no roles is "not checked" instead of silently passing or failing (§6.2).
 - **Role suggestions deferred**: the first version answers "what is needed" and "do these
   roles cover it". Working out which roles would cover a requirement comes later.

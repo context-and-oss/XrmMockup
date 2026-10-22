@@ -1,3 +1,4 @@
+using XrmMockup.PermissionAnalyzer.Core.Coverage;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Output;
@@ -7,5 +8,6 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// </summary>
 internal interface IManifestWriter
 {
-    void Write(Manifest manifest, TextWriter writer);
+    /// <param name="coverage">Role coverage to show with each requirement, or <c>null</c> for the plain manifest.</param>
+    void Write(Manifest manifest, CoverageReport? coverage, TextWriter writer);
 }

@@ -66,6 +66,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
     private readonly Dictionary<string, ObjectState> _defaultObjects = new(StringComparer.Ordinal);
     private readonly HashSet<string> _constructing = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _returning = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Everything reachable from <paramref name="handlers"/>.
@@ -166,7 +167,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         var identities = Resolve(access.Service, frame, 0);
         if (identities.Count == 0) identities = [Unknown("service is null")];
 
-        var tables = BindTables(access.Tables, frame);
+        var tables = BindTables(access.Tables, frame, 0);
         foreach (var identity in identities)
         {
             if (identity.Assumption is { } assumption) result.Assumptions.Add(new AssumptionHit(assumption, source));
@@ -241,7 +242,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     /// What a call passes to <paramref name="callee"/>. A lambda or local function also sees the parameters of the
     /// method around it.
     /// </summary>
-    private IReadOnlyDictionary<(string, int), Binding> Bind(CallFact call, Frame caller, NodeSummary callee)
+    private IReadOnlyDictionary<(string, int), Binding> Bind(CallFact call, Frame caller, NodeSummary callee, int depth = 0)
     {
         var inherit = graph.Nodes.TryGetValue(caller.Node, out var callerNode) && callee.Member == callerNode.Member;
         if (call.Arguments.Count == 0)
@@ -255,18 +256,19 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         foreach (var argument in call.Arguments)
         {
             var services = argument.Value.Service is { } origins ? Resolve(origins, caller, 0) : null;
-            var tables = argument.Value.Tables?.ToDictionary(t => t.Key, t => BindTables(t.Value, caller));
+            var tables = argument.Value.Tables?.ToDictionary(t => t.Key, t => BindTables(t.Value, caller, depth));
             bindings[(callee.Id, argument.Key)] = new Binding(services, tables);
         }
         return bindings;
     }
 
     /// <summary>
-    /// Fills in the parameter slots of <paramref name="tables"/> from the call context.
+    /// Fills in the parameter slots of <paramref name="tables"/> from the call context, and the values returned by
+    /// calls from what each method that can run returns.
     /// </summary>
-    private static TableResolution BindTables(TableResolution tables, Frame frame)
+    private TableResolution BindTables(TableResolution tables, Frame frame, int depth)
     {
-        if (tables.Slots.Count == 0) return tables;
+        if (tables.IsBound) return tables;
 
         var result = TableResolution.Empty;
         foreach (var table in tables.Tables) result.Add(TableResolution.Table(table));
@@ -277,7 +279,38 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 ? bound!
                 : TableResolution.Unresolved(slot.Reason));
         }
+        foreach (var returned in tables.Returns) result.Add(Returned(returned, frame, depth + 1));
         return result;
+    }
+
+    private TableResolution Returned(ReturnedTables returned, Frame frame, int depth)
+    {
+        if (depth > MaxDepth) return TableResolution.Unresolved($"{returned.Reason}, through too many calls");
+
+        var result = TableResolution.Empty;
+        var cyclic = false;
+        foreach (var (target, state, _) in Dispatch(returned.Call, frame, depth))
+        {
+            if (!graph.Nodes.TryGetValue(target, out var callee) || !callee.ReturnTables.TryGetValue(returned.Shape, out var tables)) continue;
+
+            // A method that returns its own result, directly or through others, adds nothing the other returns don't
+            var key = target + "\n" + returned.Shape;
+            if (!_returning.Add(key))
+            {
+                cyclic = true;
+                continue;
+            }
+            try
+            {
+                var calleeFrame = new Frame(target, state, Bind(returned.Call, frame, callee, depth), frame.Basis, frame.Path, frame.Injected);
+                result.Add(BindTables(tables, calleeFrame, depth));
+            }
+            finally
+            {
+                _returning.Remove(key);
+            }
+        }
+        return cyclic ? result : result.OrUnresolved(returned.Reason);
     }
 
     private IReadOnlyList<Identity> Resolve(IEnumerable<ServiceOrigin> origins, Frame frame, int depth)

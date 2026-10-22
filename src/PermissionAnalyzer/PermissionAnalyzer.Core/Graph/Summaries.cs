@@ -135,6 +135,11 @@ internal sealed class NodeSummary(string id, string member, string display, stri
     public List<IReadOnlyList<ServiceOrigin>> Returns { get; } = [];
 
     /// <summary>
+    /// The tables this method returns per shape, when it returns an entity, query or string.
+    /// </summary>
+    public Dictionary<TableShape, TableResolution> ReturnTables { get; } = [];
+
+    /// <summary>
     /// Services stored in fields of the current object.
     /// </summary>
     public List<FieldWrite> FieldWrites { get; } = [];
@@ -149,6 +154,10 @@ internal sealed class NodeSummary(string id, string member, string display, stri
         MergeBySource(Calls, other.Calls, c => (c.Source, c.Target));
         Lambdas.UnionWith(other.Lambdas);
         if (Returns.Count == 0) Returns.AddRange(other.Returns);
+        if (ReturnTables.Count == 0)
+        {
+            foreach (var returned in other.ReturnTables) ReturnTables.Add(returned.Key, returned.Value);
+        }
         if (FieldWrites.Count == 0) FieldWrites.AddRange(other.FieldWrites);
     }
 

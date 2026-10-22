@@ -120,12 +120,41 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                     Node(Owner(operation, symbol)).Returns.Add(ServiceOf(value, symbol));
                     break;
 
+                case IReturnOperation { ReturnedValue: { } value }:
+                    ReturnedTables(Owner(operation, symbol), value, symbol);
+                    break;
+
                 case ISimpleAssignmentOperation assignment when FieldOf(assignment.Target) is { } field && symbols.IsService(assignment.Target.Type):
                     Node(Owner(operation, symbol)).FieldWrites.Add(new FieldWrite(field, ServiceOf(assignment.Value, symbol)));
                     break;
             }
         }
     }
+
+    /// <summary>
+    /// The tables a method returns, for every way a caller might read them, such as a query built by a helper.
+    /// </summary>
+    private void ReturnedTables(IMethodSymbol owner, IOperation value, IMethodSymbol root)
+    {
+        var resolver = Resolver(root);
+        var shapes = resolver.ShapesOf(owner.ReturnType);
+        if (shapes.Count == 0) return;
+
+        var returns = Node(owner).ReturnTables;
+        foreach (var shape in shapes)
+        {
+            var tables = resolver.Resolve(value, shape);
+            returns[shape] = returns.TryGetValue(shape, out var known) ? known.Add(tables) : tables;
+        }
+    }
+
+    /// <summary>
+    /// A table resolver for code in <paramref name="root"/>, which follows calls to methods in the solution.
+    /// </summary>
+    private TableResolver Resolver(IMethodSymbol root) => new(symbols, invocation =>
+        IsInSource(invocation.TargetMethod)
+            ? Call(invocation.TargetMethod, invocation.Instance, invocation.IsVirtual, invocation.Arguments, NameLocation(invocation.Syntax), root)
+            : null);
 
     private void Invocation(IInvocationOperation invocation, IMethodSymbol root)
     {
@@ -146,7 +175,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
     private IEnumerable<AccessFact> Accesses(IInvocationOperation invocation, string operation, IMethodSymbol root)
     {
-        var resolver = new TableResolver(symbols);
+        var resolver = Resolver(root);
         var first = Argument(invocation, 0);
         var site = new Site(operation, paths.Of(NameLocation(invocation.Syntax)), ServiceOf(invocation.Instance, root));
 
@@ -241,7 +270,8 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     }
 
     /// <summary>
-    /// What each argument passes on: its services, and its tables for every way the callee might read them.
+    /// What each argument passes on: its services, and its tables for every way the callee might read them. The
+    /// type arguments of a generic method are passed as tables too, under <see cref="TableSlot.TypeParameterOrdinal"/>.
     /// </summary>
     private IReadOnlyDictionary<int, ArgumentFact> Arguments(IMethodSymbol target, IReadOnlyList<IArgumentOperation> arguments, bool isVirtual, IMethodSymbol root)
     {
@@ -256,7 +286,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             Dictionary<TableShape, TableResolution>? tables = null;
             if (tablesMatter)
             {
-                var resolver = new TableResolver(symbols);
+                var resolver = Resolver(root);
                 foreach (var shape in resolver.ShapesOf(parameter.Type))
                 {
                     tables ??= new Dictionary<TableShape, TableResolution>();
@@ -265,6 +295,19 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             }
 
             if (service is not null || tables is not null) result[parameter.Ordinal] = new ArgumentFact(service, tables);
+        }
+
+        if (tablesMatter && target.IsGenericMethod)
+        {
+            var resolver = Resolver(root);
+            var typeArguments = (target.ReducedFrom is not null ? target.GetConstructedReducedFrom() ?? target : target).TypeArguments;
+            for (var i = 0; i < typeArguments.Length; i++)
+            {
+                result[TableSlot.TypeParameterOrdinal(i)] = new ArgumentFact(null, new Dictionary<TableShape, TableResolution>
+                {
+                    [TableShape.Entity] = resolver.TypeArgument(typeArguments[i]),
+                });
+            }
         }
         return result;
     }

@@ -1,3 +1,5 @@
+using XrmMockup.PermissionAnalyzer.Core.Graph;
+
 namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 
 /// <summary>
@@ -7,13 +9,16 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// </summary>
 /// <remarks>
 /// A value that comes from a method parameter is kept as a <see cref="TableSlot"/>, so the call graph can fill
-/// it in from the argument at each call site. Where no call site binds it, the slot's reason is reported.
+/// it in from the argument at each call site. Where no call site binds it, the slot's reason is reported. A value
+/// returned by a method in the solution is kept as a <see cref="ReturnedTables"/>, resolved from the method's
+/// return values in the context of the call.
 /// </remarks>
 internal sealed class TableResolution
 {
     private readonly SortedSet<string> _tables = new(StringComparer.Ordinal);
     private readonly SortedSet<string> _reasons = new(StringComparer.Ordinal);
     private readonly SortedSet<TableSlot> _slots = new();
+    private readonly SortedSet<ReturnedTables> _returns = new();
 
     public IReadOnlyCollection<string> Tables => _tables;
 
@@ -27,7 +32,17 @@ internal sealed class TableResolution
     /// </summary>
     public IReadOnlyCollection<TableSlot> Slots => _slots;
 
-    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && _slots.Count == 0;
+    /// <summary>
+    /// Calls whose return value the value depends on, resolved per call context.
+    /// </summary>
+    public IReadOnlyCollection<ReturnedTables> Returns => _returns;
+
+    /// <summary>
+    /// Set when nothing in the value depends on the call context: no parameter and no method's return value.
+    /// </summary>
+    public bool IsBound => _slots.Count == 0 && _returns.Count == 0;
+
+    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && IsBound;
 
     public static TableResolution Empty => new();
 
@@ -52,11 +67,19 @@ internal sealed class TableResolution
         return result;
     }
 
+    public static TableResolution Returned(ReturnedTables returned)
+    {
+        var result = new TableResolution();
+        result._returns.Add(returned);
+        return result;
+    }
+
     public TableResolution Add(TableResolution other)
     {
         _tables.UnionWith(other._tables);
         _reasons.UnionWith(other._reasons);
         _slots.UnionWith(other._slots);
+        _returns.UnionWith(other._returns);
         return this;
     }
 
@@ -69,7 +92,7 @@ internal sealed class TableResolution
     /// A stable text form, used to tell call contexts apart.
     /// </summary>
     public override string ToString() =>
-        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "$" + string.Join("|", _slots);
+        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns);
 }
 
 /// <summary>
@@ -89,11 +112,18 @@ internal enum TableShape
 }
 
 /// <summary>
-/// A table that depends on parameter <see cref="Ordinal"/> of <see cref="Method"/>, read as <see cref="Shape"/>.
+/// A table that depends on parameter <see cref="Ordinal"/>, or on a type parameter of a generic method (see
+/// <see cref="TypeParameterOrdinal"/>) of <see cref="Method"/>, read as <see cref="Shape"/>.
 /// <see cref="Reason"/> is reported when no call site provides the argument.
 /// </summary>
 internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, string Reason) : IComparable<TableSlot>
 {
+    /// <summary>
+    /// The ordinal a method's type parameter is bound under. Negative, so it never clashes with a parameter: a
+    /// call binds type argument <c>i</c> as if it were argument <c>-1 - i</c>, read as <see cref="TableShape.Entity"/>.
+    /// </summary>
+    public static int TypeParameterOrdinal(int ordinal) => -1 - ordinal;
+
     public int CompareTo(TableSlot? other)
     {
         if (other is null) return 1;
@@ -104,4 +134,22 @@ internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, s
     }
 
     public override string ToString() => $"{Method}#{Ordinal}:{Shape}";
+}
+
+/// <summary>
+/// The tables of the value <see cref="Call"/> returns, read as <see cref="Shape"/>, such as a query built by a
+/// helper method. <see cref="Reason"/> is reported when the method isn't in the call graph or returns nothing known.
+/// </summary>
+internal sealed record ReturnedTables(CallFact Call, TableShape Shape, string Reason) : IComparable<ReturnedTables>
+{
+    public int CompareTo(ReturnedTables? other)
+    {
+        if (other is null) return 1;
+        var result = Call.Source.CompareTo(other.Call.Source);
+        if (result == 0) result = string.CompareOrdinal(Call.Target, other.Call.Target);
+        if (result == 0) result = Shape.CompareTo(other.Shape);
+        return result != 0 ? result : string.CompareOrdinal(Reason, other.Reason);
+    }
+
+    public override string ToString() => $"{Call.Target}@{Call.Source}:{Shape}";
 }

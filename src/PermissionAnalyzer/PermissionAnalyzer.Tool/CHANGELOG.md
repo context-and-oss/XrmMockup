@@ -19,3 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: Methods with service calls that no entry point reaches are listed separately
 * Change: `--project` also analyzes the projects it references, so entry points reach code in shared libraries
 * Change: A missing metadata folder is a warning, because security roles and plugin steps are then not used
+* Add: `check` command, which checks the requirements against security roles from the metadata, per identity: `--role` for the caller and the application user, `--caller-role` for users acted for through `CallerId`, and the `Principals` and `Users` settings. Exits with `1` when a privilege is missing; `--strict` also fails on unresolved operations, unchecked identities and unverifiable privileges
+* Add: `--role` and `--caller-role` on `required`, which mark each requirement as granted or missing without changing the exit code
+* Add: `Principals`, `Users` and `Suppress` settings under `XrmMockup:Permissions`
+* Add: Unknown role names are an error that suggests the closest names
+* Add: Table resolution through the values helper methods return, with the arguments of each call, and through type arguments of generic methods
+* Add: A `Not checked` line after the result, listing unresolved operations, identities without roles, the impersonation privilege and Append/AppendTo, and `unresolvedExecute` and `incomplete` in the JSON result. `check` warns when it passes with something not checked
+* Add: A `Missing privileges` list after the result, with each missing privilege once, the roles that lack it and the entry points that need it, also as `missing` in JSON. The `check` error names the missing privileges
+* Change: The counts line names unreached methods and counts distinct table privileges next to the requirements per entry point and method

@@ -93,7 +93,7 @@ public class DeterminismTests
     private static string Write(IManifestWriter writer, ManifestBuilder builder)
     {
         using var output = new StringWriter();
-        writer.Write(builder.Build(["account"]), output);
+        writer.Write(builder.Build(["account"]), null, output);
         return output.ToString();
     }
 }

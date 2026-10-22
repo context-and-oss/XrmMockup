@@ -4,7 +4,8 @@ using XrmMockup.PermissionAnalyzer.Tool.Commands;
 
 var rootCommand = new RootCommand("XrmMockup Permission Analyzer - Work out which Dataverse privileges your code needs, by static analysis")
 {
-    RequiredCommand.Create()
+    RequiredCommand.Create(),
+    CheckCommand.Create()
 };
 
 var parseResult = rootCommand.Parse(args);

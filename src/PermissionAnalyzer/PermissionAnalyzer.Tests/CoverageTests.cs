@@ -1,0 +1,436 @@
+using XrmMockup.PermissionAnalyzer.Core.Coverage;
+using XrmMockup.PermissionAnalyzer.Core.Model;
+using XrmMockup.PermissionAnalyzer.Tool;
+using XrmMockup.PermissionAnalyzer.Tool.Commands;
+using XrmMockup.PermissionAnalyzer.Tool.Options;
+using XrmMockup.PermissionAnalyzer.Tool.Output;
+
+namespace XrmMockup.PermissionAnalyzer.Tests;
+
+public class CoverageTests
+{
+    private const string UserId = "6a1e5c4d-2b3f-4a5e-8c7d-9e0f1a2b3c4d";
+
+    private static readonly RoleDefinition Salesperson = Role("Salesperson",
+        ("account", Privilege.Read, PrivilegeDepth.User),
+        ("account", Privilege.Write, PrivilegeDepth.User),
+        ("contact", Privilege.Read, PrivilegeDepth.BusinessUnit));
+
+    private static readonly RoleDefinition Manager = Role("Sales Manager",
+        ("account", Privilege.Read, PrivilegeDepth.Organization),
+        ("contact", Privilege.Create, PrivilegeDepth.User));
+
+    private static readonly RoleDefinition Integration = Role("Integration App",
+        ("account", Privilege.Create, PrivilegeDepth.Organization),
+        ("contact", Privilege.Delete, PrivilegeDepth.Organization));
+
+    private static readonly string[] Governed = ["account", "contact"];
+
+    private const string PluginSource = """
+        public class P : Plugin
+        {
+            public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, Execute);
+
+            private void Execute(LocalPluginContext context)
+            {
+                context.OrganizationService.Retrieve("account", Guid.Empty, new ColumnSet());
+                context.OrganizationService.Create(new Contact());
+                context.OrganizationAdminService.Delete("contact", Guid.Empty);
+            }
+        }
+        """;
+
+    private const string FunctionSource = """
+        public class Functions
+        {
+            [Microsoft.Azure.Functions.Worker.Function("ProcessOrder")]
+            public void Run([Microsoft.Azure.Functions.Worker.HttpTrigger] object request)
+            {
+                var client = new Microsoft.PowerPlatform.Dataverse.Client.ServiceClient("AuthType=ClientSecret");
+                client.Create(new Account());
+            }
+
+            [Microsoft.Azure.Functions.Worker.Function("ActForUser")]
+            public static void ActForUser([Microsoft.Azure.Functions.Worker.TimerTrigger("0 * * * *")] object timer, Guid userId)
+            {
+                var client = new Microsoft.PowerPlatform.Dataverse.Client.ServiceClient("AuthType=ClientSecret");
+                client.CallerId = userId;
+                client.Delete("contact", Guid.Empty);
+            }
+        }
+        """;
+
+    [Fact]
+    public void CombinedRolesGrantTheUnionWithTheHighestDepth()
+    {
+        var roles = RoleSet.Combine([Salesperson, Manager], "--role");
+
+        Assert.Equal(["Sales Manager", "Salesperson"], roles.Names);
+        Assert.Equal(PrivilegeDepth.Organization, roles.Depth("account", Privilege.Read));
+        Assert.Equal(PrivilegeDepth.User, roles.Depth("account", Privilege.Write));
+        Assert.Equal(PrivilegeDepth.User, roles.Depth("contact", Privilege.Create));
+        Assert.Null(roles.Depth("contact", Privilege.Delete));
+        Assert.Null(roles.Depth("lead", Privilege.Read));
+    }
+
+    [Fact]
+    public void CallerRequirementsAreCheckedAgainstTheRoles()
+    {
+        var manifest = Analyze.Code(PluginSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Equal(
+            ["account:Read as Caller: Granted User", "contact:Create as Caller: Missing", "contact:Delete as System: System"],
+            Results(report, entry));
+        Assert.Equal(new CoverageSummary(1, 0, 1, 0, 0, 1, 0, 0, 0), report.Summary);
+        Assert.False(report.Summary.Passed(strict: false));
+
+        var identity = Assert.Single(report.For(entry).Identities);
+        Assert.Equal(RunsAs.Caller, identity.RunsAs);
+        Assert.Equal("Salesperson (--role)", identity.Roles?.ToString());
+    }
+
+    [Fact]
+    public void AnyDepthCountsAndCombinedRolesCover()
+    {
+        var manifest = Analyze.Code(PluginSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson, Manager], "--role") });
+
+        Assert.Equal(
+            ["account:Read as Caller: Granted Organization", "contact:Create as Caller: Granted User", "contact:Delete as System: System"],
+            Results(report, manifest.Entry("plugin:P:Update:account:PostOperation")));
+        Assert.True(report.Summary.Passed(strict: true));
+    }
+
+    [Fact]
+    public void ApplicationUserRolesComeFromPrincipalsWithTheFunctionWinning()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var options = new CoverageOptions
+        {
+            Principals = new Dictionary<string, RoleSet>
+            {
+                ["test"] = RoleSet.Combine([Salesperson], "Principals: Test"),
+                ["Test/ProcessOrder"] = RoleSet.Combine([Integration], "Principals: Test/ProcessOrder"),
+            },
+        };
+        var report = CoverageEvaluator.Evaluate(manifest, options);
+
+        var process = manifest.Entry("function:ProcessOrder");
+        Assert.Equal(["account:Create as ApplicationUser: Granted Organization"], Results(report, process));
+        Assert.Equal("Integration App (Principals: Test/ProcessOrder)", Assert.Single(report.For(process).Identities).Roles?.ToString());
+        Assert.True(report.UsesConfiguredRoles);
+    }
+
+    [Fact]
+    public void RoleOptionReplacesPrincipals()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var options = new CoverageOptions
+        {
+            Roles = RoleSet.Combine([Salesperson], "--role"),
+            Principals = new Dictionary<string, RoleSet> { ["Test"] = RoleSet.Combine([Integration], "Principals: Test") },
+        };
+        var report = CoverageEvaluator.Evaluate(manifest, options);
+
+        Assert.Equal(["account:Create as ApplicationUser: Missing"], Results(report, manifest.Entry("function:ProcessOrder")));
+        Assert.False(report.UsesConfiguredRoles);
+    }
+
+    [Fact]
+    public void ApplicationUserWithoutRolesIsNotChecked()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { CallerRoles = RoleSet.Combine([Integration], "--caller-role") });
+
+        var process = manifest.Entry("function:ProcessOrder");
+        Assert.Equal(["account:Create as ApplicationUser: NotChecked"], Results(report, process));
+        Assert.Equal("not checked: pass --role, or map Test in XrmMockup:Permissions:Principals", Assert.Single(report.For(process).Identities).Note);
+        Assert.True(report.Summary.Passed(strict: false));
+        Assert.False(report.Summary.Passed(strict: true));
+    }
+
+    [Fact]
+    public void ImpersonatedCallsUseCallerRolesAndNeedAnUnverifiablePrivilege()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var withoutCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
+        var actForUser = manifest.Entry("function:ActForUser");
+
+        Assert.Equal(["contact:Delete as ImpersonatedCaller: NotChecked"], Results(withoutCallerRoles, actForUser));
+        Assert.StartsWith("not checked: acts for the user in CallerId", Assert.Single(withoutCallerRoles.For(actForUser).Identities).Note);
+
+        // The application user's roles don't count: the call runs with the impersonated user's privileges
+        var withCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Roles = RoleSet.Combine([Integration], "--role"),
+            CallerRoles = RoleSet.Combine([Salesperson], "--caller-role"),
+        });
+        Assert.Equal(["contact:Delete as ImpersonatedCaller: Missing"], Results(withCallerRoles, actForUser));
+
+        var impersonation = withCallerRoles.For(actForUser).Impersonation;
+        Assert.Equal(RunsAs.ApplicationUser, impersonation?.RunsAs);
+        Assert.Null(withCallerRoles.For(manifest.Entry("function:ProcessOrder")).Impersonation);
+        Assert.Equal(1, withCallerRoles.Summary.Unverifiable);
+    }
+
+    [Fact]
+    public void UnverifiableImpersonationOnlyFailsWhenStrict()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Roles = RoleSet.Combine([Integration], "--role"),
+            CallerRoles = RoleSet.Combine([Integration], "--caller-role"),
+        });
+
+        Assert.True(report.Summary.Passed(strict: false));
+        Assert.False(report.Summary.Passed(strict: true));
+    }
+
+    [Fact]
+    public void ImpersonatingUserOfAStepUsesTheUsersMapping()
+    {
+        var source = $$"""
+            public class P : Plugin
+            {
+                public P()
+                {
+                    RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c => c.OrganizationService.Create(new Contact()))
+                        .SetUserContext(new Guid("{{UserId}}"));
+                }
+            }
+            """;
+        var manifest = Analyze.Code(source, Governed);
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+
+        // --role is for the caller, not for a specific user
+        var unmapped = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Manager], "--role") });
+        Assert.Equal([$"contact:Create as User {UserId}: NotChecked"], Results(unmapped, entry));
+        Assert.Equal($"not checked: runs as user {UserId}; map it in XrmMockup:Permissions:Users", Assert.Single(unmapped.For(entry).Identities).Note);
+
+        var mapped = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Users = new Dictionary<string, RoleSet> { [UserId.ToUpperInvariant()] = RoleSet.Combine([Manager], "Users: svc-plugins") },
+        });
+        Assert.Equal([$"contact:Create as User {UserId}: Granted User"], Results(mapped, entry));
+        Assert.True(mapped.UsesConfiguredRoles);
+    }
+
+    [Fact]
+    public void AssumedIdentitiesAreChecked()
+    {
+        var manifest = Analyze.Code("""
+            namespace Contoso
+            {
+                public class Importer
+                {
+                    public void Run(IOrganizationService service) => service.Delete("contact", Guid.Empty);
+                }
+            }
+            """, Governed, setup: b => b.AddEntryMethods(["Contoso.Importer.Run"]));
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+
+        Assert.Equal(["contact:Delete as ApplicationUser (assumed): Missing"], Results(report, Assert.Single(manifest.EntryPoints)));
+        Assert.Equal(1, report.Summary.Missing);
+    }
+
+    [Fact]
+    public void TablesNoRoleGovernsAreCovered()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c => c.OrganizationService.Create(new Entity("ctx_log")));
+            }
+            """, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+
+        Assert.Equal(["ctx_log:Create as Caller: NotGoverned"], Results(report, Assert.Single(manifest.EntryPoints)));
+        Assert.True(report.Summary.Passed(strict: true));
+    }
+
+    [Fact]
+    public void SuppressedPrivilegesDontFail()
+    {
+        var manifest = Analyze.Code(PluginSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Roles = RoleSet.Combine([Salesperson], "--role"),
+            Suppress = [new Suppression("contact", Privilege.Create, "Created by a flow"), new Suppression("account", null, "Not used")],
+        });
+
+        var entry = Assert.Single(manifest.EntryPoints);
+        Assert.Equal(
+            ["account:Read as Caller: Granted User", "contact:Create as Caller: Suppressed", "contact:Delete as System: System"],
+            Results(report, entry));
+        Assert.Equal("Created by a flow", report.For(entry).For(entry.Requirements[1]).Reason);
+        Assert.True(report.Summary.Passed(strict: true));
+    }
+
+    [Fact]
+    public void RoleCatalogFindsNamesIgnoringCaseAndSuggestsClosest()
+    {
+        var catalog = new RoleCatalog([Integration, Manager, Salesperson]);
+
+        Assert.Same(Salesperson, Assert.Single(catalog.Find("salesperson")));
+        Assert.Empty(catalog.Find("Sales"));
+        Assert.Equal("Salesperson", catalog.Suggest("Salesperon")[0]);
+        // Both contain the name, so the closer one comes first
+        Assert.Equal(["Salesperson", "Sales Manager"], catalog.Suggest("sales").Take(2));
+        Assert.Empty(catalog.Suggest("Marketing"));
+    }
+
+    [Fact]
+    public void UnknownRoleIsAnErrorWithSuggestions()
+    {
+        var error = Assert.Throws<ToolException>(() =>
+            CoverageSetup.Create([Integration, Manager, Salesperson], ["Salesperon"], [], new PermissionsConfiguration(), requireRoles: true));
+
+        Assert.Contains("Unknown security role 'Salesperon' in --role. Did you mean 'Salesperson'", error.Message);
+    }
+
+    [Fact]
+    public void UnknownRoleInConfigurationNamesTheSetting()
+    {
+        var configuration = new PermissionsConfiguration
+        {
+            Principals = new() { ["Contoso.Functions"] = new PrincipalConfiguration { Roles = ["Integration"] } },
+        };
+        var error = Assert.Throws<ToolException>(() => CoverageSetup.Create([Integration], [], [], configuration, requireRoles: true));
+
+        Assert.Contains("in XrmMockup:Permissions:Principals:Contoso.Functions. Did you mean 'Integration App'?", error.Message);
+    }
+
+    [Fact]
+    public void CheckNeedsRolesAndRequiredDoesnt()
+    {
+        Assert.Null(CoverageSetup.Create([Salesperson], [], [], new PermissionsConfiguration(), requireRoles: false));
+        var error = Assert.Throws<ToolException>(() => CoverageSetup.Create([Salesperson], [], [], new PermissionsConfiguration(), requireRoles: true));
+        Assert.StartsWith("No roles to check against", error.Message);
+    }
+
+    [Fact]
+    public void SuppressionWithUnknownPrivilegeIsAnError()
+    {
+        var configuration = new PermissionsConfiguration { Suppress = [new SuppressionConfiguration { Table = "account", Privilege = "Update" }] };
+        var error = Assert.Throws<ToolException>(() => CoverageSetup.Create([Salesperson], ["Salesperson"], [], configuration, requireRoles: true));
+
+        Assert.StartsWith("XrmMockup:Permissions:Suppress:0 has an unknown Privilege 'Update'", error.Message);
+    }
+
+    [Fact]
+    public void MissingPrivilegesAreMergedAcrossEntryPoints()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P()
+                {
+                    RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c => c.OrganizationService.Create(new Contact()));
+                    RegisterPluginStep<Account>(EventOperation.Create, ExecutionStage.PostOperation, c => c.OrganizationService.Create(new Contact()));
+                    RegisterPluginStep<Account>(EventOperation.Delete, ExecutionStage.PreOperation, c => c.OrganizationService.Delete("account", Guid.Empty));
+                }
+            }
+            """, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+
+        Assert.Equal(
+            [
+                "account:Delete as Caller (Salesperson (--role)) in plugin:P:Delete:account:PreOperation",
+                "contact:Create as Caller (Salesperson (--role)) in plugin:P:Create:account:PostOperation, plugin:P:Update:account:PostOperation",
+            ],
+            report.Missing.Select(m => $"{m.Table}:{m.Privilege} as {m.RunsAs} ({m.Roles}) in {string.Join(", ", m.In)}"));
+        Assert.Equal(3, report.Summary.Missing);
+    }
+
+    [Fact]
+    public void TextOutputMarksEachRequirement()
+    {
+        var manifest = Analyze.Code(PluginSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+        using var output = new StringWriter();
+        new TextManifestWriter().Write(manifest, report, output);
+        var lines = output.ToString().Split('\n');
+
+        Assert.Contains("  roles for Caller: Salesperson (--role)", lines);
+        Assert.Contains(lines, l => l.StartsWith("  ✔ account  Read      Caller  User     ", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.StartsWith("  ✘ contact  Create    Caller  missing  ", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.StartsWith("  · contact  Delete    System  SYSTEM   ", StringComparison.Ordinal));
+        Assert.Contains("Result: 1 granted, 1 missing, 1 as SYSTEM", lines);
+        Assert.Contains("Missing privileges:", lines);
+        Assert.Contains("  ✘ contact  Create  Caller  Salesperson (--role)  in plugin:P:Update:account:PostOperation", lines);
+        Assert.Contains("Not checked: Append and AppendTo on lookups (not analyzed yet)", lines);
+        Assert.Contains(lines, l => l.StartsWith("1 entry point, 0 unreached methods, 2 tables, 3 table privileges (3 requirements counted per entry point and method)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TextOutputListsWhatWasNotChecked()
+    {
+        var summary = new CoverageSummary(Granted: 2, NotGoverned: 0, Missing: 0, Suppressed: 0, NotChecked: 1, System: 0, Unresolved: 3, UnresolvedExecute: 2, Unverifiable: 1);
+        Assert.True(summary.Incomplete);
+        Assert.True(summary.Passed(strict: false));
+        Assert.False(summary.Passed(strict: true));
+
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
+        using var output = new StringWriter();
+        new TextManifestWriter().Write(manifest, report, output);
+        var line = Assert.Single(output.ToString().Split('\n'), l => l.StartsWith("Not checked: ", StringComparison.Ordinal));
+
+        Assert.Contains("prvActOnBehalfOfAnotherUser for 1 entry point", line);
+        Assert.EndsWith("Append and AppendTo on lookups (not analyzed yet)", line);
+    }
+
+    [Fact]
+    public void TextOutputShowsTheImpersonationPrivilege()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
+        using var output = new StringWriter();
+        new TextManifestWriter().Write(manifest, report, output);
+        var text = output.ToString();
+
+        Assert.Contains("  ! prvActOnBehalfOfAnotherUser as ApplicationUser: unverifiable", text);
+        Assert.Contains("  roles for ImpersonatedCaller: not checked: acts for the user in CallerId", text);
+    }
+
+    [Fact]
+    public void JsonOutputHasCoverageOnlyWithRoles()
+    {
+        var manifest = Analyze.Code(PluginSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+
+        using var plain = new StringWriter();
+        new JsonManifestWriter().Write(manifest, null, plain);
+        Assert.DoesNotContain("coverage", plain.ToString());
+        Assert.DoesNotContain("\"result\"", plain.ToString());
+        Assert.DoesNotContain("\"missing\"", plain.ToString());
+
+        using var covered = new StringWriter();
+        new JsonManifestWriter().Write(manifest, report, covered);
+        var json = covered.ToString();
+        Assert.Contains("\"status\": \"granted\"", json);
+        Assert.Contains("\"depth\": \"User\"", json);
+        Assert.Contains("\"status\": \"missing\"", json);
+        Assert.Contains("\"origin\": \"--role\"", json);
+        Assert.Contains("\"missing\": 1", json);
+        Assert.Contains("\"unresolvedExecute\": 0", json);
+        Assert.Contains("\"in\": [\n        \"plugin:P:Update:account:PostOperation\"\n      ]", json);
+        Assert.Contains("\"incomplete\": false", json);
+    }
+
+    private static IReadOnlyList<string> Results(CoverageReport report, EntryPoint entryPoint) =>
+        entryPoint.Requirements.Select(r =>
+        {
+            var coverage = report.For(entryPoint).For(r);
+            var depth = coverage.Depth is { } d ? $" {d}" : "";
+            return $"{r.Table}:{r.Privilege} as {r.RunsAs}: {coverage.Status}{depth}";
+        }).ToList();
+
+    private static RoleDefinition Role(string name, params (string Table, Privilege Privilege, PrivilegeDepth Depth)[] privileges) =>
+        new(name, privileges
+            .GroupBy(p => p.Table)
+            .ToDictionary(g => g.Key, g => (IReadOnlyDictionary<Privilege, PrivilegeDepth>)g.ToDictionary(p => p.Privilege, p => p.Depth)));
+}

@@ -78,4 +78,23 @@ internal static class CliOptions
         public const string Primary = "--entry";
         public const string Description = "Only analyze this method, e.g. Contoso.Sync.Importer.Run, as an entry point. Repeatable";
     }
+
+    internal static class Role
+    {
+        public const string Primary = "--role";
+        public const string Alias = "-r";
+        public const string Description = "Security role of the caller and the application user, by name. Repeatable; roles combine. Replaces XrmMockup:Permissions:Principals";
+    }
+
+    internal static class CallerRole
+    {
+        public const string Primary = "--caller-role";
+        public const string Description = "Security role of the user that app code acts for by setting CallerId, by name. Repeatable";
+    }
+
+    internal static class Strict
+    {
+        public const string Primary = "--strict";
+        public const string Description = "Also fail on unresolved operations, identities without roles and privileges that can't be checked";
+    }
 }

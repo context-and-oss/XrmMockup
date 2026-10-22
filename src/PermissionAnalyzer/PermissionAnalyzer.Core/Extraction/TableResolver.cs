@@ -3,6 +3,7 @@ using System.Xml;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
+using XrmMockup.PermissionAnalyzer.Core.Graph;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 
@@ -10,7 +11,12 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// Works out which tables a value refers to: early-bound types, constants, FetchXML and assignments to locals
 /// in the same method. Anything else becomes a reason in the resolution, never a guess.
 /// </summary>
-internal sealed class TableResolver(XrmSymbols symbols)
+/// <remarks>
+/// Parameters and type parameters of the method become slots, filled in per call site. <paramref name="calls"/>
+/// turns a call to a method in the solution into the call graph's view of it, so the tables of its return value
+/// are resolved per call context too; without it such a value is unresolved.
+/// </remarks>
+internal sealed class TableResolver(XrmSymbols symbols, Func<IInvocationOperation, CallFact?>? calls = null)
 {
     // Stands in for runtime text inside a FetchXML template. Private use area, so real FetchXML never contains it.
     private const char Hole = '';
@@ -58,7 +64,7 @@ internal sealed class TableResolver(XrmSymbols symbols)
         {
             if (op is null) return TableResolution.Unresolved("entity argument is missing");
             if (symbols.LogicalNameOf(op.Type) is { } logicalName) return TableResolution.Table(logicalName);
-            if (op.Type is ITypeParameterSymbol typeParameter) return TableResolution.Unresolved($"table depends on type parameter '{typeParameter.Name}'");
+            if (op.Type is ITypeParameterSymbol typeParameter) return TypeParameter(typeParameter);
 
             var inner = UnwrapOnce(op);
             if (inner is null) break;
@@ -214,6 +220,14 @@ internal sealed class TableResolver(XrmSymbols symbols)
         TableShape.EntityReferences => EntityReferences(operation),
         _ => Records(operation),
     };
+
+    /// <summary>
+    /// The table of a type argument, such as <c>Account</c> in <c>repository.Retrieve&lt;Account&gt;()</c>.
+    /// </summary>
+    public TableResolution TypeArgument(ITypeSymbol type) =>
+        symbols.LogicalNameOf(type) is { } logicalName ? TableResolution.Table(logicalName)
+        : type is ITypeParameterSymbol typeParameter ? TypeParameter(typeParameter)
+        : TableResolution.Unresolved($"type '{type.Name}' has no table");
 
     /// <summary>
     /// The shapes a parameter of <paramref name="type"/> can be read as; empty when it can't name a table.
@@ -542,12 +556,29 @@ internal sealed class TableResolver(XrmSymbols symbols)
     private readonly record struct LocalValue(IOperation Operation, bool IsLoopCollection);
 
     /// <summary>
-    /// A value the resolver can't follow. A method parameter becomes a slot for the call graph to fill in.
+    /// A value the resolver can't follow here. A method parameter becomes a slot for the call graph to fill in, and
+    /// a call to a method in the solution is resolved from what that method returns.
     /// </summary>
-    private static TableResolution Unknown(IOperation? operation, string what, TableShape shape) =>
-        operation is IParameterReferenceOperation { Parameter.ContainingSymbol: IMethodSymbol method } parameter
-            ? TableResolution.Slot(new TableSlot(Nodes.Id(method), parameter.Parameter.Ordinal, shape, Describe(operation, what)))
-            : TableResolution.Unresolved(Describe(operation, what));
+    private TableResolution Unknown(IOperation? operation, string what, TableShape shape) => operation switch
+    {
+        IParameterReferenceOperation { Parameter.ContainingSymbol: IMethodSymbol method } parameter =>
+            TableResolution.Slot(new TableSlot(Nodes.Id(method), parameter.Parameter.Ordinal, shape, Describe(operation, what))),
+        IInvocationOperation invocation when calls?.Invoke(invocation) is { } call =>
+            TableResolution.Returned(new ReturnedTables(call, shape, Describe(operation, what))),
+        _ => TableResolution.Unresolved(Describe(operation, what)),
+    };
+
+    /// <summary>
+    /// A type parameter of a generic method becomes a slot for the type argument at each call site. One of a
+    /// generic type is unresolved.
+    /// </summary>
+    private static TableResolution TypeParameter(ITypeParameterSymbol typeParameter)
+    {
+        var reason = $"table depends on type parameter '{typeParameter.Name}'";
+        return typeParameter.DeclaringMethod is { } method
+            ? TableResolution.Slot(new TableSlot(Nodes.Id(method), TableSlot.TypeParameterOrdinal(typeParameter.Ordinal), TableShape.Entity, reason))
+            : TableResolution.Unresolved(reason);
+    }
 
     private static string Describe(IOperation? operation, string what) => operation switch
     {
