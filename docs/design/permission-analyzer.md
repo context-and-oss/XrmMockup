@@ -317,7 +317,10 @@ impersonated. Mockup does the same through `RequestExecutionPipeline`. The analy
 1. Builds a step registry from code registrations (§5.1) merged with metadata registrations.
 2. For each operation `(message, table, attributes)`, finds matching steps. For Update it
    respects `FilteredAttributes` when the set attributes are known. When they aren't, the
-   step is included with basis `filter-unknown`.
+   step is included with basis `filter-unknown`. The set attributes are tracked like the
+   lookups set on a record: early-bound properties, indexers and `Attributes.Add` on a created
+   entity or a local, and on a parameter per call site. An entity from elsewhere, a computed
+   column name, or an entity passed to another method in the solution makes them unknown.
 3. Adds the step's requirements under the **effective** identity (caller, or the step's
    impersonating user), and expands the operations of the step in turn. Each step is expanded
    once per identity and basis per entry point, which bounds the expansion and stops cycles, so
@@ -673,7 +676,7 @@ location of each missing privilege.
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
-| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code), then `--operation` scope, FilteredAttributes, and plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
+| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes), then `--operation` scope and plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |

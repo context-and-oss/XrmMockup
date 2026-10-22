@@ -3,10 +3,17 @@ using XrmMockup.PermissionAnalyzer.Core.Model;
 namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 
 /// <summary>
-/// A plugin step or custom API that runs when an operation fires its message. <see cref="Code"/> is <c>null</c>
-/// for a step from the metadata whose plugin code isn't loaded.
+/// A plugin step or custom API that runs when an operation fires its message. <see cref="FilteredAttributes"/> are
+/// the columns an Update step runs for, or <c>null</c> when it runs on every update. <see cref="Code"/> is
+/// <c>null</c> for a step from the metadata whose plugin code isn't loaded.
 /// </summary>
-internal sealed record CascadeStep(string Id, string Message, string? Table, string? ImpersonatingUserId, EntryCandidate? Code);
+internal sealed record CascadeStep(
+    string Id,
+    string Message,
+    string? Table,
+    string? ImpersonatingUserId,
+    IReadOnlyList<string>? FilteredAttributes,
+    EntryCandidate? Code);
 
 /// <summary>
 /// An evaluation with the hits of every step its operations fire, and the ids of those steps, sorted.
@@ -18,6 +25,8 @@ internal sealed record CascadeResult(EvaluationResult Result, IReadOnlyList<stri
 /// turn, as Dataverse runs them in the request pipeline. A fired step runs as the identity of the operation that
 /// fired it, unless it impersonates. Each step is expanded once per identity and basis, which also stops cycles.
 /// An operation on an unknown table only runs the steps without a table; the others are reported as unresolved.
+/// An update runs an Update step filtered on columns when it sets one of them, and, with the basis
+/// <see cref="RequirementBasis.FilterUnknown"/>, when the columns it sets aren't all known.
 /// </summary>
 internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, Func<EntryCandidate, RunsAs, EntryContext> context)
 {
@@ -46,7 +55,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
         {
             var (current, currentBasis) = queue.Dequeue();
             var triggers = current.Triggers
-                .GroupBy(t => (Message: t.Message.ToLowerInvariant(), Table: t.Table?.ToLowerInvariant(), t.RunsAs, t.Basis))
+                .GroupBy(t => (Message: t.Message.ToLowerInvariant(), Table: t.Table?.ToLowerInvariant(), t.RunsAs, t.Basis, Columns: t.Columns is null ? null : string.Join(",", t.Columns)))
                 .Select(g => g.First());
             foreach (var trigger in triggers)
             {
@@ -60,11 +69,11 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
                         trigger.Source));
                 }
 
-                foreach (var step in Matching(trigger))
+                foreach (var (step, filterBasis) in Matching(trigger))
                 {
                     fired.Add(step.Id);
                     var runsAs = step.ImpersonatingUserId is { } user ? RunsAs.User(user) : trigger.RunsAs;
-                    var basis = Max(currentBasis, trigger.Basis);
+                    var basis = Max(Max(currentBasis, trigger.Basis), filterBasis);
                     if (!done.Add((step.Id, runsAs, basis))) continue;
 
                     var table = trigger.Table is null ? trigger.Message : $"{trigger.Message} {trigger.Table}";
@@ -92,13 +101,32 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
     }
 
     /// <summary>
-    /// The steps registered for the trigger's message on its table. A step without a table runs on every table, so
-    /// it is also the only step a trigger on an unknown table is known to run.
+    /// The steps registered for the trigger's message on its table, with the basis their filter gives. A step
+    /// without a table runs on every table, so it is also the only step a trigger on an unknown table is known to
+    /// run.
     /// </summary>
-    private IEnumerable<CascadeStep> Matching(TriggerHit trigger) =>
-        _steps.Where(s =>
-            string.Equals(s.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)
-            && (s.Table is null || string.Equals(s.Table, trigger.Table, StringComparison.OrdinalIgnoreCase)));
+    private IEnumerable<(CascadeStep Step, RequirementBasis Basis)> Matching(TriggerHit trigger)
+    {
+        foreach (var step in _steps)
+        {
+            if (!string.Equals(step.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)) continue;
+            if (step.Table is not null && !string.Equals(step.Table, trigger.Table, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // As in XrmMockup, a filter applies to Update only
+            if (step.FilteredAttributes is not { Count: > 0 } filter || !step.Message.Equals("Update", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return (step, RequirementBasis.Direct);
+            }
+            else if (trigger.Columns is null)
+            {
+                yield return (step, RequirementBasis.FilterUnknown);
+            }
+            else if (trigger.Columns.Intersect(filter, StringComparer.OrdinalIgnoreCase).Any())
+            {
+                yield return (step, RequirementBasis.Direct);
+            }
+        }
+    }
 
     /// <summary>
     /// The steps of the trigger's message that run on one table, which a trigger on an unknown table may or may not

@@ -41,10 +41,26 @@ internal static class PluginStepLoader
                 p.MessageName,
                 string.IsNullOrEmpty(p.PrimaryEntity) || p.PrimaryEntity == "none" ? null : p.PrimaryEntity,
                 p.Stage,
-                p.ImpersonatingUserId?.ToString()))
+                p.ImpersonatingUserId?.ToString(),
+                FilteredAttributes(p.FilteredAttributes)))
             .OrderBy(s => s.TypeName, StringComparer.Ordinal)
             .ThenBy(s => s.Message, StringComparer.Ordinal)
             .ThenBy(s => s.Table, StringComparer.Ordinal)
             .ThenBy(s => s.Stage)
             .ToList();
+
+    /// <summary>
+    /// The comma-separated columns a step is filtered on, lowercased and sorted; <c>null</c> for none.
+    /// </summary>
+    private static IReadOnlyList<string>? FilteredAttributes(string? attributes)
+    {
+        var columns = (attributes ?? "")
+            .Split(',')
+            .Select(a => a.Trim().ToLowerInvariant())
+            .Where(a => a.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(a => a, StringComparer.Ordinal)
+            .ToList();
+        return columns.Count > 0 ? columns : null;
+    }
 }

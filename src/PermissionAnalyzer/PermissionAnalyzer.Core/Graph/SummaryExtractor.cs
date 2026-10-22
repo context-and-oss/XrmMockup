@@ -193,7 +193,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             case "CreateAndReturn":
                 return [site.Access(Fires("Create", resolver.Entity(first).OrUnresolved("entity is created without a table name")), Privilege.Create, Privilege.Read), .. Lookups(site, resolver, first)];
             case "Update":
-                return [site.Access(Fires("Update", resolver.Entity(first).OrUnresolved("entity is created without a table name")), Privilege.Write), .. Lookups(site, resolver, first)];
+                return [site.Access(Fires("Update", resolver.Entity(first).OrUnresolved("entity is created without a table name"), resolver.Columns(first)), Privilege.Write), .. Lookups(site, resolver, first)];
             case "Retrieve":
                 return [site.Access(Fires("Retrieve", resolver.Name(first)), Privilege.Read)];
             case "Delete":
@@ -227,9 +227,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     }
 
     /// <summary>
-    /// <paramref name="tables"/>, on which the call also fires the plugin steps of <paramref name="message"/>.
+    /// <paramref name="tables"/>, on which the call also fires the plugin steps of <paramref name="message"/>,
+    /// setting <paramref name="columns"/>.
     /// </summary>
-    private static TableResolution Fires(string message, TableResolution tables) => TableResolution.Empty.Add(tables).Add(TableResolution.Fires(message, tables));
+    private static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null) =>
+        TableResolution.Empty.Add(tables).Add(TableResolution.Fires(message, tables, columns));
 
     /// <summary>
     /// Append on an entity that gets a lookup, and AppendTo on the tables its lookups refer to.

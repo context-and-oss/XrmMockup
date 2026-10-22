@@ -121,13 +121,14 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         var stage = Name(arguments.ElementAtOrDefault(1)?.Value) ?? "?";
         var table = method.TypeArguments.Length > 0 ? symbols.LogicalNameOf(method.TypeArguments[0]) : null;
         var impersonation = UserContext(invocation);
+        var filter = message == "Update" ? FilteredAttributes(invocation) : null;
 
         return new EntryCandidate(
             StepId(name, message, table, stage),
             EntryPointKind.PluginStep,
             name,
             compilation.AssemblyName,
-            new Trigger(message, table, stage),
+            new Trigger(message, table, stage, FilteredAttributes: filter),
             impersonation,
             declaration,
             handlers);
@@ -173,7 +174,56 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
     /// <summary>
     /// <c>.SetUserContext(userId)</c> on the step configuration: the step runs as that user.
     /// </summary>
-    private static string? UserContext(IInvocationOperation registration)
+    private static string? UserContext(IInvocationOperation registration) =>
+        Configuration(registration)
+            .Where(c => c.TargetMethod.Name == "SetUserContext" && c.Arguments.Length > 0)
+            .Select(c => SummaryExtractor.GuidConstant(c.Arguments[0].Value))
+            .FirstOrDefault();
+
+    /// <summary>
+    /// <c>.AddFilteredAttributes(x => x.Name, …)</c> or <c>.AddFilteredAttributes("name", …)</c> on the step
+    /// configuration, lowercased and sorted. <c>null</c> when there are none, or when one can't be read, so the step
+    /// is treated as running on every update.
+    /// </summary>
+    private IReadOnlyList<string>? FilteredAttributes(IInvocationOperation registration)
+    {
+        var columns = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var call in Configuration(registration).Where(c => c.TargetMethod.Name is "AddFilteredAttributes" or "AddFilteredAttribute"))
+        {
+            foreach (var argument in call.Arguments)
+            {
+                var values = argument.Value is IArrayCreationOperation { Initializer: { } initializer } ? initializer.ElementValues : [argument.Value];
+                foreach (var value in values)
+                {
+                    if (Column(value) is not { } column) return null;
+                    columns.Add(column);
+                }
+            }
+        }
+        return columns.Count > 0 ? columns.ToList() : null;
+    }
+
+    /// <summary>
+    /// The column a filtered attribute names: a constant, or the early-bound property a lambda selects.
+    /// </summary>
+    private string? Column(IOperation value)
+    {
+        var op = Unwrap(value);
+        if (op?.ConstantValue is { HasValue: true, Value: string { Length: > 0 } name }) return name.ToLowerInvariant();
+
+        while (op is IDelegateCreationOperation delegateCreation) op = Unwrap(delegateCreation.Target);
+        if (op is IAnonymousFunctionOperation lambda)
+        {
+            var returned = lambda.Body.Operations.OfType<IReturnOperation>().FirstOrDefault()?.ReturnedValue;
+            if (Unwrap(returned) is IPropertyReferenceOperation property) return symbols.AttributeNameOf(property.Property)?.ToLowerInvariant();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The calls chained on a step registration to configure it, such as <c>.AddImage(…).SetUserContext(…)</c>.
+    /// </summary>
+    private static IEnumerable<IInvocationOperation> Configuration(IInvocationOperation registration)
     {
         IOperation current = registration;
         while (current.Parent is { } parent)
@@ -184,14 +234,10 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
                 continue;
             }
             if (parent is not IInvocationOperation call || !ReferenceEquals(Unwrap(call.Instance), registration) && !ReferenceEquals(call.Instance, current)) break;
-            if (call.TargetMethod.Name == "SetUserContext" && call.Arguments.Length > 0)
-            {
-                return SummaryExtractor.GuidConstant(call.Arguments[0].Value);
-            }
+            yield return call;
             current = call;
             registration = call;
         }
-        return null;
     }
 
     private void Activity(INamedTypeSymbol type)

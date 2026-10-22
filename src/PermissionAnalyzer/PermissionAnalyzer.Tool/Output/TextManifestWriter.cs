@@ -213,6 +213,7 @@ internal sealed class TextManifestWriter : IManifestWriter
     {
         RequirementBasis.AllImplementations => "all-implementations",
         RequirementBasis.AllLookupTargets => "all-lookup-targets",
+        RequirementBasis.FilterUnknown => "filter-unknown",
         _ => basis.ToString().ToLowerInvariant(),
     };
 

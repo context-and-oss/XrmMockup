@@ -59,6 +59,8 @@ internal static class Analyze
             {
                 public PluginStepConfigBuilder<T> SetUserContext(Guid userId) => this;
                 public PluginStepConfigBuilder<T> SetName(string name) => this;
+                public PluginStepConfigBuilder<T> AddFilteredAttributes(params System.Linq.Expressions.Expression<Func<T, object>>[] lambdas) => this;
+                public PluginStepConfigBuilder<T> AddFilteredAttributes(params string[] attributes) => this;
             }
         }
 

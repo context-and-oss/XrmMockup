@@ -291,14 +291,20 @@ point. Steps come from code registrations and from the plugin steps in the metad
   because including every step of the message would include most of the solution and tell nothing.
 - An operation on a polymorphic lookup's targets fires the steps of each target, with basis
   `all-lookup-targets`.
+- An Update step with filtered attributes, from `.AddFilteredAttributes(…)` or the metadata, fires
+  only for an update that sets one of them. The columns set are read from early-bound properties,
+  indexers and `Attributes.Add` on the entity, or on the `Target` of a request, and followed into
+  helpers it is passed to. When they can't all be determined, such as for a retrieved entity, the
+  plugin's `Target`, a column name computed at runtime, or an entity passed to a method that can
+  set more, the step fires with basis `filter-unknown`.
 - A call to a custom API implemented in the analyzed code runs that code.
 - A metadata step whose plugin code isn't loaded is reported as unresolved, so missing plugin code is
   never treated as needing nothing.
 - Each step is expanded once per identity, so steps that fire each other don't loop.
 
 The source path of a cascaded requirement runs from the entry point through the operation (such as
-`Create contact`) and the step id into the step's code. Steps are fired whatever attributes are set;
-`FilteredAttributes` isn't applied yet.
+`Create contact`) and the step id into the step's code. The JSON output lists a step's filter as
+`filteredAttributes` on its trigger.
 
 Calls inside lambdas and local functions count towards the method that contains them. A generic
 helper that no entry point calls is listed under unreached methods with its type parameter as the

@@ -253,6 +253,7 @@ internal sealed class TableResolver(
         TableShape.EntityReferences => EntityReferences(operation),
         TableShape.Records => Records(operation),
         TableShape.LookupHolder or TableShape.LookupTarget => Lookups(operation, shape),
+        TableShape.Columns => Columns(operation),
         _ => Requests(operation, shape),
     };
 
@@ -271,7 +272,7 @@ internal sealed class TableResolver(
     {
         if (type.SpecialType == SpecialType.System_String) return [TableShape.Name, TableShape.Fetch, TableShape.FetchMainTable];
         if (symbols.Is(type, symbols.EntityReference)) return [TableShape.Entity];
-        if (symbols.Is(type, symbols.Entity) || type is ITypeParameterSymbol) return [TableShape.Entity, TableShape.LookupHolder, TableShape.LookupTarget];
+        if (symbols.Is(type, symbols.Entity) || type is ITypeParameterSymbol) return [TableShape.Entity, TableShape.LookupHolder, TableShape.LookupTarget, TableShape.Columns];
         if (symbols.Is(type, symbols.QueryBase)) return [TableShape.Query, TableShape.QueryMainTable];
         if (symbols.Is(type, symbols.EntityReferenceCollection)) return [TableShape.EntityReferences];
         if (symbols.Is(type, symbols.EntityCollection)) return [TableShape.Records, TableShape.LookupHolder, TableShape.LookupTarget];
@@ -439,18 +440,25 @@ internal sealed class TableResolver(
     {
         var primary = rule.Checks.FirstOrDefault(c => c.Member is not null) ?? rule.Checks.FirstOrDefault(c => c.Table is not null);
         var tables = TableResolution.Empty;
+        TableResolution? columns = null;
         if (primary?.Member is { } member)
         {
             var values = members(member);
             if (values.Count == 0) tables.Add(TableResolution.Unresolved($"{member} of the {message} request isn't set where the request is created"));
             foreach (var value in values) tables.Add(MemberTables(value));
+
+            // The columns of an entity the request writes, such as the Target of an UpdateRequest
+            if (values.Count > 0 && values.All(v => IsEntityLike(Unwrap(v)?.Type) && !symbols.Is(Unwrap(v)?.Type, symbols.EntityReference)))
+            {
+                columns = values.Aggregate(TableResolution.Empty, (result, value) => result.Add(Columns(value)));
+            }
         }
         else if (primary?.Table is { } table)
         {
             tables.Add(TableResolution.Table(table));
         }
 
-        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables)));
+        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables, columns)));
     }
 
     /// <summary>
@@ -751,6 +759,79 @@ internal sealed class TableResolver(
     }
 
     /// <summary>
+    /// The columns set on an entity, in <see cref="TableResolution.Tables"/>, with a reason for each way more can be
+    /// set: a column whose name is computed at runtime, an entity from elsewhere, such as one that is retrieved, or
+    /// an entity passed to a method in the solution, which can set more.
+    /// </summary>
+    public TableResolution Columns(IOperation? operation)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
+            case IObjectCreationOperation creation when IsEntityLike(creation.Type):
+                return creation.Initializer is { } members
+                    ? Inside(members).Aggregate(TableResolution.Empty, (result, node) => result.Add(ColumnsSet(node, IsImplicitReceiver, null)))
+                    : TableResolution.Empty;
+
+            case IInvocationOperation { TargetMethod.Name: "ToEntity", Instance: { } instance } when IsEntityLike(instance.Type):
+                return Columns(instance);
+
+            case ILocalReferenceOperation local when IsEntityLike(local.Type):
+                return FromLocal(local, Columns, use: (node, symbol) => ColumnsSet(node, instance => IsLocal(instance, symbol), CallOf(local)));
+
+            case IParameterReferenceOperation parameter when IsEntityLike(parameter.Type) && LambdaSource(parameter) is null:
+            {
+                // The caller's columns, and those set on the parameter here
+                var result = Unknown(op, "entity", TableShape.Columns);
+                foreach (var node in Root(parameter).DescendantsAndSelf()) result.Add(ColumnsSet(node, instance => IsParameter(instance, parameter.Parameter), CallOf(parameter)));
+                return result;
+            }
+
+            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
+                return Columns(conditional.WhenTrue).Add(Columns(whenFalse));
+
+            case ICoalesceOperation coalesce:
+                return Columns(coalesce.Value).Add(Columns(coalesce.WhenNull));
+
+            default:
+                return Unknown(op, "entity", TableShape.Columns);
+        }
+    }
+
+    /// <summary>
+    /// The columns <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, or a reason when it
+    /// passes the entity to a method in the solution other than <paramref name="call"/>, the one being resolved for.
+    /// </summary>
+    private TableResolution ColumnsSet(IOperation node, Func<IOperation?, bool> isObject, IInvocationOperation? call)
+    {
+        if (SetColumn(node, isObject) is { } set)
+        {
+            return set.Column is { } column ? TableResolution.Table(column) : TableResolution.Unresolved("a column name is computed at runtime");
+        }
+        // Only whether the method is in the solution, as building its call would resolve its arguments in turn
+        if (node is IInvocationOperation invocation && !ReferenceEquals(invocation, call) && calls is not null
+            && invocation.TargetMethod.Locations.Any(l => l.IsInSource) && invocation.Arguments.Any(a => isObject(Unwrap(a.Value))))
+        {
+            return TableResolution.Unresolved($"entity is passed to '{invocation.TargetMethod.Name}', which can set more columns");
+        }
+        return TableResolution.Empty;
+    }
+
+    /// <summary>
+    /// The call <paramref name="operation"/> is an argument of.
+    /// </summary>
+    private static IInvocationOperation? CallOf(IOperation operation)
+    {
+        var current = operation.Parent;
+        while (current is IConversionOperation or IParenthesizedOperation) current = current.Parent;
+        return current is IArgumentOperation { Parent: IInvocationOperation invocation } ? invocation : null;
+    }
+
+    /// <summary>
     /// What the lookups <paramref name="set"/> on <paramref name="entity"/> need, read as <paramref name="shape"/>.
     /// The table a lookup refers to is narrowed to the tables its column can refer to, when the metadata knows it.
     /// </summary>
@@ -772,29 +853,36 @@ internal sealed class TableResolver(
 
     /// <summary>
     /// The lookup <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, with its column when
-    /// known: <c>e.ParentAccountId = r</c>, <c>e["parentaccountid"] = r</c>, <c>e.Attributes["parentaccountid"] = r</c>
-    /// or <c>e.Attributes.Add("parentaccountid", r)</c>, where <c>r</c> is an <c>EntityReference</c>.
+    /// known, where the value is an <c>EntityReference</c> (see <see cref="SetColumn"/>).
     /// </summary>
     private IEnumerable<(string? Column, IOperation Value)> SetLookup(IOperation node, Func<IOperation?, bool> isObject)
+    {
+        if (SetColumn(node, isObject) is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != "ownerid") yield return lookup;
+    }
+
+    /// <summary>
+    /// The column <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, with its name when
+    /// known: <c>e.Name = v</c>, <c>e["name"] = v</c>, <c>e.Attributes["name"] = v</c> or
+    /// <c>e.Attributes.Add("name", v)</c>. An early-bound property that isn't a column, such as <c>Id</c>, sets none.
+    /// </summary>
+    private (string? Column, IOperation Value)? SetColumn(IOperation node, Func<IOperation?, bool> isObject)
     {
         bool IsAttributes(IOperation? instance) =>
             isObject(instance) || (Unwrap(instance) is IPropertyReferenceOperation { Property.Name: "Attributes" } attributes && isObject(attributes.Instance));
 
-        (string? Column, IOperation Value)? set = node switch
+        return node switch
         {
             ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: false } property } assignment
-                when isObject(property.Instance) && IsEntityLike(property.Property.ContainingType) =>
-                (symbols.AttributeNameOf(property.Property), assignment.Value),
+                when isObject(property.Instance) && IsEntityLike(property.Property.ContainingType) && symbols.AttributeNameOf(property.Property) is { } column =>
+                (column, assignment.Value),
             ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: true, Arguments.Length: 1 } indexer } assignment
                 when IsAttributes(indexer.Instance) =>
-                (Key(indexer.Arguments[0].Value), assignment.Value),
+                (Key(indexer.Arguments[0].Value)?.ToLowerInvariant(), assignment.Value),
             IInvocationOperation { TargetMethod.Name: "Add", Arguments.Length: 2 } add
                 when Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: "Attributes" } attributes && isObject(attributes.Instance) =>
-                (Key(add.Arguments[0].Value), add.Arguments[1].Value),
+                (Key(add.Arguments[0].Value)?.ToLowerInvariant(), add.Arguments[1].Value),
             _ => null,
         };
-
-        if (set is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != "ownerid") yield return lookup;
     }
 
     /// <summary>

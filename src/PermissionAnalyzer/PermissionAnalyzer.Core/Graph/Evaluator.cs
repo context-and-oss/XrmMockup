@@ -35,7 +35,13 @@ internal sealed record AssumptionHit(string Reason, RequirementSource Source);
 /// An operation that fires the plugin steps of <see cref="Message"/> on <see cref="Table"/>: <c>null</c> for no
 /// table, <see cref="AnyTable"/> for a table that isn't known.
 /// </summary>
-internal sealed record TriggerHit(string Message, string? Table, RunsAs RunsAs, RequirementBasis Basis, RequirementSource Source)
+internal sealed record TriggerHit(
+    string Message,
+    string? Table,
+    RunsAs RunsAs,
+    RequirementBasis Basis,
+    RequirementSource Source,
+    IReadOnlyList<string>? Columns = null)
 {
     public const string AnyTable = "*";
 }
@@ -208,13 +214,15 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
             foreach (var fired in tables.Fired)
             {
-                foreach (var table in fired.Value.Tables) result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, frame.Basis, source));
+                // The columns set, when all of them are known
+                var columns = fired.Value.Columns is { Reasons.Count: 0 } set ? set.Tables.ToList() : null;
+                foreach (var table in fired.Value.Tables) result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, frame.Basis, source, columns));
                 foreach (var table in fired.Value.LookupTargets.Except(fired.Value.Tables, StringComparer.Ordinal))
                 {
-                    result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, RequirementBasis.AllLookupTargets, source));
+                    result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, RequirementBasis.AllLookupTargets, source, columns));
                 }
-                if (fired.Value.Reasons.Count > 0) result.Triggers.Add(new TriggerHit(fired.Key, TriggerHit.AnyTable, identity.RunsAs, frame.Basis, source));
-                if (fired.Value.Tables.Count == 0 && fired.Value.LookupTargets.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source));
+                if (fired.Value.Reasons.Count > 0) result.Triggers.Add(new TriggerHit(fired.Key, TriggerHit.AnyTable, identity.RunsAs, frame.Basis, source, columns));
+                if (fired.Value.Tables.Count == 0 && fired.Value.LookupTargets.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source, columns));
             }
         }
     }
@@ -312,7 +320,11 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             else if (slot.Reason.Length > 0) result.Add(TableResolution.Unresolved(slot.Reason));
         }
         foreach (var returned in tables.Returns) result.Add(Returned(returned, frame, depth + 1));
-        foreach (var fired in tables.Fired) result.Add(TableResolution.Fires(fired.Key, BindTables(fired.Value, frame, depth)));
+        foreach (var fired in tables.Fired)
+        {
+            var columns = fired.Value.Columns is { } set ? BindTables(set, frame, depth) : null;
+            result.Add(TableResolution.Fires(fired.Key, BindTables(fired.Value, frame, depth), columns));
+        }
         return result;
     }
 

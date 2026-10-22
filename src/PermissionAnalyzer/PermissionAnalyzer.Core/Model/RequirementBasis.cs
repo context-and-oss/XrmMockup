@@ -20,4 +20,9 @@ public enum RequirementBasis
     /// The record a lookup refers to can't be determined, so every table the lookup column can refer to is included.
     /// </summary>
     AllLookupTargets,
+
+    /// <summary>
+    /// From an Update plugin step filtered on columns, fired by an update whose columns can't all be determined.
+    /// </summary>
+    FilterUnknown,
 }

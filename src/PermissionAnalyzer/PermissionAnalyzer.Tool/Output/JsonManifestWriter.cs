@@ -39,7 +39,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
                 e.Kind,
                 e.Type,
                 e.Assembly,
-                e.Trigger is { } trigger ? new TriggerDocument(trigger.Message, trigger.Table, trigger.Stage, trigger.Binding) : null,
+                e.Trigger is { } trigger ? new TriggerDocument(trigger.Message, trigger.Table, trigger.Stage, trigger.Binding, trigger.FilteredAttributes) : null,
                 e.ImpersonatingUserId,
                 Declaration(e.Declaration),
                 Requirements(e.Requirements, coverage?.For(e)),
@@ -139,7 +139,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
         IReadOnlyList<IdentityRolesDocument>? Roles,
         ImpersonationDocument? Impersonation);
 
-    private sealed record TriggerDocument(string? Message, string? Table, string? Stage, string? Binding);
+    private sealed record TriggerDocument(string? Message, string? Table, string? Stage, string? Binding, IReadOnlyList<string>? FilteredAttributes);
 
     private sealed record MethodDocument(
         string Id,

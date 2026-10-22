@@ -144,7 +144,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             {
                 var table = string.IsNullOrEmpty(step.Table) ? null : step.Table!.ToLowerInvariant();
                 var id = EntryPointDiscovery.StepId(step.TypeName, step.Message, table, EntryPointDiscovery.StageName(step.Stage));
-                codeless.Add(new CascadeStep(id, step.Message, table, step.ImpersonatingUserId?.ToLowerInvariant(), null));
+                codeless.Add(new CascadeStep(id, step.Message, table, step.ImpersonatingUserId?.ToLowerInvariant(), Filter(step), null));
             }
             foreach (var match in matches)
             {
@@ -181,6 +181,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 var stage = EntryPointDiscovery.StageName(step.Stage);
                 var table = string.IsNullOrEmpty(step.Table) ? null : step.Table!.ToLowerInvariant();
                 var user = step.ImpersonatingUserId?.ToLowerInvariant();
+                var filter = Filter(step);
 
                 var code = plugin.HasCodeSteps
                     ? candidates.Values.FirstOrDefault(c =>
@@ -193,20 +194,37 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
 
                 if (code is not null)
                 {
-                    if (user is not null && code.ImpersonatingUserId is null) candidates[code.Id] = code with { ImpersonatingUserId = user };
+                    candidates[code.Id] = Registered(code, user, filter);
                     continue;
                 }
 
                 var id = EntryPointDiscovery.StepId(plugin.Type, step.Message, table, stage);
                 if (candidates.TryGetValue(id, out var existing))
                 {
-                    if (user is not null && existing.ImpersonatingUserId is null) candidates[id] = existing with { ImpersonatingUserId = user };
+                    candidates[id] = Registered(existing, user, filter);
                     continue;
                 }
-                candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage), user, plugin.Declaration, handlers));
+                candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage, FilteredAttributes: filter), user, plugin.Declaration, handlers));
             }
         }
         return codeless;
+    }
+
+    /// <summary>
+    /// The columns an Update step from the metadata is filtered on, lowercased.
+    /// </summary>
+    private static IReadOnlyList<string>? Filter(PluginStepRegistration step) =>
+        step.Message.Equals("Update", StringComparison.OrdinalIgnoreCase) ? step.FilteredAttributes : null;
+
+    /// <summary>
+    /// <paramref name="candidate"/> with the user and filtered attributes of its registration in the metadata, where
+    /// the code doesn't set them.
+    /// </summary>
+    private static EntryCandidate Registered(EntryCandidate candidate, string? user, IReadOnlyList<string>? filter)
+    {
+        if (user is not null && candidate.ImpersonatingUserId is null) candidate = candidate with { ImpersonatingUserId = user };
+        if (filter is not null && candidate.Trigger is { FilteredAttributes: null } trigger) candidate = candidate with { Trigger = trigger with { FilteredAttributes = filter } };
+        return candidate;
     }
 
     /// <summary>
@@ -215,7 +233,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     private static IEnumerable<CascadeStep> CascadeSteps(IEnumerable<EntryCandidate> candidates, IEnumerable<CascadeStep> codeless) =>
         candidates
             .Where(c => c.Kind is EntryPointKind.PluginStep or EntryPointKind.CustomApi && c.Trigger?.Message is not null)
-            .Select(c => new CascadeStep(c.Id, c.Trigger!.Message!, c.Trigger.Table, c.ImpersonatingUserId, c))
+            .Select(c => new CascadeStep(c.Id, c.Trigger!.Message!, c.Trigger.Table, c.ImpersonatingUserId, c.Trigger.FilteredAttributes, c))
             .Concat(codeless.GroupBy(s => s.Id, StringComparer.Ordinal).Select(g => g.First()));
 
     private void AddMethodEntries(Dictionary<string, EntryCandidate> candidates)

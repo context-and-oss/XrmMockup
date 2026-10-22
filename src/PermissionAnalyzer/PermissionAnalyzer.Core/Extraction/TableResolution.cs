@@ -23,6 +23,7 @@ internal sealed class TableResolution
     private readonly SortedSet<TableSlot> _slots = new();
     private readonly SortedSet<ReturnedTables> _returns = new();
     private readonly SortedDictionary<string, TableResolution> _fired = new(StringComparer.OrdinalIgnoreCase);
+    private TableResolution? _columns;
 
     public IReadOnlyCollection<string> Tables => _tables;
 
@@ -55,9 +56,15 @@ internal sealed class TableResolution
     public IReadOnlyDictionary<string, TableResolution> Fired => _fired;
 
     /// <summary>
+    /// For a message in <see cref="Fired"/>: the columns the operation sets, in <see cref="Tables"/>, with a reason
+    /// for each way more can be set, which an Update step filtered on columns runs for.
+    /// </summary>
+    public TableResolution? Columns => _columns;
+
+    /// <summary>
     /// Set when nothing in the value depends on the call context: no parameter and no method's return value.
     /// </summary>
-    public bool IsBound => _slots.Count == 0 && _returns.Count == 0 && _fired.Values.All(f => f.IsBound);
+    public bool IsBound => _slots.Count == 0 && _returns.Count == 0 && _fired.Values.All(f => f.IsBound) && (_columns?.IsBound ?? true);
 
     public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && _fired.Count == 0 && IsBound;
 
@@ -99,12 +106,15 @@ internal sealed class TableResolution
     }
 
     /// <summary>
-    /// <paramref name="message"/> fired on <paramref name="tables"/>.
+    /// <paramref name="message"/> fired on <paramref name="tables"/>, setting <paramref name="columns"/>; without
+    /// columns, those set aren't known.
     /// </summary>
-    public static TableResolution Fires(string message, TableResolution tables)
+    public static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null)
     {
+        var fired = Empty.Add(tables);
+        fired._columns = Empty.Add(columns ?? Unresolved("the columns set aren't known"));
         var result = new TableResolution();
-        result._fired.Add(message, Empty.Add(tables));
+        result._fired.Add(message, fired);
         return result;
     }
 
@@ -120,6 +130,7 @@ internal sealed class TableResolution
             // Copied, as the resolutions added may be shared
             _fired[fired.Key] = _fired.TryGetValue(fired.Key, out var existing) ? Empty.Add(existing).Add(fired.Value) : Empty.Add(fired.Value);
         }
+        if (other._columns is { } columns) (_columns ??= Empty).Add(columns);
         return this;
     }
 
@@ -152,7 +163,7 @@ internal sealed class TableResolution
     /// </summary>
     public override string ToString() =>
         string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "*" + string.Join("|", _lookupTargets) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns)
-        + "!" + string.Join("|", _fired.Select(f => $"{f.Key}=({f.Value})"));
+        + "!" + string.Join("|", _fired.Select(f => $"{f.Key}=({f.Value})")) + (_columns is null ? "" : $"#({_columns})");
 }
 
 /// <summary>
@@ -174,6 +185,9 @@ internal enum TableShape
     // a lookup is set on them, and the tables the lookups refer to, which need AppendTo
     LookupHolder,
     LookupTarget,
+
+    // An entity read for the columns set on it, which decide the Update steps filtered on columns it fires
+    Columns,
 
     // A request, or a collection of requests, read for the tables it needs one privilege on (see RequestShapes)
     RequestCreate,
