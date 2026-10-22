@@ -200,19 +200,63 @@ can't be named without a table.
 
 ### 5.3 Message → privilege rules
 
-The rules are data (an embedded JSON/C# table), not code, so they can be extended and
-overridden in `XrmMockup:Permissions:Rules` (§6.3):
+`Execute` is the generic way into Dataverse, so most real code reaches tables through request
+objects as well as through the CRUD methods. The rules map each request type to the
+privileges it needs. Phase 3.5 builds them.
+
+**Rule table.** The rules are data (an embedded table), not code, so they can be extended and
+overridden in `XrmMockup:Permissions:Rules` (§6.3). A rule names the request (by type or by
+`RequestName`), the property that holds the target, and the privileges. It can also expand
+into other requests, the way XrmMockup's handlers call each other:
 
 ```jsonc
-{ "message": "AssignRequest", "target": "Target",   "privileges": ["Assign", "Write"] },
+{ "message": "AssignRequest", "target": "Target", "privileges": ["Assign", "Write"] },
 { "message": "SetStateRequest", "target": "EntityMoniker", "privileges": ["Write"] },
+{ "message": "UpsertRequest", "target": "Target", "as": ["CreateRequest", "UpdateRequest"] },
+{ "message": "CreateMultipleRequest", "targets": "Targets", "as": ["CreateRequest"] },
 { "message": "GrantAccessRequest", "target": "Target", "privileges": ["Share", "$PrincipalAccess.AccessMask"] },
 { "message": "QualifyLeadRequest", "target": "LeadId", "privileges": ["Write"],
-  "creates": ["account?", "contact?", "opportunity?"] }
+  "creates": ["account?", "contact?", "opportunity?"] },
+{ "message": "WhoAmIRequest", "privileges": [] }
 ```
 
-Built-in rules cover the messages XrmMockup implements (`src/XrmMockup365/Requests/`). Unknown
-messages are reported as `unknown-message` findings so they show up instead of passing silently.
+Built-in rules, in groups:
+
+| Requests | Privileges |
+|---|---|
+| `CreateRequest`, `UpdateRequest`, `DeleteRequest`, `RetrieveRequest`, `RetrieveMultipleRequest`, `AssociateRequest`, `DisassociateRequest` | Same as the matching `IOrganizationService` method (§3) |
+| `UpsertRequest` | Create and Write on the target (whether the record exists is a runtime fact) |
+| `CreateMultipleRequest`, `UpdateMultipleRequest`, `UpsertMultipleRequest`, `DeleteMultipleRequest` | As the single request, per table in `Targets` (`EntityCollection.EntityName`, or the tables of the entities added) |
+| `SetStateRequest`, `AssignRequest`, `GrantAccessRequest`, `ModifyAccessRequest`, `RevokeAccessRequest`, `MergeRequest`, `QualifyLeadRequest`, `SendEmailRequest` and the other messages XrmMockup implements | As listed in §3, or from the handler |
+| `InitializeFileBlocksUploadRequest` / `InitializeFileBlocksDownloadRequest` | Write / Read on `Target` |
+| Requests that need no table privilege: block transfers that continue an initialized one (`UploadBlockRequest`, `CommitFileBlocksUploadRequest`, `DownloadBlockRequest`), metadata (`RetrieveEntityRequest`, `RetrieveAttributeRequest`, `RetrieveMetadataChangesRequest`, …), `WhoAmIRequest`, `RetrieveVersionRequest`, `FetchXmlToQueryExpressionRequest` | None. Not reported as unresolved |
+
+Rules follow Dataverse. Some checks Dataverse makes aren't enforced by XrmMockup's handlers
+(for example `SetState`, `GrantAccess` and the file block requests). Each rule records whether
+XrmMockup enforces it, so the cross-check in §9 knows which differences are expected.
+
+**Requests through the code.** A request is tracked like a table (§5.5): through locals,
+fields, parameters, return values and object initializers, so a request built in one method and
+executed by a shared helper resolves at each call. Request collections
+(`ExecuteMultipleRequest.Requests`, `ExecuteTransactionRequest.Requests`, and
+`List<OrganizationRequest>` or similar passed between methods) hold everything added to them
+with `Add`, `AddRange` or a collection initializer. Batching (`Chunk`, `Skip`/`Take`, `foreach`)
+passes the contents through. The contents of a collection are the union of everything added to
+it, so they over-approximate, like the rest of the call graph.
+
+**Requests without a rule** stay unresolved, with a reason that says which:
+
+- A request type without a rule: "no rule for 'XxxRequest'". It can be added in `Rules`.
+- `new OrganizationRequest("name")` naming a custom API in the metadata: recognized as a
+  custom API call. Its execute privilege comes in phase 5 (§5.7) and the plugins it runs in
+  phase 4. Until then it is listed under `Not checked` as a custom API call, apart from
+  the rest.
+- A request whose type or table can't be determined: the reason, as for other operations.
+
+**Append and AppendTo** (also phase 3.5): Create, Update and their request forms add Append on
+the target and AppendTo (Create also Read) on each table referenced by a lookup that is set
+(see attribute resolution in §5.2). This needs the relationship and lookup target metadata in
+`Metadata/`. Without it, these privileges stay under `Not checked`.
 
 ### 5.4 Execution identity ("runs as")
 
@@ -421,19 +465,20 @@ The `Result:` line only counts what was checked. A `Missing privileges:` list fo
 `Not checked:` line, so a pass isn't read as proof that the roles are enough:
 
 ```
-16 entry points, 12 unreached methods, 17 tables, 21 table privileges (52 requirements counted per entry point and method), 24 unresolved
-Result: 46 granted, 6 missing
+6 entry points, 2 unreached methods, 9 tables, 14 table privileges (31 requirements counted per entry point and method), 5 unresolved
+Result: 27 granted, 4 missing
 Missing privileges:
-  ✘ ctx_orderline  Create  ApplicationUser  Order API (--role)  in function:ProcessOrder, function:…
-  ✘ ctx_orderline  Read    ApplicationUser  Order API (--role)  in function:GetOrder
-Not checked: 24 unresolved operations (22 Execute requests, 2 with an unknown table), Append and AppendTo on lookups (not analyzed yet)
+  ✘ ctx_orderline  Create  ApplicationUser  Integration App (--role)  in function:ProcessOrder, function:ResubmitOrder
+  ✘ ctx_orderline  Read    ApplicationUser  Integration App (--role)  in function:GetOrder
+Not checked: 5 unresolved operations (4 Execute requests, 1 with an unknown table), Append and AppendTo on lookups (not analyzed yet)
 ```
 
 `Missing privileges` merges the missing requirements by table, privilege, identity and roles,
 so each gap is listed once with every entry point that needs it. `Not checked` lists unresolved
 operations (`Execute` requests apart from calls with an unknown table),
 requirements whose identity has no roles, entry points whose impersonation privilege is
-unverifiable, and Append/AppendTo until phase 5. When nothing is missing but something wasn't
+unverifiable, and Append/AppendTo until phase 3.5. From phase 3.5, requests with no rule and
+custom API calls are counted separately (§5.3). When nothing is missing but something wasn't
 checked, `check` exits `0` with a warning, and `--strict` fails.
 
 **`required`**: exactly what is needed, optionally with role coverage.
@@ -588,8 +633,9 @@ location of each missing privilege.
 | 1 | Project skeleton, MSBuildWorkspace loading, role loading via MetadataSkeleton, direct `IOrganizationService` CRUD with early-bound/literal tables, per-method manifest, `required` (no scope). Also pulled forward: `QueryExpression`/`AddLink`/FetchXML tables, `Associate`/`Disassociate`, loops over `RetrieveMultiple` results, `Solution`/`MetadataDirectory` configuration | First useful manifest |
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
+| 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
 | 4 | Plugin cascade expansion, `--operation` scope, FilteredAttributes; cascades from Azure Functions and app code, including plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
-| 5 | Queries (QueryExpression, LinkEntity, FetchXML, LINQ), Append/AppendTo via relationship metadata, Execute/ExecuteMultiple rule table; privilege catalog + global privileges in the metadata generator, custom API execute privileges | Near-complete coverage |
+| 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |
 
