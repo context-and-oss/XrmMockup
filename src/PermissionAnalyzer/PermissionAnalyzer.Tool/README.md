@@ -118,7 +118,7 @@ plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation  src/Plugi
 Result: 1 granted, 1 missing, 1 as SYSTEM
 Missing privileges:
   ✘ contact  Create  Caller  Salesperson (--role)  in plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation
-Not checked: 1 unresolved operation (1 with an unknown table), Append and AppendTo on lookups (not analyzed yet)
+Not checked: 1 unresolved operation (1 with an unknown table)
 ```
 
 Each requirement is checked against the roles of the identity it runs as:
@@ -144,8 +144,8 @@ Each requirement is checked against the roles of the identity it runs as:
 - `Missing privileges` lists each missing privilege once, with the identity, the roles that don't
   grant it and every entry point or unreached method that needs it. The `check` error names them too.
 - `Not checked` lists what the result doesn't cover: unresolved operations (split into requests
-  without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles, the
-  impersonation privilege, and Append/AppendTo on lookups, which aren't analyzed yet. When nothing is
+  without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles and the
+  impersonation privilege. It is left out when everything was checked. When nothing is
   missing but something wasn't checked, `check` exits with `0` and logs a warning; `--strict` makes it fail.
 - Setting `CallerId` also needs the `prvActOnBehalfOfAnotherUser` privilege on the identity that sets
   it, usually the application user. The metadata has no global privileges yet, so this is shown as
@@ -203,10 +203,10 @@ Calls on `IOrganizationService`, `IOrganizationServiceAsync`/`Async2` and their 
 
 | Call | Privileges |
 |------|------------|
-| `Create` | Create |
-| `CreateAndReturn` | Create, Read |
+| `Create` | Create, and Append and AppendTo for [lookups](#lookups) |
+| `CreateAndReturn` | Create, Read, and Append and AppendTo for lookups |
 | `Retrieve`, `RetrieveMultiple` | Read on the table and every linked table |
-| `Update` | Write |
+| `Update` | Write, and Append and AppendTo for lookups |
 | `Delete` | Delete |
 | `Associate`, `Disassociate` | Read, AppendTo on the target; Read, Append on the related records |
 | `Execute` | From the rule for the request's message, see [Requests](#requests) |
@@ -252,6 +252,22 @@ A request without a rule is reported as unresolved. When its message is a custom
 the code, a plugin step message in the metadata, or a name with a publisher prefix such as
 `ctx_Approve`), it is reported as a custom API call; its privileges aren't analyzed yet. Add a rule
 for your own messages in the [`Rules` setting](#request-rules).
+
+### Lookups
+
+A lookup set on a record that is created or updated, directly or through a request such as `Upsert` or
+`CreateMultiple`, needs Append on the record's table and AppendTo on the table the lookup refers to.
+Lookups are found where the code sets them: early-bound properties (`order.CustomerId = …`), indexers
+(`entity["parentcustomerid"] = …`) and `Attributes.Add`, on new records and on records passed in from
+callers. `ownerid` and lookups set to `null` need nothing.
+
+The referenced table comes from the `EntityReference` value, like any other table. When it can't be
+resolved, the lookup's targets in the entity metadata (`*Metadata.xml` in the metadata folder) are used:
+the only target of a simple lookup, or every target of a polymorphic one such as a customer lookup, with
+basis `all-lookup-targets`. Without metadata such a lookup is reported as unresolved.
+
+The analysis only sees lookups set in the code. A record retrieved and written back unchanged, or one
+from a source it can't follow, adds no Append or AppendTo.
 
 Calls inside lambdas and local functions count towards the method that contains them. A generic
 helper that no entry point calls is listed under unreached methods with its type parameter as the

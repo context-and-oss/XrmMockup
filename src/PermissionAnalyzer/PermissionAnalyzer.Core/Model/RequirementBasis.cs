@@ -15,4 +15,9 @@ public enum RequirementBasis
     /// every implementation in the solution is included.
     /// </summary>
     AllImplementations,
+
+    /// <summary>
+    /// The record a lookup refers to can't be determined, so every table the lookup column can refer to is included.
+    /// </summary>
+    AllLookupTargets,
 }

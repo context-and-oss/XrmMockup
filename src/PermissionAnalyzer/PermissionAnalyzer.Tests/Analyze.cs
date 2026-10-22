@@ -151,9 +151,10 @@ internal static class Analyze
         IEnumerable<string>? roleGovernedTables = null,
         EntryPointSelector? scope = null,
         Action<ManifestBuilder>? setup = null,
-        IEnumerable<RequestRule>? rules = null)
+        IEnumerable<RequestRule>? rules = null,
+        IEnumerable<LookupColumn>? lookups = null)
     {
-        var builder = new ManifestBuilder(Root, rules);
+        var builder = new ManifestBuilder(Root, rules, lookups);
         setup?.Invoke(builder);
         Assert.True(builder.Add(Compile(source)));
         return builder.Build(roleGovernedTables, scope);

@@ -32,6 +32,7 @@ internal sealed class XrmSymbols
         LinkEntity = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.LinkEntity");
         OrganizationRequest = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.OrganizationRequest");
         EntityLogicalNameAttribute = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Client.EntityLogicalNameAttribute");
+        AttributeLogicalNameAttribute = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.AttributeLogicalNameAttribute");
         Plugin = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IPlugin");
         OrganizationServiceFactory = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IOrganizationServiceFactory");
         ExecutionContext = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IExecutionContext");
@@ -53,6 +54,7 @@ internal sealed class XrmSymbols
     public INamedTypeSymbol? LinkEntity { get; }
     public INamedTypeSymbol? OrganizationRequest { get; }
     public INamedTypeSymbol? EntityLogicalNameAttribute { get; }
+    public INamedTypeSymbol? AttributeLogicalNameAttribute { get; }
     public INamedTypeSymbol? Plugin { get; }
     public INamedTypeSymbol? OrganizationServiceFactory { get; }
     public INamedTypeSymbol? ExecutionContext { get; }
@@ -110,6 +112,17 @@ internal sealed class XrmSymbols
         }
         return null;
     }
+
+    /// <summary>
+    /// The column of an early-bound property, read from <c>[AttributeLogicalName]</c>.
+    /// </summary>
+    public string? AttributeNameOf(IPropertySymbol property) =>
+        AttributeLogicalNameAttribute is null
+            ? null
+            : property.GetAttributes()
+                .Where(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, AttributeLogicalNameAttribute) && a.ConstructorArguments.Length == 1)
+                .Select(a => a.ConstructorArguments[0].Value as string)
+                .FirstOrDefault(name => name is not null);
 
     /// <summary>
     /// The service operation a method performs (<c>Create</c>, <c>RetrieveMultiple</c>, …), or <c>null</c> when

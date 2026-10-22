@@ -11,7 +11,7 @@ namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 /// Summarizes every method body of a compilation: its service calls, the methods it calls with what it passes
 /// them, and where its organization services come from.
 /// </summary>
-internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbols, SourcePaths paths, RequestRules rules)
+internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbols, SourcePaths paths, RequestRules rules, LookupColumns lookups)
 {
     // How far constants are followed through fields and locals, such as a user id in a static field.
     private const int MaxConstantDepth = 8;
@@ -25,6 +25,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
     private readonly CallGraph _graph = new();
     private readonly HashSet<ILocalSymbol> _visiting = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<IMethodSymbol, TableResolver> _resolvers = new(SymbolEqualityComparer.Default);
 
     public CallGraph Extract(CancellationToken cancellationToken = default)
     {
@@ -147,12 +148,20 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     }
 
     /// <summary>
-    /// A table resolver for code in <paramref name="root"/>, which follows calls to methods in the solution.
+    /// The table resolver for code in <paramref name="root"/>, which follows calls to methods in the solution. It is
+    /// shared, so a local passed to the call it is assigned from, as in <c>x = Prepare(x)</c>, is resolved once.
     /// </summary>
-    private TableResolver Resolver(IMethodSymbol root) => new(symbols, rules, invocation =>
-        IsInSource(invocation.TargetMethod)
-            ? Call(invocation.TargetMethod, invocation.Instance, invocation.IsVirtual, invocation.Arguments, NameLocation(invocation.Syntax), root)
-            : null);
+    private TableResolver Resolver(IMethodSymbol root)
+    {
+        if (!_resolvers.TryGetValue(root, out var resolver))
+        {
+            _resolvers[root] = resolver = new TableResolver(symbols, rules, invocation =>
+                IsInSource(invocation.TargetMethod)
+                    ? Call(invocation.TargetMethod, invocation.Instance, invocation.IsVirtual, invocation.Arguments, NameLocation(invocation.Syntax), root)
+                    : null, lookups);
+        }
+        return resolver;
+    }
 
     private void Invocation(IInvocationOperation invocation, IMethodSymbol root)
     {
@@ -180,11 +189,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         switch (operation)
         {
             case "Create":
-                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Create)];
+                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Create), .. Lookups(site, resolver, first)];
             case "CreateAndReturn":
-                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Create, Privilege.Read)];
+                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Create, Privilege.Read), .. Lookups(site, resolver, first)];
             case "Update":
-                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Write)];
+                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Write), .. Lookups(site, resolver, first)];
             case "Retrieve":
                 return [site.Access(resolver.Name(first), Privilege.Read)];
             case "Delete":
@@ -210,6 +219,15 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 return [];
         }
     }
+
+    /// <summary>
+    /// Append on an entity that gets a lookup, and AppendTo on the tables its lookups refer to.
+    /// </summary>
+    private static AccessFact[] Lookups(Site site, TableResolver resolver, IOperation? entity) =>
+    [
+        site.Access(resolver.Lookups(entity, TableShape.LookupHolder), Privilege.Append),
+        site.Access(resolver.Lookups(entity, TableShape.LookupTarget), "lookup value: ", Privilege.AppendTo),
+    ];
 
     /// <summary>
     /// A call to a method that is in the solution or may be implemented by it. Calls into the framework are left

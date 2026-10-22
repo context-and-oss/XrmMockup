@@ -180,6 +180,15 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 }
             }
 
+            // Every table a lookup can refer to, where the code doesn't say which
+            foreach (var table in tables.LookupTargets.Except(tables.Tables, StringComparer.Ordinal))
+            {
+                foreach (var privilege in access.Privileges)
+                {
+                    result.Requirements.Add(new RequirementHit(table, privilege, identity.RunsAs, RequirementBasis.AllLookupTargets, source));
+                }
+            }
+
             foreach (var reason in tables.Reasons)
             {
                 var privileges = access.Privileges.Distinct().OrderBy(p => p).ToList();
@@ -273,6 +282,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         var result = TableResolution.Empty;
         foreach (var table in tables.Tables) result.Add(TableResolution.Table(table));
         foreach (var reason in tables.Reasons) result.Add(TableResolution.Unresolved(reason));
+        foreach (var target in tables.LookupTargets) result.Add(TableResolution.LookupTarget(target));
         foreach (var slot in tables.Slots)
         {
             if (frame.Bindings.TryGetValue((slot.Method, slot.Ordinal), out var binding) && binding.Tables?.TryGetValue(slot.Shape, out var bound) == true) result.Add(bound!);

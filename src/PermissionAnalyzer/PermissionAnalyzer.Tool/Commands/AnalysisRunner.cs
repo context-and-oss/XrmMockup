@@ -45,7 +45,12 @@ internal static class AnalysisRunner
             var coverageOptions = CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, requireRoles);
 
             var root = Path.GetDirectoryName(settings.Target)!;
-            var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions));
+            var lookups = settings.MetadataDirectory is { } lookupDirectory ? LookupLoader.Load(lookupDirectory) : [];
+            if (settings.MetadataDirectory is not null)
+            {
+                logger.LogInformation("Loaded {Count} lookup columns from {Directory}", lookups.Count, settings.MetadataDirectory);
+            }
+            var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), lookups);
             if (settings.MetadataDirectory is { } metadataDirectory)
             {
                 var steps = PluginStepLoader.Load(metadataDirectory);

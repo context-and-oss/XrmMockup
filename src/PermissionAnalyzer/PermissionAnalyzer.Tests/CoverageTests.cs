@@ -361,7 +361,7 @@ public class CoverageTests
         Assert.Contains("Result: 1 granted, 1 missing, 1 as SYSTEM", lines);
         Assert.Contains("Missing privileges:", lines);
         Assert.Contains("  ✘ contact  Create  Caller  Salesperson (--role)  in plugin:P:Update:account:PostOperation", lines);
-        Assert.Contains("Not checked: Append and AppendTo on lookups (not analyzed yet)", lines);
+        Assert.DoesNotContain(lines, l => l.StartsWith("Not checked: ", StringComparison.Ordinal));
         Assert.Contains(lines, l => l.StartsWith("1 entry point, 0 unreached methods, 2 tables, 3 table privileges (3 requirements counted per entry point and method)", StringComparison.Ordinal));
     }
 
@@ -379,8 +379,7 @@ public class CoverageTests
         new TextManifestWriter().Write(manifest, report, output);
         var line = Assert.Single(output.ToString().Split('\n'), l => l.StartsWith("Not checked: ", StringComparison.Ordinal));
 
-        Assert.Contains("prvActOnBehalfOfAnotherUser for 1 entry point", line);
-        Assert.EndsWith("Append and AppendTo on lookups (not analyzed yet)", line);
+        Assert.EndsWith("prvActOnBehalfOfAnotherUser for 1 entry point", line);
     }
 
     [Fact]

@@ -15,12 +15,16 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// <param name="rules">
 /// Rules for the requests passed to <c>Execute</c>, which replace the built-in rule for their message or add one.
 /// </param>
-public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null)
+/// <param name="lookups">
+/// The lookup columns in the metadata, which give the tables a lookup can refer to when the code doesn't say.
+/// </param>
+public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null, IEnumerable<LookupColumn>? lookups = null)
 {
     private const string InjectedAssumption = "service is injected";
 
     private readonly SourcePaths _paths = new(rootDirectory);
     private readonly RequestRules _rules = new(rules);
+    private readonly LookupColumns _lookups = new(lookups);
     private readonly CallGraph _graph = new();
     private readonly Dictionary<string, EntryCandidate> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PluginClass> _plugins = new(StringComparer.Ordinal);
@@ -36,7 +40,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     {
         if (XrmSymbols.Create(compilation) is not { } symbols) return false;
 
-        _graph.Merge(new SummaryExtractor(compilation, symbols, _paths, _rules).Extract(cancellationToken));
+        _graph.Merge(new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups).Extract(cancellationToken));
 
         var discovery = new EntryPointDiscovery(compilation, symbols, _paths).Discover(cancellationToken);
         foreach (var entry in discovery.Entries) AddEntry(entry);

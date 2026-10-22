@@ -52,7 +52,7 @@ does, and the analyzer copies them so its answers match what a mockup test would
 
 | Message | Checks (from the handler) |
 |---|---|
-| Create | Create on target; per lookup set: Append on target, Read + AppendTo on referenced record (`CreateRequestHandler.cs`) |
+| Create | Create on target; per lookup set: Append on target, AppendTo (+ Read for UI role) on referenced record (`CreateRequestHandler.cs`) |
 | Update | Write on target; per changed lookup: Append on target, AppendTo (+ Read for UI role) on referenced record (`UpdateRequestHandler.cs`) |
 | Delete | Delete on target (`DeleteRequestHandler.cs`) |
 | Retrieve | Read on target (`RetrieveRequestHandler.cs`) |
@@ -177,11 +177,13 @@ Within each method body, the extractor finds:
 6. Otherwise the operation is recorded as **Unresolved**, with its source location. It is
    never dropped silently.
 
-**Attribute resolution** (for Append/AppendTo): lookup properties set on early-bound
-entities (`ctx_AccountId = …`) or indexers (`entity["parentcustomerid"] = new EntityReference(…)`)
-are mapped to the target table through relationship metadata in `Metadata/`. Polymorphic
-lookups (customer, owner, regarding) use the `EntityReference.LogicalName` when it can be
-resolved. Otherwise every target the relationship metadata allows is included.
+**Attribute resolution** (for Append/AppendTo): lookups set on early-bound properties
+(`ctx_AccountId = …`, column from `[AttributeLogicalName]`), indexers
+(`entity["parentcustomerid"] = new EntityReference(…)`) and `Attributes.Add` are found. The
+referenced table is resolved from the `EntityReference` value like any other table. When it
+can't be, the lookup's targets from the entity metadata in `Metadata/` are used: the single
+target of a simple lookup (basis `direct`), or every target of a polymorphic lookup (customer,
+regarding) with basis `all-lookup-targets`.
 
 Each requirement records its **basis**, which says why it is in the set. A basis is a fact
 about the code, not a likelihood:
@@ -262,10 +264,17 @@ it, so they over-approximate, like the rest of the call graph.
   the rest.
 - A request whose type or table can't be determined: the reason, as for other operations.
 
-**Append and AppendTo** (also phase 3.5): Create, Update and their request forms add Append on
-the target and AppendTo (Create also Read) on each table referenced by a lookup that is set
-(see attribute resolution in §5.2). This needs the relationship and lookup target metadata in
-`Metadata/`. Without it, these privileges stay under `Not checked`.
+**Append and AppendTo** (also phase 3.5): Create, Update and their request forms (`Upsert`,
+`*Multiple`, batches) add Append on the target and AppendTo on each table referenced by a
+lookup that is set (see attribute resolution in §5.2), as XrmMockup checks them. `ownerid` and
+`null` values are skipped, as in XrmMockup; the Read XrmMockup also checks for the UI role
+doesn't apply to code. Lookups are followed through locals, collections, helpers and
+parameters: a helper's parameter contributes the lookups set on it there, and the caller's.
+
+Only lookups set in code are seen. A record from a source the analysis can't follow (retrieved,
+a field, a deconstruction) adds no requirement and no unresolved entry, because it usually
+carries no changed lookups. A lookup value whose table can't be resolved, with no metadata for
+its column, is reported as unresolved with the reason prefixed `lookup value:`.
 
 ### 5.4 Execution identity ("runs as")
 
@@ -479,14 +488,14 @@ Result: 27 granted, 4 missing
 Missing privileges:
   ✘ ctx_orderline  Create  ApplicationUser  Integration App (--role)  in function:ProcessOrder, function:ResubmitOrder
   ✘ ctx_orderline  Read    ApplicationUser  Integration App (--role)  in function:GetOrder
-Not checked: 5 unresolved operations (1 request without a rule, 3 custom API calls, 1 with an unknown table or request), Append and AppendTo on lookups (not analyzed yet)
+Not checked: 5 unresolved operations (1 request without a rule, 3 custom API calls, 1 with an unknown table or request)
 ```
 
 `Missing privileges` merges the missing requirements by table, privilege, identity and roles,
 so each gap is listed once with every entry point that needs it. `Not checked` lists unresolved
 operations (requests with no rule and custom API calls apart from operations with an unknown
 table or request, §5.3), requirements whose identity has no roles, entry points whose
-impersonation privilege is unverifiable, and Append/AppendTo until it is analyzed. When nothing is missing but something wasn't
+impersonation privilege is unverifiable. The line is left out when everything was checked. When nothing is missing but something wasn't
 checked, `check` exits `0` with a warning, and `--strict` fails.
 
 **`required`**: exactly what is needed, optionally with role coverage.

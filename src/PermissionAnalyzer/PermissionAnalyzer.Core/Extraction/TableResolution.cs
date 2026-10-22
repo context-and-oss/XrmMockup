@@ -18,6 +18,7 @@ internal sealed class TableResolution
 {
     private readonly SortedSet<string> _tables = new(StringComparer.Ordinal);
     private readonly SortedSet<string> _reasons = new(StringComparer.Ordinal);
+    private readonly SortedSet<string> _lookupTargets = new(StringComparer.Ordinal);
     private readonly SortedSet<TableSlot> _slots = new();
     private readonly SortedSet<ReturnedTables> _returns = new();
 
@@ -27,6 +28,12 @@ internal sealed class TableResolution
     /// Why part of the value couldn't be resolved, one entry per distinct cause.
     /// </summary>
     public IReadOnlyCollection<string> Reasons => _reasons;
+
+    /// <summary>
+    /// Tables a lookup can refer to, by the metadata, where the record it refers to can't be determined. They are
+    /// required with the basis <see cref="Model.RequirementBasis.AllLookupTargets"/>.
+    /// </summary>
+    public IReadOnlyCollection<string> LookupTargets => _lookupTargets;
 
     /// <summary>
     /// Parameters the value depends on, resolved per call site.
@@ -43,7 +50,7 @@ internal sealed class TableResolution
     /// </summary>
     public bool IsBound => _slots.Count == 0 && _returns.Count == 0;
 
-    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && IsBound;
+    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && IsBound;
 
     public static TableResolution Empty => new();
 
@@ -58,6 +65,13 @@ internal sealed class TableResolution
     {
         var result = new TableResolution();
         result._reasons.Add(reason);
+        return result;
+    }
+
+    public static TableResolution LookupTarget(string logicalName)
+    {
+        var result = new TableResolution();
+        result._lookupTargets.Add(logicalName.ToLowerInvariant());
         return result;
     }
 
@@ -79,6 +93,7 @@ internal sealed class TableResolution
     {
         _tables.UnionWith(other._tables);
         _reasons.UnionWith(other._reasons);
+        _lookupTargets.UnionWith(other._lookupTargets);
         _slots.UnionWith(other._slots);
         _returns.UnionWith(other._returns);
         return this;
@@ -90,10 +105,28 @@ internal sealed class TableResolution
     public TableResolution OrUnresolved(string reason) => IsEmpty ? Unresolved(reason) : this;
 
     /// <summary>
+    /// The value of a lookup that can refer to <paramref name="targets"/> only. With one target that is its table.
+    /// With several, what can't be resolved here becomes all of them.
+    /// </summary>
+    public TableResolution WithinTargets(IReadOnlyCollection<string> targets)
+    {
+        if (targets.Count == 1) return Table(targets.First());
+        if (_reasons.Count == 0) return this;
+
+        var result = new TableResolution();
+        result._tables.UnionWith(_tables);
+        result._lookupTargets.UnionWith(_lookupTargets);
+        result._lookupTargets.UnionWith(targets.Select(t => t.ToLowerInvariant()));
+        result._slots.UnionWith(_slots);
+        result._returns.UnionWith(_returns);
+        return result;
+    }
+
+    /// <summary>
     /// A stable text form, used to tell call contexts apart.
     /// </summary>
     public override string ToString() =>
-        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns);
+        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "*" + string.Join("|", _lookupTargets) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns);
 }
 
 /// <summary>
@@ -110,6 +143,11 @@ internal enum TableShape
     FetchMainTable,
     EntityReferences,
     Records,
+
+    // An entity, or a collection of entities, read for the lookups set on it: the tables that need Append because
+    // a lookup is set on them, and the tables the lookups refer to, which need AppendTo
+    LookupHolder,
+    LookupTarget,
 
     // A request, or a collection of requests, read for the tables it needs one privilege on (see RequestShapes)
     RequestCreate,

@@ -16,9 +16,13 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// Parameters and type parameters of the method become slots, filled in per call site. <paramref name="calls"/>
 /// turns a call to a method in the solution into the call graph's view of it, so the tables of its return value
 /// are resolved per call context too; without it such a value is unresolved. Requests are read through
-/// <paramref name="rules"/>.
+/// <paramref name="rules"/>, and the tables a lookup refers to are narrowed by <paramref name="lookups"/>.
 /// </remarks>
-internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = null, Func<IInvocationOperation, CallFact?>? calls = null)
+internal sealed class TableResolver(
+    XrmSymbols symbols,
+    RequestRules? rules = null,
+    Func<IInvocationOperation, CallFact?>? calls = null,
+    LookupColumns? lookups = null)
 {
     // The access rights of AccessRights, as in PrincipalAccess.AccessMask
     private static readonly (int Bit, Privilege Privilege)[] AccessRights =
@@ -85,6 +89,10 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
 
         switch (op)
         {
+            // Writing a null entity throws, and a null lookup refers to nothing, so such a value needs nothing
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
             case IObjectCreationOperation creation:
                 return AssignedMember(creation.Initializer, "LogicalName", Name)
                     ?? (FirstStringArgument(creation) is { } nameArgument ? Name(nameArgument.Value) : TableResolution.Empty);
@@ -234,6 +242,7 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
         TableShape.FetchMainTable => Fetch(operation, includeLinks: false),
         TableShape.EntityReferences => EntityReferences(operation),
         TableShape.Records => Records(operation),
+        TableShape.LookupHolder or TableShape.LookupTarget => Lookups(operation, shape),
         _ => Requests(operation, shape),
     };
 
@@ -251,12 +260,16 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
     public IReadOnlyList<TableShape> ShapesOf(ITypeSymbol type)
     {
         if (type.SpecialType == SpecialType.System_String) return [TableShape.Name, TableShape.Fetch, TableShape.FetchMainTable];
-        if (IsEntityOrReference(type) || type is ITypeParameterSymbol) return [TableShape.Entity];
+        if (symbols.Is(type, symbols.EntityReference)) return [TableShape.Entity];
+        if (symbols.Is(type, symbols.Entity) || type is ITypeParameterSymbol) return [TableShape.Entity, TableShape.LookupHolder, TableShape.LookupTarget];
         if (symbols.Is(type, symbols.QueryBase)) return [TableShape.Query, TableShape.QueryMainTable];
         if (symbols.Is(type, symbols.EntityReferenceCollection)) return [TableShape.EntityReferences];
-        if (symbols.Is(type, symbols.EntityCollection)) return [TableShape.Records];
+        if (symbols.Is(type, symbols.EntityCollection)) return [TableShape.Records, TableShape.LookupHolder, TableShape.LookupTarget];
         if (IsRequestLike(type)) return RequestShapes.All;
-        if (ElementType(type) is { } element && IsEntityLike(element)) return [TableShape.Records];
+        if (ElementType(type) is { } element && IsEntityLike(element))
+        {
+            return symbols.Is(element, symbols.EntityReference) ? [TableShape.Records] : [TableShape.Records, TableShape.LookupHolder, TableShape.LookupTarget];
+        }
         return [];
     }
 
@@ -378,6 +391,14 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
                 if (shape == TableShape.RequestOther) result.Add(reasons);
                 needed |= privilege is { } granted && rights.Contains(granted);
             }
+            // A request that writes an entity, such as Create or Update, sets its lookups too
+            if (shape is TableShape.RequestAppend or TableShape.RequestAppendTo && check.Member is { } written
+                && (check.Privileges.Contains(Privilege.Create) || check.Privileges.Contains(Privilege.Write)))
+            {
+                var lookupShape = shape == TableShape.RequestAppend ? TableShape.LookupHolder : TableShape.LookupTarget;
+                foreach (var value in members(written)) result.Add(Lookups(value, lookupShape));
+            }
+
             if (!needed) continue;
 
             if (check.Table is { } table)
@@ -598,6 +619,148 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
         }
     }
 
+    /// <summary>
+    /// What the lookups set on an entity, or on every entity in a collection of them, need. Read as
+    /// <see cref="TableShape.LookupHolder"/>: the tables of the entities that get a lookup, which need Append. Read
+    /// as <see cref="TableShape.LookupTarget"/>: the tables the lookups refer to, which need AppendTo.
+    /// </summary>
+    /// <remarks>
+    /// Only lookups set in the code are seen, and an entity from elsewhere, such as one that is retrieved, adds
+    /// nothing for those it already holds. Nothing is reported for such an entity here: its table is reported where
+    /// that can't be resolved. <c>ownerid</c> is left out, as XrmMockup leaves it out.
+    /// </remarks>
+    public TableResolution Lookups(IOperation? operation, TableShape shape)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
+            case { Type: var type } when symbols.Is(type, symbols.EntityReference) || symbols.Is(type, symbols.EntityReferenceCollection):
+                return TableResolution.Empty;
+
+            case IObjectCreationOperation creation when IsEntityLike(creation.Type):
+                return Set(creation, creation.Initializer is { } members ? Inside(members).SelectMany(node => SetLookup(node, IsImplicitReceiver)) : [], shape);
+
+            case IObjectCreationOperation creation:
+            {
+                // A collection of entities, such as EntityCollection or List<Entity>
+                var result = TableResolution.Empty;
+                foreach (var argument in creation.Arguments.Where(a => IsRecordsLike(a.Value.Type))) result.Add(Lookups(argument.Value, shape));
+                foreach (var add in creation.Initializer?.Initializers.OfType<IInvocationOperation>() ?? [])
+                {
+                    foreach (var argument in add.Arguments) result.Add(Lookups(argument.Value, shape));
+                }
+                if (creation.Initializer is { } initializer)
+                {
+                    foreach (var entities in Inside(initializer).SelectMany(node => SetMember(node, IsImplicitReceiver, "Entities"))) result.Add(Lookups(entities, shape));
+                }
+                return result;
+            }
+
+            case IArrayCreationOperation or ICollectionExpressionOperation:
+                return CollectionElements(op).Aggregate(TableResolution.Empty, (result, element) => result.Add(Lookups(element, shape)));
+
+            case IPropertyReferenceOperation { Property.Name: "Entities", Instance: { } records } property
+                when symbols.Is(property.Property.ContainingType, symbols.EntityCollection):
+                return Lookups(records, shape);
+
+            case IInvocationOperation { TargetMethod.Name: "ToEntity", Instance: { } instance } when IsEntityLike(instance.Type):
+                return Lookups(instance, shape);
+
+            case ILocalReferenceOperation local:
+            {
+                var result = FromLocal(local, value => Lookups(value, shape), collection => Lookups(collection, shape), (node, symbol) =>
+                    node is IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" or "Insert" or "InsertRange" } add
+                    && (IsLocal(add.Instance, symbol) || (Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: "Entities" } entities && IsLocal(entities.Instance, symbol)))
+                        ? add.Arguments.Where(a => IsEntityLike(Unwrap(a.Value)?.Type) || IsRecordsLike(Unwrap(a.Value)?.Type))
+                            .Aggregate(TableResolution.Empty, (result, a) => result.Add(Lookups(a.Value, shape)))
+                        : null,
+                    silent: true);
+
+                // Lookups set through the local, once it is no longer being resolved, so its table can be
+                return IsEntityLike(local.Type)
+                    ? result.Add(Set(local, Root(local).DescendantsAndSelf().SelectMany(node => SetLookup(node, instance => IsLocal(instance, local.Local))), shape))
+                    : result;
+            }
+
+            case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
+                return Lookups(source, shape);
+
+            case IParameterReferenceOperation parameter:
+            {
+                // The caller's lookups, and those set on the parameter here
+                var result = Unknown(op, "entity", shape, silent: true);
+                return IsEntityLike(parameter.Type)
+                    ? result.Add(Set(parameter, Root(parameter).DescendantsAndSelf().SelectMany(node => SetLookup(node, instance => IsParameter(instance, parameter.Parameter))), shape))
+                    : result;
+            }
+
+            case IInvocationOperation invocation when IsFramework(invocation):
+                return Passthrough(invocation, t => IsEntityLike(t) || IsRecordsLike(t), value => Lookups(value, shape), value => Lookups(value, shape)) ?? TableResolution.Empty;
+
+            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
+                return Lookups(conditional.WhenTrue, shape).Add(Lookups(whenFalse, shape));
+
+            case ICoalesceOperation coalesce:
+                return Lookups(coalesce.Value, shape).Add(Lookups(coalesce.WhenNull, shape));
+
+            default:
+                return Unknown(op, "entity", shape, silent: true);
+        }
+    }
+
+    /// <summary>
+    /// What the lookups <paramref name="set"/> on <paramref name="entity"/> need, read as <paramref name="shape"/>.
+    /// The table a lookup refers to is narrowed to the tables its column can refer to, when the metadata knows it.
+    /// </summary>
+    private TableResolution Set(IOperation entity, IEnumerable<(string? Column, IOperation Value)> set, TableShape shape)
+    {
+        var values = set.ToList();
+        if (values.Count == 0) return TableResolution.Empty;
+        if (shape == TableShape.LookupHolder) return Entity(entity);
+
+        var tables = lookups is not null && values.Any(l => l.Column is not null) ? Entity(entity).Tables : [];
+        var result = TableResolution.Empty;
+        foreach (var (column, value) in values)
+        {
+            var targets = column is null ? [] : tables.SelectMany(table => lookups!.TargetsOf(table, column)).Distinct(StringComparer.Ordinal).ToList();
+            result.Add(targets.Count > 0 ? Entity(value).WithinTargets(targets) : Entity(value));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// The lookup <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, with its column when
+    /// known: <c>e.ParentAccountId = r</c>, <c>e["parentaccountid"] = r</c>, <c>e.Attributes["parentaccountid"] = r</c>
+    /// or <c>e.Attributes.Add("parentaccountid", r)</c>, where <c>r</c> is an <c>EntityReference</c>.
+    /// </summary>
+    private IEnumerable<(string? Column, IOperation Value)> SetLookup(IOperation node, Func<IOperation?, bool> isObject)
+    {
+        bool IsAttributes(IOperation? instance) =>
+            isObject(instance) || (Unwrap(instance) is IPropertyReferenceOperation { Property.Name: "Attributes" } attributes && isObject(attributes.Instance));
+
+        (string? Column, IOperation Value)? set = node switch
+        {
+            ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: false } property } assignment
+                when isObject(property.Instance) && IsEntityLike(property.Property.ContainingType) =>
+                (symbols.AttributeNameOf(property.Property), assignment.Value),
+            ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: true, Arguments.Length: 1 } indexer } assignment
+                when IsAttributes(indexer.Instance) =>
+                (Key(indexer.Arguments[0].Value), assignment.Value),
+            IInvocationOperation { TargetMethod.Name: "Add", Arguments.Length: 2 } add
+                when Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: "Attributes" } attributes && isObject(attributes.Instance) =>
+                (Key(add.Arguments[0].Value), add.Arguments[1].Value),
+            _ => null,
+        };
+
+        if (set is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != "ownerid") yield return lookup;
+    }
+
+    private static string? Key(IOperation operation) => operation.ConstantValue is { HasValue: true, Value: string key } ? key : null;
+
     private TableResolution EntityOrRecords(IOperation value) => IsEntityLike(Unwrap(value)?.Type) ? Entity(value) : Records(value);
 
     /// <summary>
@@ -783,13 +946,15 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
     /// <summary>
     /// Resolves a local from every value assigned to it in its method. The union is taken, because the analysis
     /// doesn't follow control flow. <paramref name="use"/> sees every operation in the method, to pick up
-    /// changes made through the local, such as <c>entity.LogicalName = "account"</c>.
+    /// changes made through the local, such as <c>entity.LogicalName = "account"</c>. A <paramref name="silent"/>
+    /// local reports nothing for assignments it can't follow, as for any value from an unknown source.
     /// </summary>
     private TableResolution FromLocal(
         ILocalReferenceOperation reference,
         Func<IOperation, TableResolution> resolve,
         Func<IOperation, TableResolution>? resolveElements = null,
-        Func<IOperation, ILocalSymbol, TableResolution?>? use = null)
+        Func<IOperation, ILocalSymbol, TableResolution?>? use = null,
+        bool silent = false)
     {
         var local = reference.Local;
         if (!_visiting.Add(local)) return TableResolution.Empty;
@@ -797,7 +962,7 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
         {
             var root = Root(reference);
             var result = TableResolution.Empty;
-            foreach (var value in LocalValues(local, root, result))
+            foreach (var value in LocalValues(local, root, silent ? TableResolution.Empty : result))
             {
                 if (!value.IsLoopCollection)
                 {
@@ -959,6 +1124,9 @@ internal sealed class TableResolver(XrmSymbols symbols, RequestRules? rules = nu
 
     private static bool IsLocal(IOperation? operation, ILocalSymbol local) =>
         Unwrap(operation) is ILocalReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Local, local);
+
+    private static bool IsParameter(IOperation? operation, IParameterSymbol parameter) =>
+        Unwrap(operation) is IParameterReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Parameter, parameter);
 
     private static IOperation Root(IOperation operation)
     {

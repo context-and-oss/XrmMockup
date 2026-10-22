@@ -30,3 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: Requests passed to `Execute` are checked against rules for their message, including `Upsert`, the `*Multiple` requests, `ExecuteMultiple`/`ExecuteTransaction`, `Assign`, `SetState`, `GrantAccess`, `QualifyLead` and others. Requests are followed through locals, helpers, parameters and collections, and requests that need no table privilege are no longer reported
 * Add: `Rules` setting under `XrmMockup:Permissions`, to add rules for custom messages or replace built-in ones
 * Change: Requests without a rule and custom API calls are counted apart under `Not checked`, and as `unresolvedNoRule` and `unresolvedCustomApi` in the JSON result instead of `unresolvedExecute`
+* Add: Append on the record and AppendTo on the referenced table for lookups set on records that are created or updated, directly or through requests. Lookups are found on early-bound properties, indexers and `Attributes.Add`, and followed through locals, collections, helpers and parameters
+* Add: Lookup targets are read from the entity metadata in the metadata folder, and give the table of a lookup value that can't be resolved; every target of a polymorphic lookup is included with basis `all-lookup-targets`
+* Change: The `Not checked` line no longer lists Append/AppendTo, and is left out when everything was checked
+* Fix: A `null` entity or reference passed to a helper is no longer reported as unresolved
+* Fix: A local passed to the call it is assigned from, such as `entity = Prepare(entity)`, no longer overflows the stack

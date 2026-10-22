@@ -118,7 +118,7 @@ internal sealed class TextManifestWriter : IManifestWriter
         {
             writer.Write(Result(coverage.Summary) + "\n");
             Missing(coverage.Missing, writer);
-            writer.Write(NotChecked(coverage.Summary) + "\n");
+            if (NotChecked(coverage.Summary) is { } notChecked) writer.Write(notChecked + "\n");
         }
     }
 
@@ -161,9 +161,10 @@ internal sealed class TextManifestWriter : IManifestWriter
     }
 
     /// <summary>
-    /// What the result doesn't cover, so a pass isn't read as proof that the roles are enough.
+    /// What the result doesn't cover, so a pass isn't read as proof that the roles are enough; <c>null</c> when
+    /// everything was checked.
     /// </summary>
-    private static string NotChecked(CoverageSummary summary)
+    private static string? NotChecked(CoverageSummary summary)
     {
         var parts = new List<string>();
         if (summary.NotChecked > 0) parts.Add($"{Count(summary.NotChecked, "requirement")} without roles");
@@ -177,8 +178,7 @@ internal sealed class TextManifestWriter : IManifestWriter
             parts.Add($"{Count(summary.Unresolved, "unresolved operation")} ({string.Join(", ", details)})");
         }
         if (summary.Unverifiable > 0) parts.Add($"{ImpersonationCheck.Privilege} for {Count(summary.Unverifiable, "entry point")}");
-        parts.Add("Append and AppendTo on lookups (not analyzed yet)");
-        return "Not checked: " + string.Join(", ", parts);
+        return parts.Count > 0 ? "Not checked: " + string.Join(", ", parts) : null;
     }
 
     private static string Mark(CoverageStatus status) => status switch
@@ -211,6 +211,7 @@ internal sealed class TextManifestWriter : IManifestWriter
     private static string Kebab(RequirementBasis basis) => basis switch
     {
         RequirementBasis.AllImplementations => "all-implementations",
+        RequirementBasis.AllLookupTargets => "all-lookup-targets",
         _ => basis.ToString().ToLowerInvariant(),
     };
 
