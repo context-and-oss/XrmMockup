@@ -275,9 +275,8 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         foreach (var reason in tables.Reasons) result.Add(TableResolution.Unresolved(reason));
         foreach (var slot in tables.Slots)
         {
-            result.Add(frame.Bindings.TryGetValue((slot.Method, slot.Ordinal), out var binding) && binding.Tables?.TryGetValue(slot.Shape, out var bound) == true
-                ? bound!
-                : TableResolution.Unresolved(slot.Reason));
+            if (frame.Bindings.TryGetValue((slot.Method, slot.Ordinal), out var binding) && binding.Tables?.TryGetValue(slot.Shape, out var bound) == true) result.Add(bound!);
+            else if (slot.Reason.Length > 0) result.Add(TableResolution.Unresolved(slot.Reason));
         }
         foreach (var returned in tables.Returns) result.Add(Returned(returned, frame, depth + 1));
         return result;
@@ -285,13 +284,15 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
     private TableResolution Returned(ReturnedTables returned, Frame frame, int depth)
     {
-        if (depth > MaxDepth) return TableResolution.Unresolved($"{returned.Reason}, through too many calls");
+        if (depth > MaxDepth) return returned.Reason.Length > 0 ? TableResolution.Unresolved($"{returned.Reason}, through too many calls") : TableResolution.Empty;
 
         var result = TableResolution.Empty;
         var cyclic = false;
+        var found = false;
         foreach (var (target, state, _) in Dispatch(returned.Call, frame, depth))
         {
             if (!graph.Nodes.TryGetValue(target, out var callee) || !callee.ReturnTables.TryGetValue(returned.Shape, out var tables)) continue;
+            found = true;
 
             // A method that returns its own result, directly or through others, adds nothing the other returns don't
             var key = target + "\n" + returned.Shape;
@@ -310,7 +311,10 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 _returning.Remove(key);
             }
         }
-        return cyclic ? result : result.OrUnresolved(returned.Reason);
+        // Requests that need nothing resolve to nothing, so for them only a method that returns none is unknown
+        if (cyclic || returned.Reason.Length == 0) return result;
+        if (RequestShapes.IsRequest(returned.Shape)) return found ? result : TableResolution.Unresolved(returned.Reason);
+        return result.OrUnresolved(returned.Reason);
     }
 
     private IReadOnlyList<Identity> Resolve(IEnumerable<ServiceOrigin> origins, Frame frame, int depth)

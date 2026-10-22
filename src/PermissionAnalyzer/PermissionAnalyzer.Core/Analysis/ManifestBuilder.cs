@@ -11,16 +11,22 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// from each and collects the privileges the reached operations need. A project that targets several
 /// frameworks is added once per target; its duplicate findings merge into one.
 /// </summary>
-public sealed class ManifestBuilder(string rootDirectory)
+/// <param name="rootDirectory">The directory source locations are reported relative to.</param>
+/// <param name="rules">
+/// Rules for the requests passed to <c>Execute</c>, which replace the built-in rule for their message or add one.
+/// </param>
+public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null)
 {
     private const string InjectedAssumption = "service is injected";
 
     private readonly SourcePaths _paths = new(rootDirectory);
+    private readonly RequestRules _rules = new(rules);
     private readonly CallGraph _graph = new();
     private readonly Dictionary<string, EntryCandidate> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PluginClass> _plugins = new(StringComparer.Ordinal);
     private readonly List<PluginStepRegistration> _steps = [];
     private readonly List<string> _entryMethods = [];
+    private readonly HashSet<string> _customApis = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Adds the code in <paramref name="compilation"/>. Returns <c>false</c> when the compilation doesn't
@@ -30,7 +36,7 @@ public sealed class ManifestBuilder(string rootDirectory)
     {
         if (XrmSymbols.Create(compilation) is not { } symbols) return false;
 
-        _graph.Merge(new SummaryExtractor(compilation, symbols, _paths).Extract(cancellationToken));
+        _graph.Merge(new SummaryExtractor(compilation, symbols, _paths, _rules).Extract(cancellationToken));
 
         var discovery = new EntryPointDiscovery(compilation, symbols, _paths).Discover(cancellationToken);
         foreach (var entry in discovery.Entries) AddEntry(entry);
@@ -64,6 +70,10 @@ public sealed class ManifestBuilder(string rootDirectory)
         var candidates = new Dictionary<string, EntryCandidate>(_entries, StringComparer.Ordinal);
         AddMetadataSteps(candidates);
         AddMethodEntries(candidates);
+
+        // Messages the solution implements or registers steps on, which no rule knows, are its custom APIs
+        _customApis.Clear();
+        _customApis.UnionWith(candidates.Values.Select(c => c.Trigger?.Message).Concat(_steps.Select(s => s.Message)).OfType<string>());
 
         var entryPoints = new List<EntryPoint>();
         var reached = new HashSet<string>(StringComparer.Ordinal);
@@ -253,11 +263,20 @@ public sealed class ManifestBuilder(string rootDirectory)
             .ToList();
     }
 
-    private static EntryPoint Describe(EntryCandidate candidate, EvaluationResult result)
+    private EntryPoint Describe(EntryCandidate candidate, EvaluationResult result)
     {
         var (requirements, unresolved, assumptions) = Aggregate([result]);
         return Describe(candidate, requirements, unresolved, assumptions);
     }
+
+    /// <summary>
+    /// A request without a rule is a custom API call when the solution implements the message or registers steps on
+    /// it, or the message has a publisher prefix, as custom API and custom action names do.
+    /// </summary>
+    private string CustomApi(string reason) =>
+        RequestReasons.NoRuleMessage(reason) is { } message && (_customApis.Contains(message) || message.IndexOf('_') > 0)
+            ? RequestReasons.CustomApi(message)
+            : reason;
 
     private static EntryPoint Describe(EntryCandidate candidate, IReadOnlyList<Requirement> requirements, IReadOnlyList<UnresolvedOperation> unresolved, IReadOnlyList<Assumption> assumptions) =>
         new(
@@ -274,9 +293,10 @@ public sealed class ManifestBuilder(string rootDirectory)
 
     /// <summary>
     /// Merges the hits of an evaluation: one requirement per table, privilege and identity, with the strongest
-    /// basis and one source per location (the shortest call path), all sorted.
+    /// basis and one source per location (the shortest call path), and one unresolved operation per location,
+    /// reason and identity, with the privileges of each. All sorted.
     /// </summary>
-    private static (IReadOnlyList<Requirement>, IReadOnlyList<UnresolvedOperation>, IReadOnlyList<Assumption>) Aggregate(IEnumerable<EvaluationResult> results)
+    private (IReadOnlyList<Requirement>, IReadOnlyList<UnresolvedOperation>, IReadOnlyList<Assumption>) Aggregate(IEnumerable<EvaluationResult> results)
     {
         var list = results.ToList();
         var truncated = list.Any(r => r.Truncated);
@@ -298,8 +318,8 @@ public sealed class ManifestBuilder(string rootDirectory)
 
         var unresolved = list
             .SelectMany(r => r.Unresolved)
-            .GroupBy(h => (h.Source.Location, h.Operation, h.Reason, Privileges: string.Join(",", h.Privileges), h.RunsAs))
-            .Select(g => g.First())
+            .GroupBy(h => (h.Source.Location, h.Operation, Reason: CustomApi(h.Reason), h.RunsAs))
+            .Select(g => g.First() with { Reason = g.Key.Reason, Privileges = g.SelectMany(h => h.Privileges).Distinct().OrderBy(p => p).ToList() })
             .OrderBy(h => h.Source.Location)
             .ThenBy(h => h.Operation, StringComparer.Ordinal)
             .ThenBy(h => h.Reason, StringComparer.Ordinal)

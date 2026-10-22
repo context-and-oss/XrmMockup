@@ -47,6 +47,11 @@ public record PermissionsConfiguration
     /// Missing privileges that are accepted. They are reported as suppressed and don't fail <c>check</c>.
     /// </summary>
     public SuppressionConfiguration[] Suppress { get; init; } = [];
+
+    /// <summary>
+    /// Rules for requests passed to <c>Execute</c>, which replace the built-in rule for their message or add one.
+    /// </summary>
+    public RuleConfiguration[] Rules { get; init; } = [];
 }
 
 public record PrincipalConfiguration
@@ -77,4 +82,71 @@ public record SuppressionConfiguration
     public string? Privilege { get; init; }
 
     public string? Reason { get; init; }
+}
+
+public record RuleConfiguration
+{
+    /// <summary>
+    /// The message, such as <c>Assign</c>, or the request type name, such as <c>AssignRequest</c>.
+    /// </summary>
+    public string? Message { get; init; }
+
+    /// <summary>
+    /// The member that holds the target of <see cref="Privileges"/>, such as <c>Target</c>.
+    /// </summary>
+    public string? Target { get; init; }
+
+    /// <summary>
+    /// The privileges needed on <see cref="Target"/>. <c>$Member</c>, such as <c>$PrincipalAccess.AccessMask</c>,
+    /// adds the rights that member grants.
+    /// </summary>
+    public string[] Privileges { get; init; } = [];
+
+    /// <summary>
+    /// Further checks, on other members or on fixed tables.
+    /// </summary>
+    public RuleCheckConfiguration[] Checks { get; init; } = [];
+
+    /// <summary>
+    /// Messages whose checks this request makes as well, such as <c>Create</c> and <c>Update</c> for <c>Upsert</c>.
+    /// </summary>
+    public string[] As { get; init; } = [];
+
+    /// <summary>
+    /// The member that holds several targets, which the checks of <see cref="As"/> on <c>Target</c> apply to.
+    /// </summary>
+    public string? Targets { get; init; }
+
+    /// <summary>
+    /// The member that holds requests run as part of this one.
+    /// </summary>
+    public string? Requests { get; init; }
+
+    /// <summary>
+    /// Whether XrmMockup makes the checks. <c>true</c> when not set.
+    /// </summary>
+    public bool? Enforced { get; init; }
+}
+
+public record RuleCheckConfiguration
+{
+    /// <summary>
+    /// The request member that refers to the table, such as <c>Target</c>.
+    /// </summary>
+    public string? Member { get; init; }
+
+    /// <summary>
+    /// A fixed table logical name, when no <see cref="Member"/> is set.
+    /// </summary>
+    public string? Table { get; init; }
+
+    /// <summary>
+    /// The privileges, as for <see cref="RuleConfiguration.Privileges"/>.
+    /// </summary>
+    public string[] Privileges { get; init; } = [];
+
+    /// <summary>
+    /// A boolean member that must be set for the check to apply.
+    /// </summary>
+    public string? When { get; init; }
 }

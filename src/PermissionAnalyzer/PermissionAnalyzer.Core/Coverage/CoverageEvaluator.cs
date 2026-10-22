@@ -1,3 +1,4 @@
+using XrmMockup.PermissionAnalyzer.Core.Extraction;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Coverage;
@@ -99,7 +100,8 @@ public static class CoverageEvaluator
                 identities.Values.Where(i => i.RunsAs.Kind != RunsAsKind.System).ToList(),
                 impersonation,
                 needsRole.Count,
-                needsRole.Count(u => u.Operation == "Execute"));
+                needsRole.Count(u => RequestReasons.NoRuleMessage(u.Reason) is not null),
+                needsRole.Count(u => RequestReasons.IsCustomApi(u.Reason)));
             sections.Add(section);
             return section;
         }
@@ -126,7 +128,8 @@ public static class CoverageEvaluator
             Count(CoverageStatus.NotChecked),
             Count(CoverageStatus.System),
             sections.Sum(s => s.Unresolved),
-            sections.Sum(s => s.UnresolvedExecute),
+            sections.Sum(s => s.UnresolvedNoRule),
+            sections.Sum(s => s.UnresolvedCustomApi),
             sections.Count(s => s.Impersonation is not null));
 
         var missingPrivileges = missing.Select(m => new MissingPrivilege(m.Key.Table, m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();

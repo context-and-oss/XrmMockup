@@ -150,7 +150,7 @@ internal sealed class NodeSummary(string id, string member, string display, stri
     /// </summary>
     public void Merge(NodeSummary other)
     {
-        MergeBySource(Accesses, other.Accesses, a => (a.Source, a.Operation + "\n" + a.ReasonPrefix));
+        MergeBySource(Accesses, other.Accesses, a => (a.Source, a.Operation + "\n" + a.ReasonPrefix + "\n" + string.Join(",", a.Privileges)));
         MergeBySource(Calls, other.Calls, c => (c.Source, c.Target));
         Lambdas.UnionWith(other.Lambdas);
         if (Returns.Count == 0) Returns.AddRange(other.Returns);

@@ -170,8 +170,10 @@ internal sealed class TextManifestWriter : IManifestWriter
         if (summary.Unresolved > 0)
         {
             var details = new List<string>();
-            if (summary.UnresolvedExecute > 0) details.Add($"{Count(summary.UnresolvedExecute, "Execute request")}");
-            if (summary.Unresolved > summary.UnresolvedExecute) details.Add($"{summary.Unresolved - summary.UnresolvedExecute} with an unknown table");
+            if (summary.UnresolvedNoRule > 0) details.Add($"{Count(summary.UnresolvedNoRule, "request")} without a rule");
+            if (summary.UnresolvedCustomApi > 0) details.Add($"{Count(summary.UnresolvedCustomApi, "custom API call")}");
+            var other = summary.Unresolved - summary.UnresolvedNoRule - summary.UnresolvedCustomApi;
+            if (other > 0) details.Add($"{other} with an unknown table or request");
             parts.Add($"{Count(summary.Unresolved, "unresolved operation")} ({string.Join(", ", details)})");
         }
         if (summary.Unverifiable > 0) parts.Add($"{ImpersonationCheck.Privilege} for {Count(summary.Unverifiable, "entry point")}");

@@ -138,19 +138,6 @@ public class ExtractionTests
     }
 
     [Fact]
-    public void ExecuteIsReportedAsUnresolved()
-    {
-        var method = Analyze.Method("""
-            class C { void M(IOrganizationService service) => service.Execute(new OrganizationRequest("WhoAmI")); }
-            """);
-
-        Assert.Empty(method.Requirements);
-        var unresolved = Assert.Single(method.Unresolved);
-        Assert.Equal("Execute", unresolved.Operation);
-        Assert.Equal("Execute requests are not analyzed yet", unresolved.Reason);
-    }
-
-    [Fact]
     public void ParameterEntityIsReportedWithReason()
     {
         var method = Analyze.Method("""

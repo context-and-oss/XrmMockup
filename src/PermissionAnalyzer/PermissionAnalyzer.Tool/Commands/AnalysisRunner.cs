@@ -45,7 +45,7 @@ internal static class AnalysisRunner
             var coverageOptions = CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, requireRoles);
 
             var root = Path.GetDirectoryName(settings.Target)!;
-            var builder = new ManifestBuilder(root);
+            var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions));
             if (settings.MetadataDirectory is { } metadataDirectory)
             {
                 var steps = PluginStepLoader.Load(metadataDirectory);

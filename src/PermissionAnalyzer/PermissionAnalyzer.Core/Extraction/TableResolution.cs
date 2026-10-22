@@ -1,4 +1,5 @@
 using XrmMockup.PermissionAnalyzer.Core.Graph;
+using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 
@@ -109,12 +110,48 @@ internal enum TableShape
     FetchMainTable,
     EntityReferences,
     Records,
+
+    // A request, or a collection of requests, read for the tables it needs one privilege on (see RequestShapes)
+    RequestCreate,
+    RequestRead,
+    RequestWrite,
+    RequestDelete,
+    RequestAppend,
+    RequestAppendTo,
+    RequestAssign,
+    RequestShare,
+
+    /// <summary>
+    /// A request read for what can't be tied to a privilege: requests without a rule, or of unknown type.
+    /// </summary>
+    RequestOther,
+}
+
+/// <summary>
+/// The shapes a request is read as: one per privilege, plus <see cref="TableShape.RequestOther"/>.
+/// </summary>
+internal static class RequestShapes
+{
+    public static IReadOnlyList<TableShape> All { get; } =
+        [.. Enum.GetValues(typeof(Privilege)).Cast<Privilege>().Select(For), TableShape.RequestOther];
+
+    public static TableShape For(Privilege privilege) => TableShape.RequestCreate + (int)privilege;
+
+    /// <summary>
+    /// The privilege a request shape is read for; <c>null</c> for <see cref="TableShape.RequestOther"/> and the
+    /// other shapes.
+    /// </summary>
+    public static Privilege? PrivilegeOf(TableShape shape) =>
+        shape is >= TableShape.RequestCreate and < TableShape.RequestOther ? (Privilege)(shape - TableShape.RequestCreate) : null;
+
+    public static bool IsRequest(TableShape shape) => shape >= TableShape.RequestCreate;
 }
 
 /// <summary>
 /// A table that depends on parameter <see cref="Ordinal"/>, or on a type parameter of a generic method (see
 /// <see cref="TypeParameterOrdinal"/>) of <see cref="Method"/>, read as <see cref="Shape"/>.
-/// <see cref="Reason"/> is reported when no call site provides the argument.
+/// <see cref="Reason"/> is reported when no call site provides the argument; an empty reason reports nothing, for
+/// a request read for one privilege, whose reason is reported once under <see cref="TableShape.RequestOther"/>.
 /// </summary>
 internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, string Reason) : IComparable<TableSlot>
 {
@@ -138,7 +175,8 @@ internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, s
 
 /// <summary>
 /// The tables of the value <see cref="Call"/> returns, read as <see cref="Shape"/>, such as a query built by a
-/// helper method. <see cref="Reason"/> is reported when the method isn't in the call graph or returns nothing known.
+/// helper method. <see cref="Reason"/> is reported when the method isn't in the call graph or returns nothing known;
+/// an empty reason reports nothing, as for <see cref="TableSlot"/>.
 /// </summary>
 internal sealed record ReturnedTables(CallFact Call, TableShape Shape, string Reason) : IComparable<ReturnedTables>
 {

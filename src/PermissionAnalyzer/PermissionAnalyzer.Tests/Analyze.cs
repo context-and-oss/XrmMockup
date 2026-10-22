@@ -25,7 +25,7 @@ internal static class Analyze
         using Microsoft.Xrm.Sdk;
         using Microsoft.Xrm.Sdk.Client;
         using Microsoft.Xrm.Sdk.Query;
-        using Microsoft.Xrm.Sdk.Messages;
+        using Microsoft.Xrm.Sdk.Messages; using Microsoft.Crm.Sdk.Messages;
         using Microsoft.Extensions.DependencyInjection;
         using XrmPluginCore;
         using XrmPluginCore.Enums;
@@ -150,9 +150,10 @@ internal static class Analyze
         string source,
         IEnumerable<string>? roleGovernedTables = null,
         EntryPointSelector? scope = null,
-        Action<ManifestBuilder>? setup = null)
+        Action<ManifestBuilder>? setup = null,
+        IEnumerable<RequestRule>? rules = null)
     {
-        var builder = new ManifestBuilder(Root);
+        var builder = new ManifestBuilder(Root, rules);
         setup?.Invoke(builder);
         Assert.True(builder.Add(Compile(source)));
         return builder.Build(roleGovernedTables, scope);

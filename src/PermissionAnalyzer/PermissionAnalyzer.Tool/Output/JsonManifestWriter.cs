@@ -60,7 +60,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
             manifest.NotRoleGoverned,
             coverage?.Missing.Select(m => new MissingDocument(m.Table, m.Privilege, m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In)).ToList(),
             coverage?.Summary is { } summary
-                ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedExecute, summary.Unverifiable, summary.Incomplete)
+                ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.Unverifiable, summary.Incomplete)
                 : null);
 
         writer.Write(JsonSerializer.Serialize(document, Options));
@@ -172,7 +172,8 @@ internal sealed class JsonManifestWriter : IManifestWriter
         int NotChecked,
         int System,
         int Unresolved,
-        int UnresolvedExecute,
+        int UnresolvedNoRule,
+        int UnresolvedCustomApi,
         int Unverifiable,
         bool Incomplete);
 

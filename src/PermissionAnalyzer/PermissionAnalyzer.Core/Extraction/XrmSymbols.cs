@@ -30,6 +30,7 @@ internal sealed class XrmSymbols
         QueryByAttribute = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.QueryByAttribute");
         FetchExpression = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.FetchExpression");
         LinkEntity = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Query.LinkEntity");
+        OrganizationRequest = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.OrganizationRequest");
         EntityLogicalNameAttribute = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Client.EntityLogicalNameAttribute");
         Plugin = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IPlugin");
         OrganizationServiceFactory = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IOrganizationServiceFactory");
@@ -50,6 +51,7 @@ internal sealed class XrmSymbols
     public INamedTypeSymbol? QueryByAttribute { get; }
     public INamedTypeSymbol? FetchExpression { get; }
     public INamedTypeSymbol? LinkEntity { get; }
+    public INamedTypeSymbol? OrganizationRequest { get; }
     public INamedTypeSymbol? EntityLogicalNameAttribute { get; }
     public INamedTypeSymbol? Plugin { get; }
     public INamedTypeSymbol? OrganizationServiceFactory { get; }

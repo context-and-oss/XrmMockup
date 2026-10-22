@@ -69,7 +69,8 @@ public sealed class SectionCoverage(
     IReadOnlyList<IdentityRoles> identities,
     ImpersonationCheck? impersonation,
     int unresolved,
-    int unresolvedExecute)
+    int unresolvedNoRule,
+    int unresolvedCustomApi)
 {
     /// <summary>
     /// The identities of the section's requirements, with their roles, sorted by identity.
@@ -84,9 +85,14 @@ public sealed class SectionCoverage(
     public int Unresolved { get; } = unresolved;
 
     /// <summary>
-    /// The part of <see cref="Unresolved"/> that are <c>Execute</c> requests, which aren't analyzed yet.
+    /// The part of <see cref="Unresolved"/> that are requests without a rule.
     /// </summary>
-    public int UnresolvedExecute { get; } = unresolvedExecute;
+    public int UnresolvedNoRule { get; } = unresolvedNoRule;
+
+    /// <summary>
+    /// The part of <see cref="Unresolved"/> that are custom API calls, whose privileges aren't analyzed yet.
+    /// </summary>
+    public int UnresolvedCustomApi { get; } = unresolvedCustomApi;
 
     public RequirementCoverage For(Requirement requirement) => requirements[requirement];
 
@@ -94,8 +100,9 @@ public sealed class SectionCoverage(
 }
 
 /// <summary>
-/// Counts over every requirement of a <see cref="CoverageReport"/>. <see cref="UnresolvedExecute"/> is the part of
-/// <see cref="Unresolved"/> that are <c>Execute</c> requests.
+/// Counts over every requirement of a <see cref="CoverageReport"/>. <see cref="UnresolvedNoRule"/> and
+/// <see cref="UnresolvedCustomApi"/> are the parts of <see cref="Unresolved"/> that are requests without a rule and
+/// custom API calls.
 /// </summary>
 public sealed record CoverageSummary(
     int Granted,
@@ -105,7 +112,8 @@ public sealed record CoverageSummary(
     int NotChecked,
     int System,
     int Unresolved,
-    int UnresolvedExecute,
+    int UnresolvedNoRule,
+    int UnresolvedCustomApi,
     int Unverifiable)
 {
     /// <summary>

@@ -204,21 +204,29 @@ can't be named without a table.
 objects as well as through the CRUD methods. The rules map each request type to the
 privileges it needs. Phase 3.5 builds them.
 
-**Rule table.** The rules are data (an embedded table), not code, so they can be extended and
-overridden in `XrmMockup:Permissions:Rules` (§6.3). A rule names the request (by type or by
-`RequestName`), the property that holds the target, and the privileges. It can also expand
-into other requests, the way XrmMockup's handlers call each other:
+**Rule table.** The rules are data (a table in `RequestRules`), not code, so they can be extended and
+overridden in `XrmMockup:Permissions:Rules` (§6.3). A rule names the message (`Assign` or the
+request type `AssignRequest`; matched without the `Request` suffix, ignoring case), the member
+that holds the target, and the privileges. Further checks can name another member or a fixed
+table, and apply only when a boolean member is set (`when`). A rule can also expand into other
+requests, the way XrmMockup's handlers call each other, or hold nested requests (`requests`). A
+configured rule replaces the built-in rule for its message:
 
 ```jsonc
 { "message": "AssignRequest", "target": "Target", "privileges": ["Assign", "Write"] },
-{ "message": "SetStateRequest", "target": "EntityMoniker", "privileges": ["Write"] },
-{ "message": "UpsertRequest", "target": "Target", "as": ["CreateRequest", "UpdateRequest"] },
+{ "message": "SetStateRequest", "target": "EntityMoniker", "privileges": ["Write"], "enforced": false },
+{ "message": "UpsertRequest", "as": ["CreateRequest", "UpdateRequest"] },
 { "message": "CreateMultipleRequest", "targets": "Targets", "as": ["CreateRequest"] },
+{ "message": "ExecuteMultipleRequest", "requests": "Requests" },
 { "message": "GrantAccessRequest", "target": "Target", "privileges": ["Share", "$PrincipalAccess.AccessMask"] },
 { "message": "QualifyLeadRequest", "target": "LeadId", "privileges": ["Write"],
-  "creates": ["account?", "contact?", "opportunity?"] },
-{ "message": "WhoAmIRequest", "privileges": [] }
+  "checks": [{ "table": "account", "privileges": ["Create"], "when": "CreateAccount" }, /* contact, opportunity */] },
+{ "message": "WhoAmIRequest" }
 ```
+
+`targets` makes the `as` rules' checks on `Target` apply to that member instead. `$Member` adds
+the rights an `AccessRights` member grants; when it can't be read, the request is unresolved. A
+`when` member is skipped only when it is a constant `false`.
 
 Built-in rules, in groups:
 
@@ -232,7 +240,7 @@ Built-in rules, in groups:
 | Requests that need no table privilege: block transfers that continue an initialized one (`UploadBlockRequest`, `CommitFileBlocksUploadRequest`, `DownloadBlockRequest`), metadata (`RetrieveEntityRequest`, `RetrieveAttributeRequest`, `RetrieveMetadataChangesRequest`, …), `WhoAmIRequest`, `RetrieveVersionRequest`, `FetchXmlToQueryExpressionRequest` | None. Not reported as unresolved |
 
 Rules follow Dataverse. Some checks Dataverse makes aren't enforced by XrmMockup's handlers
-(for example `SetState`, `GrantAccess` and the file block requests). Each rule records whether
+(for example `SetState` and the file block requests). Each rule records whether
 XrmMockup enforces it, so the cross-check in §9 knows which differences are expected.
 
 **Requests through the code.** A request is tracked like a table (§5.5): through locals,
@@ -246,8 +254,9 @@ it, so they over-approximate, like the rest of the call graph.
 
 **Requests without a rule** stay unresolved, with a reason that says which:
 
-- A request type without a rule: "no rule for 'XxxRequest'". It can be added in `Rules`.
-- `new OrganizationRequest("name")` naming a custom API in the metadata: recognized as a
+- A request without a rule: "no rule for message 'Xxx'". It can be added in `Rules`.
+- A request without a rule whose message is a custom API found in the code, a plugin step
+  message in the metadata, or has a publisher prefix (`ctx_Approve`): recognized as a
   custom API call. Its execute privilege comes in phase 5 (§5.7) and the plugins it runs in
   phase 4. Until then it is listed under `Not checked` as a custom API call, apart from
   the rest.
@@ -470,15 +479,14 @@ Result: 27 granted, 4 missing
 Missing privileges:
   ✘ ctx_orderline  Create  ApplicationUser  Integration App (--role)  in function:ProcessOrder, function:ResubmitOrder
   ✘ ctx_orderline  Read    ApplicationUser  Integration App (--role)  in function:GetOrder
-Not checked: 5 unresolved operations (4 Execute requests, 1 with an unknown table), Append and AppendTo on lookups (not analyzed yet)
+Not checked: 5 unresolved operations (1 request without a rule, 3 custom API calls, 1 with an unknown table or request), Append and AppendTo on lookups (not analyzed yet)
 ```
 
 `Missing privileges` merges the missing requirements by table, privilege, identity and roles,
 so each gap is listed once with every entry point that needs it. `Not checked` lists unresolved
-operations (`Execute` requests apart from calls with an unknown table),
-requirements whose identity has no roles, entry points whose impersonation privilege is
-unverifiable, and Append/AppendTo until phase 3.5. From phase 3.5, requests with no rule and
-custom API calls are counted separately (§5.3). When nothing is missing but something wasn't
+operations (requests with no rule and custom API calls apart from operations with an unknown
+table or request, §5.3), requirements whose identity has no roles, entry points whose
+impersonation privilege is unverifiable, and Append/AppendTo until it is analyzed. When nothing is missing but something wasn't
 checked, `check` exits `0` with a warning, and `--strict` fails.
 
 **`required`**: exactly what is needed, optionally with role coverage.
@@ -589,7 +597,7 @@ Command-line options override the matching setting, as in the metadata tool. For
   "missing": [{ "table": "contact", "privilege": "Create", "runsAs": "Caller", "roles": ["Salesperson"],
                 "origin": "--role", "in": ["plugin:Contoso.AccountPostPlugin:Update:account:PostOperation"] }],   // with roles only
   "result": { "granted": 12, "notGoverned": 0, "missing": 2, "suppressed": 0, "notChecked": 1,
-              "system": 1, "unresolved": 1, "unresolvedExecute": 0, "unverifiable": 0,
+              "system": 1, "unresolved": 1, "unresolvedNoRule": 0, "unresolvedCustomApi": 0, "unverifiable": 0,
               "incomplete": true }   // with roles only
 }
 ```

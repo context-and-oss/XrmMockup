@@ -9,7 +9,7 @@ those privileges against your security roles. It is a companion to
 `xrmmockup-metadata` downloads.
 
 > **Preview.** This release lists the privileges each entry point needs and checks them against
-> security roles. Plugin cascades and `Execute` requests are coming next.
+> security roles. Plugin cascades and custom API privileges are coming next.
 
 ## Installation
 
@@ -143,8 +143,8 @@ Each requirement is checked against the roles of the identity it runs as:
   closest names.
 - `Missing privileges` lists each missing privilege once, with the identity, the roles that don't
   grant it and every entry point or unreached method that needs it. The `check` error names them too.
-- `Not checked` lists what the result doesn't cover: unresolved operations (split into `Execute`
-  requests and calls with an unknown table), requirements whose identity has no roles, the
+- `Not checked` lists what the result doesn't cover: unresolved operations (split into requests
+  without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles, the
   impersonation privilege, and Append/AppendTo on lookups, which aren't analyzed yet. When nothing is
   missing but something wasn't checked, `check` exits with `0` and logs a warning; `--strict` makes it fail.
 - Setting `CallerId` also needs the `prvActOnBehalfOfAnotherUser` privilege on the identity that sets
@@ -209,7 +209,7 @@ Calls on `IOrganizationService`, `IOrganizationServiceAsync`/`Async2` and their 
 | `Update` | Write |
 | `Delete` | Delete |
 | `Associate`, `Disassociate` | Read, AppendTo on the target; Read, Append on the related records |
-| `Execute` | Reported as unresolved for now |
+| `Execute` | From the rule for the request's message, see [Requests](#requests) |
 
 The table is found from:
 
@@ -222,6 +222,36 @@ The table is found from:
   `service.Create(Build(flag))` or `RetrieveMultiple(Query<Contact>())`
 - type arguments of generic methods, such as `service.Get<Contact>(id)` where `Get<T>` uses
   `new T().LogicalName` or `Activator.CreateInstance<T>()`
+
+### Requests
+
+A request passed to `Execute` is checked against the rule for its message. Requests are followed like
+tables: through locals, parameters, helper methods, object initializers, `Parameters["…"]`, and
+collections built with `Add`, `AddRange` or collection expressions, including batching with `Chunk` or
+`foreach`. Built-in rules cover:
+
+| Request | Privileges |
+|---------|------------|
+| `Create`, `Update`, `Delete`, `Retrieve`, `RetrieveMultiple`, `Associate`, `Disassociate` | As the matching call above |
+| `Upsert` | Create and Write on `Target` |
+| `CreateMultiple`, `UpdateMultiple`, `UpsertMultiple`, `DeleteMultiple` | As the single request, on each table in `Targets` |
+| `ExecuteMultiple`, `ExecuteTransaction` | The privileges of every request in `Requests` |
+| `Assign` | Assign, Write |
+| `SetState` | Write on `EntityMoniker` |
+| `GrantAccess`, `ModifyAccess` | Share, and each right in `PrincipalAccess.AccessMask` |
+| `RevokeAccess` | Share |
+| `Merge` | Read, Write |
+| `QualifyLead` | Write on the lead; Create on account, contact and opportunity when asked to create them |
+| `SendEmail` | Read, Write on email |
+| `CloseIncident`, `WinOpportunity`, `LoseOpportunity`, `WinQuote`, `CloseQuote` | Create on the close activity, Write on the closed record |
+| `ReviseQuote` | Read, Create on quote |
+| `InitializeFileBlocksUpload` / `InitializeFileBlocksDownload` | Write / Read on `Target` |
+| Block transfers, metadata requests, `WhoAmI`, `RetrieveVersion`, `RetrievePrincipalAccess` and similar | None |
+
+A request without a rule is reported as unresolved. When its message is a custom API (one found in
+the code, a plugin step message in the metadata, or a name with a publisher prefix such as
+`ctx_Approve`), it is reported as a custom API call; its privileges aren't analyzed yet. Add a rule
+for your own messages in the [`Rules` setting](#request-rules).
 
 Calls inside lambdas and local functions count towards the method that contains them. A generic
 helper that no entry point calls is listed under unreached methods with its type parameter as the
@@ -252,6 +282,9 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
       },
       "Suppress": [
         { "Table": "ctx_auditlog", "Privilege": "Create", "Reason": "Created by SYSTEM via helper" }
+      ],
+      "Rules": [
+        { "Message": "ctx_Approve", "Target": "Target", "Privileges": ["Write"] }
       ]
     }
   }
@@ -267,10 +300,37 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
 | `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
 | `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |
 | `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table. Suppressed privileges are shown but don't fail `check` |
+| `Rules` | Rules for requests passed to `Execute`, which replace the built-in rule for their message or add one. See below |
 
 Configured paths are relative to the configuration file. `appsettings.{DOTNET_ENVIRONMENT}.json` and
 environment variables (for example `XrmMockup__Permissions__Solution`) override the file, and
 command-line options override everything.
+
+### Request rules
+
+Each rule names the `Message` (`ctx_Approve`, or a request type such as `AssignRequest`) and what it
+needs:
+
+```json
+"Rules": [
+  { "Message": "ctx_Approve", "Target": "Target", "Privileges": ["Write"] },
+  { "Message": "ctx_ApproveMultiple", "Targets": "Targets", "As": ["ctx_Approve"] },
+  { "Message": "ctx_Share", "Target": "Target", "Privileges": ["Share", "$Access"] },
+  { "Message": "ctx_Close", "Checks": [{ "Table": "task", "Privileges": ["Create"], "When": "CreateTask" }] },
+  { "Message": "ctx_Ping" }
+]
+```
+
+| Field | Description |
+|-------|-------------|
+| `Target`, `Privileges` | The privileges needed on the table of the request member `Target` names. `$Member` adds the rights an `AccessRights` member grants |
+| `Checks` | Further checks, each on a request `Member` or a fixed `Table`, with `Privileges` and an optional boolean `When` member that must be set |
+| `As` | Messages whose checks the request makes as well |
+| `Targets` | A member holding several targets; the `As` rules' checks on `Target` apply to it |
+| `Requests` | A member holding requests that run as part of this one |
+| `Enforced` | `false` when XrmMockup doesn't make the checks (Dataverse still does) |
+
+A rule with none of these needs no table privilege, so its requests are no longer reported.
 
 ### Excluding projects
 
@@ -307,8 +367,8 @@ Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, 
 With roles, each requirement also has `coverage` (`status`: `granted`, `not-governed`, `missing`,
 `suppressed`, `not-checked` or `system`, with `depth` or `reason`), each entry point has `roles` (the
 roles per identity, with their `origin`) and `impersonation` when it sets `CallerId`, and the document
-has a `result` with the counts, `unresolvedExecute` (the unresolved operations that are `Execute`
-requests) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
+has a `result` with the counts, `unresolvedNoRule` and `unresolvedCustomApi` (the unresolved operations
+that are requests without a rule and custom API calls) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
 with `table`, `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
 it). Without roles, none of these are written.
 

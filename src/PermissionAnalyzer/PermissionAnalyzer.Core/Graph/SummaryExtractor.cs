@@ -11,10 +11,8 @@ namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 /// Summarizes every method body of a compilation: its service calls, the methods it calls with what it passes
 /// them, and where its organization services come from.
 /// </summary>
-internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbols, SourcePaths paths)
+internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbols, SourcePaths paths, RequestRules rules)
 {
-    private const string ExecuteNotAnalyzed = "Execute requests are not analyzed yet";
-
     // How far constants are followed through fields and locals, such as a user id in a static field.
     private const int MaxConstantDepth = 8;
 
@@ -151,7 +149,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// <summary>
     /// A table resolver for code in <paramref name="root"/>, which follows calls to methods in the solution.
     /// </summary>
-    private TableResolver Resolver(IMethodSymbol root) => new(symbols, invocation =>
+    private TableResolver Resolver(IMethodSymbol root) => new(symbols, rules, invocation =>
         IsInSource(invocation.TargetMethod)
             ? Call(invocation.TargetMethod, invocation.Instance, invocation.IsVirtual, invocation.Arguments, NameLocation(invocation.Syntax), root)
             : null);
@@ -202,7 +200,12 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                     site.Access(resolver.EntityReferences(related).OrUnresolved("no related records are added"), "related records: ", Privilege.Read, Privilege.Append),
                 ];
             case "Execute":
-                return [site.Access(TableResolution.Unresolved(ExecuteNotAnalyzed))];
+                // One access per privilege the request can need, and one for what it can't be tied to a privilege
+                return
+                [
+                    .. Enum.GetValues(typeof(Privilege)).Cast<Privilege>().Select(p => site.Access(resolver.Requests(first, RequestShapes.For(p)), p)),
+                    site.Access(resolver.Requests(first, TableShape.RequestOther)),
+                ];
             default:
                 return [];
         }

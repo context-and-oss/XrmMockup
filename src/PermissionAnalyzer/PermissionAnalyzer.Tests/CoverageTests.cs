@@ -83,7 +83,7 @@ public class CoverageTests
         Assert.Equal(
             ["account:Read as Caller: Granted User", "contact:Create as Caller: Missing", "contact:Delete as System: System"],
             Results(report, entry));
-        Assert.Equal(new CoverageSummary(1, 0, 1, 0, 0, 1, 0, 0, 0), report.Summary);
+        Assert.Equal(new CoverageSummary(1, 0, 1, 0, 0, 1, 0, 0, 0, 0), report.Summary);
         Assert.False(report.Summary.Passed(strict: false));
 
         var identity = Assert.Single(report.For(entry).Identities);
@@ -368,7 +368,7 @@ public class CoverageTests
     [Fact]
     public void TextOutputListsWhatWasNotChecked()
     {
-        var summary = new CoverageSummary(Granted: 2, NotGoverned: 0, Missing: 0, Suppressed: 0, NotChecked: 1, System: 0, Unresolved: 3, UnresolvedExecute: 2, Unverifiable: 1);
+        var summary = new CoverageSummary(Granted: 2, NotGoverned: 0, Missing: 0, Suppressed: 0, NotChecked: 1, System: 0, Unresolved: 3, UnresolvedNoRule: 1, UnresolvedCustomApi: 1, Unverifiable: 1);
         Assert.True(summary.Incomplete);
         Assert.True(summary.Passed(strict: false));
         Assert.False(summary.Passed(strict: true));
@@ -381,6 +381,28 @@ public class CoverageTests
 
         Assert.Contains("prvActOnBehalfOfAnotherUser for 1 entry point", line);
         Assert.EndsWith("Append and AppendTo on lookups (not analyzed yet)", line);
+    }
+
+    [Fact]
+    public void TextOutputCountsRequestsWithoutRuleAndCustomApiCalls()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c =>
+                {
+                    c.OrganizationService.Execute(new AddMembersTeamRequest());
+                    c.OrganizationService.Execute(new OrganizationRequest("ctx_Recalculate"));
+                    c.OrganizationService.Execute(new OrganizationRequest(c.PluginExecutionContext.MessageName));
+                });
+            }
+            """, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
+        using var output = new StringWriter();
+        new TextManifestWriter().Write(manifest, report, output);
+        var line = Assert.Single(output.ToString().Split('\n'), l => l.StartsWith("Not checked: ", StringComparison.Ordinal));
+
+        Assert.StartsWith("Not checked: 3 unresolved operations (1 request without a rule, 1 custom API call, 1 with an unknown table or request)", line);
     }
 
     [Fact]
@@ -416,7 +438,8 @@ public class CoverageTests
         Assert.Contains("\"status\": \"missing\"", json);
         Assert.Contains("\"origin\": \"--role\"", json);
         Assert.Contains("\"missing\": 1", json);
-        Assert.Contains("\"unresolvedExecute\": 0", json);
+        Assert.Contains("\"unresolvedNoRule\": 0", json);
+        Assert.Contains("\"unresolvedCustomApi\": 0", json);
         Assert.Contains("\"in\": [\n        \"plugin:P:Update:account:PostOperation\"\n      ]", json);
         Assert.Contains("\"incomplete\": false", json);
     }
