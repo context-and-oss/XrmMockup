@@ -26,12 +26,24 @@ internal sealed class SourcePaths
         return new SourceLocation(Relative(span.Path), span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
     }
 
+    /// <summary>
+    /// The path relative to the root, with <c>../</c> for a file outside it, such as plugin code in a solution next to
+    /// the analyzed one. A file on another drive keeps its full path.
+    /// </summary>
     private string Relative(string path)
     {
         if (string.IsNullOrEmpty(path)) return "<unknown>";
 
         var full = Path.GetFullPath(path);
-        if (full.StartsWith(_root, PathComparison)) full = full.Substring(_root.Length);
-        return full.Replace('\\', '/');
+        if (full.StartsWith(_root, PathComparison)) return full.Substring(_root.Length).Replace('\\', '/');
+
+        var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+        var rootParts = _root.TrimEnd(separators).Split(separators);
+        var parts = full.Split(separators);
+        var common = 0;
+        while (common < rootParts.Length && common < parts.Length - 1 && string.Equals(rootParts[common], parts[common], PathComparison)) common++;
+
+        if (common == 0) return full.Replace('\\', '/');
+        return string.Concat(Enumerable.Repeat("../", rootParts.Length - common)) + string.Join("/", parts.Skip(common));
     }
 }

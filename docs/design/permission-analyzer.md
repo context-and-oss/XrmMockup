@@ -376,8 +376,12 @@ function too. Specifics:
 - **Plugin code location**: function apps rarely reference their plugin projects, so the plugin
   code isn't in the analyzed solution. The step registry still comes from `Metadata/`, and the
   plugin code is added with a setting that lists extra solutions or projects to load for
-  cascades only (for example `XrmMockup:Permissions:PluginSolutions`, or a repeatable
-  `--plugins <path>`). Their own entry points aren't reported unless asked for.
+  cascades only (`XrmMockup:Permissions:PluginSolutions`, and a repeatable
+  `--plugin-solution <path>` that adds to it). Their own entry points, and their methods no entry
+  point reaches, aren't reported unless a scope selects them; code that is also in the analyzed
+  solution is reported as usual. Their files are shown relative to the analyzed solution
+  (`../Contoso.Plugins/AccountPlugin.cs`), and `ExcludeProjects` path patterns match relative to
+  their own solution.
 - **Steps without code**: a metadata step whose plugin type isn't in any loaded code is listed
   as a finding ("step `X` fires but its code wasn't analyzed"), so missing plugin code is never
   silently treated as needing nothing.
@@ -595,6 +599,9 @@ The section holds what static analysis can't know:
       // Projects to leave out, e.g. tests. Wildcards; a pattern with '/' matches the solution-relative path.
       // --exclude/-x adds to these.
       "ExcludeProjects": ["*.Tests", "tests/*"],
+      // Plugin code the analyzed code fires but doesn't include, for cascades only (§5.6).
+      // --plugin-solution adds to these.
+      "PluginSolutions": ["../Contoso.Plugins/Contoso.Plugins.sln"],
       // Azure Function apps / app code: which roles their application user has
       "Principals": {
         "Contoso.Functions": { "Roles": ["Integration App"] },
@@ -692,7 +699,7 @@ location of each missing privilege.
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
-| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope), then plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
+| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope, plugin code loaded from other solutions (§5.6)) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |

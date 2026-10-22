@@ -38,7 +38,7 @@ internal static class AnalysisRunner
         try
         {
             var configuration = ConfigReader.Read(request.Config);
-            var settings = AnalysisSettings.Resolve(request.Solution, request.Project, request.Metadata, configuration, request.Exclude);
+            var settings = AnalysisSettings.Resolve(request.Solution, request.Project, request.Metadata, configuration, request.Exclude, request.PluginSolutions);
 
             var roles = LoadRoles(settings.MetadataDirectory, logger);
             // Role names are checked before the slow part, so a typo fails fast
@@ -61,7 +61,16 @@ internal static class AnalysisRunner
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
             var filter = new ProjectFilter(root, settings.ExcludeProjects);
-            await new CodeLoader(loggerFactory.CreateLogger<CodeLoader>()).AddAsync(settings.Target, builder, filter, cancellationToken);
+            var loader = new CodeLoader(loggerFactory.CreateLogger<CodeLoader>());
+            await loader.AddAsync(settings.Target, builder, filter, cancellationToken);
+            foreach (var plugins in settings.PluginSolutions)
+            {
+                await loader.AddAsync(plugins, builder, filter, cancellationToken, pluginCode: true);
+            }
+            foreach (var pattern in filter.Unused)
+            {
+                logger.LogWarning("Exclude pattern '{Pattern}' matches no project", pattern);
+            }
 
             foreach (var unmatched in builder.UnmatchedEntryMethods())
             {

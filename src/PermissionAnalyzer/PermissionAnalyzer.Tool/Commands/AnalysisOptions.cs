@@ -12,6 +12,7 @@ internal sealed class AnalysisOptions
     private readonly Option<string?> _project = new(CliOptions.Project.Primary, CliOptions.Project.Alias) { Description = CliOptions.Project.Description };
     private readonly Option<string?> _metadata = new(CliOptions.Metadata.Primary, CliOptions.Metadata.Alias) { Description = CliOptions.Metadata.Description };
     private readonly Option<string[]> _exclude = new(CliOptions.Exclude.Primary, CliOptions.Exclude.Alias) { Description = CliOptions.Exclude.Description };
+    private readonly Option<string[]> _pluginSolution = new(CliOptions.PluginSolution.Primary) { Description = CliOptions.PluginSolution.Description };
     private readonly Option<string?> _config = new(CliOptions.Config.Primary, CliOptions.Config.Alias) { Description = CliOptions.Config.Description };
     private readonly Option<string?> _output = new(CliOptions.Output.Primary, CliOptions.Output.Alias) { Description = CliOptions.Output.Description };
     private readonly Option<string?> _plugin = new(CliOptions.Plugin.Primary) { Description = CliOptions.Plugin.Description };
@@ -39,7 +40,7 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _project, _metadata, _exclude, _config, _format, _output })
+        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _project, _metadata, _exclude, _pluginSolution, _config, _format, _output })
         {
             command.Options.Add(option);
         }
@@ -97,7 +98,8 @@ internal sealed class AnalysisOptions
             entry,
             parseResult.GetValue(_role) ?? [],
             parseResult.GetValue(_callerRole) ?? [],
-            operation);
+            operation,
+            parseResult.GetValue(_pluginSolution) ?? []);
     }
 }
 
@@ -116,7 +118,8 @@ internal sealed record AnalysisRequest(
     IReadOnlyList<string> EntryMethods,
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> CallerRoles,
-    OperationRequest? Operation = null);
+    OperationRequest? Operation = null,
+    IReadOnlyList<string>? PluginSolutions = null);
 
 /// <summary>
 /// The user operation of <c>--operation</c>, with the columns of <c>--attributes</c> when given.

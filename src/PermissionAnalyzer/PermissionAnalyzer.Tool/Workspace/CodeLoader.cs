@@ -6,14 +6,16 @@ using XrmMockup.PermissionAnalyzer.Core.Analysis;
 namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 
 /// <summary>
-/// Loads a solution or project with MSBuild and adds every C# project to a <see cref="ManifestBuilder"/>.
+/// Loads a solution or project with MSBuild and adds every C# project to a <see cref="ManifestBuilder"/>, or with
+/// <c>pluginCode</c>, as plugin code from another solution (<see cref="ManifestBuilder.AddPluginCode"/>).
 /// The projects must be restored, as for a build. Strong-name signing is turned off, because it only affects the
 /// output and its key file is often not on the machine.
 /// </summary>
 internal sealed class CodeLoader(ILogger<CodeLoader> logger)
 {
-    public async Task AddAsync(string path, ManifestBuilder builder, ProjectFilter filter, CancellationToken cancellationToken)
+    public async Task AddAsync(string path, ManifestBuilder builder, ProjectFilter filter, CancellationToken cancellationToken, bool pluginCode = false)
     {
+        var solutionDirectory = Path.GetDirectoryName(Path.GetFullPath(path))!;
         var properties = FrameworkReferences.Properties();
         if (properties.TryGetValue(FrameworkReferences.Property, out var frameworkRoot))
         {
@@ -62,7 +64,7 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
         foreach (var project in projects.OrderBy(p => p.FilePath, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal))
         {
             // Checked before compiling, which is most of the time spent per project
-            if (filter.Excludes(project.FilePath) is { } pattern)
+            if (filter.Excludes(project.FilePath, solutionDirectory) is { } pattern)
             {
                 // Once per project file, not per target framework
                 if (excluded.Add(project.FilePath!)) logger.LogInformation("Skipping {Project}: excluded by '{Pattern}'", Path.GetFileNameWithoutExtension(project.FilePath), pattern);
@@ -95,7 +97,7 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
                 throw new ToolException($"Could not load {project.Name}: its references didn't resolve.{hint}{problems}");
             }
 
-            if (!builder.Add(compilation, cancellationToken))
+            if (!(pluginCode ? builder.AddPluginCode(compilation, cancellationToken) : builder.Add(compilation, cancellationToken)))
             {
                 if (problems.Length == 0)
                 {
@@ -123,13 +125,8 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
             }
             else
             {
-                logger.LogInformation("Analyzed {Project}", project.Name);
+                logger.LogInformation(pluginCode ? "Analyzed {Project} for plugin cascades" : "Analyzed {Project}", project.Name);
             }
-        }
-
-        foreach (var pattern in filter.Unused)
-        {
-            logger.LogWarning("Exclude pattern '{Pattern}' matches no project", pattern);
         }
 
         if (analyzed == 0 && excluded.Count > 0)

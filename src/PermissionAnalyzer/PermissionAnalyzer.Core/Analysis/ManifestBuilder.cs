@@ -31,23 +31,48 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     private readonly List<PluginStepRegistration> _steps = [];
     private readonly List<string> _entryMethods = [];
     private readonly Dictionary<string, UserOperation> _operations = new(StringComparer.Ordinal);
+
+    // What only plugin code from other solutions has, which runs in cascades but isn't reported on its own
+    private readonly HashSet<string> _cascadeOnlyEntries = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _cascadeOnlyPlugins = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _reportedNodes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _customApis = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Adds the code in <paramref name="compilation"/>. Returns <c>false</c> when the compilation doesn't
     /// reference the Dataverse SDK, so it can't contain any operations.
     /// </summary>
-    public bool Add(Compilation compilation, CancellationToken cancellationToken = default)
+    public bool Add(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, cascadesOnly: false, cancellationToken);
+
+    /// <summary>
+    /// Adds plugin code from outside the analyzed solution, such as the plugins of the environment an Azure Function
+    /// app calls. Its plugin steps and custom APIs run when operations fire them, but its entry points and unreached
+    /// methods aren't reported, unless a scope selects them. Code that <see cref="Add(Compilation, CancellationToken)"/>
+    /// adds as well is reported. Returns <c>false</c> when the compilation doesn't reference the Dataverse SDK.
+    /// </summary>
+    public bool AddPluginCode(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, cascadesOnly: true, cancellationToken);
+
+    private bool Add(Compilation compilation, bool cascadesOnly, CancellationToken cancellationToken)
     {
         if (XrmSymbols.Create(compilation) is not { } symbols) return false;
 
-        _graph.Merge(new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups).Extract(cancellationToken));
+        var summaries = new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups).Extract(cancellationToken);
+        if (!cascadesOnly) _reportedNodes.UnionWith(summaries.Nodes.Keys);
+        _graph.Merge(summaries);
 
         var discovery = new EntryPointDiscovery(compilation, symbols, _paths).Discover(cancellationToken);
-        foreach (var entry in discovery.Entries) AddEntry(entry);
+        foreach (var entry in discovery.Entries)
+        {
+            if (!cascadesOnly) _cascadeOnlyEntries.Remove(entry.Id);
+            else if (!_entries.ContainsKey(entry.Id)) _cascadeOnlyEntries.Add(entry.Id);
+            AddEntry(entry);
+        }
         foreach (var plugin in discovery.Plugins)
         {
             var key = plugin.Type + "\n" + plugin.Assembly;
+            if (!cascadesOnly) _cascadeOnlyPlugins.Remove(key);
+            else if (!_plugins.ContainsKey(key)) _cascadeOnlyPlugins.Add(key);
+
             if (_plugins.TryGetValue(key, out var existing)) _plugins[key] = existing with { HasCodeSteps = existing.HasCodeSteps || plugin.HasCodeSteps };
             else _plugins.Add(key, plugin);
         }
@@ -87,12 +112,14 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// <summary>
     /// Builds the manifest. Pass the tables that at least one security role mentions to fill
     /// <see cref="Manifest.NotRoleGoverned"/>; leave it <c>null</c> when no roles are known. With a
-    /// <paramref name="scope"/>, only the matching entry points are analyzed and nothing is reported as unreached.
+    /// <paramref name="scope"/>, only the matching entry points are analyzed and nothing is reported as unreached;
+    /// without one, the entry points of plugin code added with <see cref="AddPluginCode"/> are left out.
     /// </summary>
     public Manifest Build(IEnumerable<string>? roleGovernedTables = null, EntryPointSelector? scope = null)
     {
         var candidates = new Dictionary<string, EntryCandidate>(_entries, StringComparer.Ordinal);
-        var codeless = AddMetadataSteps(candidates);
+        var cascadeOnly = new HashSet<string>(_cascadeOnlyEntries, StringComparer.Ordinal);
+        var codeless = AddMetadataSteps(candidates, cascadeOnly);
         AddMethodEntries(candidates);
         foreach (var operation in _operations)
         {
@@ -111,6 +138,13 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             if (scope is not null && !scope.Matches(Describe(candidate, [], [], []))) continue;
 
             var context = Context(candidate);
+            if (scope is null && cascadeOnly.Contains(candidate.Id))
+            {
+                // Not reported, but what it reaches isn't unreached
+                reached.UnionWith(new Evaluator(_graph, context).Evaluate(candidate.Handlers).Reached);
+                continue;
+            }
+
             var evaluator = new Evaluator(_graph, context);
             var evaluation = _operations.TryGetValue(candidate.Id, out var user)
                 ? Unprefixed(evaluator.EvaluateAlone(user.Node(candidate.Id, _rules, _lookups), user.Display))
@@ -171,9 +205,10 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// Steps from the metadata. A step of a plugin that registers its steps in code adds the impersonating user
     /// to the matching code step, or runs <c>Execute</c> when no code step matches. A plain <c>IPlugin</c> gets
     /// one entry point per step, or one for the whole plugin when the metadata has no steps for it. Returns the
-    /// steps of plugins whose code isn't loaded.
+    /// steps of plugins whose code isn't loaded. Adds the entry points of plugins that only plugin code from other
+    /// solutions has to <paramref name="cascadeOnly"/>.
     /// </summary>
-    private List<CascadeStep> AddMetadataSteps(Dictionary<string, EntryCandidate> candidates)
+    private List<CascadeStep> AddMetadataSteps(Dictionary<string, EntryCandidate> candidates, HashSet<string> cascadeOnly)
     {
         var codeless = new List<CascadeStep>();
         var classes = _plugins.Values.OrderBy(p => p.Type, StringComparer.Ordinal).ThenBy(p => p.Assembly, StringComparer.Ordinal).ToList();
@@ -213,6 +248,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                     if (!candidates.ContainsKey(id))
                     {
                         candidates.Add(id, new EntryCandidate(id, EntryPointKind.Plugin, plugin.Type, plugin.Assembly, null, null, plugin.Declaration, handlers));
+                        if (IsCascadeOnly(plugin)) cascadeOnly.Add(id);
                     }
                 }
                 continue;
@@ -247,10 +283,13 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                     continue;
                 }
                 candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage, FilteredAttributes: filter), user, plugin.Declaration, handlers));
+                if (IsCascadeOnly(plugin)) cascadeOnly.Add(id);
             }
         }
         return codeless;
     }
+
+    private bool IsCascadeOnly(PluginClass plugin) => _cascadeOnlyPlugins.Contains(plugin.Type + "\n" + plugin.Assembly);
 
     /// <summary>
     /// The columns an Update step from the metadata is filtered on, lowercased.
@@ -328,13 +367,14 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         new(caller, new Identity(caller with { Assumed = true }, InjectedAssumption), primaryTable);
 
     /// <summary>
-    /// Methods with operations that no entry point reaches, each analyzed on its own.
+    /// Methods with operations that no entry point reaches, each analyzed on its own. Plugin code from other solutions
+    /// is left out.
     /// </summary>
     private List<MethodManifest> Unreached(HashSet<string> reached)
     {
         var evaluator = new Evaluator(_graph, new EntryContext(RunsAs.Caller, new Identity(RunsAs.Caller with { Assumed = true }, InjectedAssumption)));
         return _graph.Nodes.Values
-            .Where(n => n.Accesses.Count > 0 && !reached.Contains(n.Id))
+            .Where(n => n.Accesses.Count > 0 && !reached.Contains(n.Id) && _reportedNodes.Contains(n.Id))
             .GroupBy(n => n.Member, StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g =>

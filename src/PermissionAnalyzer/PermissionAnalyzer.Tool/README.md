@@ -74,6 +74,7 @@ Lists the table privileges each entry point needs.
 | `--project` | `-p` | A single project (`.csproj`) to analyze, together with the projects it references. Can't be combined with `--solution` |
 | `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/` |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
+| `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
 | `--config` | `-c` | Path to `appsettings.json` (default: the current directory) |
 | `--format` | `-f` | `text` (default) or `json` |
 | `--output` | `-o` | Write to a file instead of standard output |
@@ -304,12 +305,28 @@ point. Steps come from code registrations and from the plugin steps in the metad
   set more, the step fires with basis `filter-unknown`.
 - A call to a custom API implemented in the analyzed code runs that code.
 - A metadata step whose plugin code isn't loaded is reported as unresolved, so missing plugin code is
-  never treated as needing nothing.
+  never treated as needing nothing. Load it with `--plugin-solution` when it's in another solution.
 - Each step is expanded once per identity, so steps that fire each other don't loop.
 
 The source path of a cascaded requirement runs from the entry point through the operation (such as
 `Create contact`) and the step id into the step's code. The JSON output lists a step's filter as
 `filteredAttributes` on its trigger.
+
+#### Plugin code in another solution
+
+A function app or integration rarely references the plugin projects, so the steps it fires have no
+code in its solution. Add the solutions or projects with the plugin code with `--plugin-solution`, or
+`PluginSolutions` in the configuration:
+
+```bash
+xrmmockup-permissions required -p ./src/Contoso.Functions/Contoso.Functions.csproj -m ./tests/Metadata \
+  --plugin-solution ../Contoso.Plugins/Contoso.Plugins.sln
+```
+
+Their code is used for the steps the analyzed code fires, and their files are shown relative to the
+analyzed solution, such as `../Contoso.Plugins/AccountPlugin.cs:12`. Their own entry points, and
+their methods that no entry point reaches, aren't listed, unless a scope such as `--plugin` selects
+one. `ExcludeProjects` applies to them as well, with path patterns relative to their own solution.
 
 ### User operations
 
@@ -354,6 +371,7 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
       "Solution": "./src/Contoso.sln",
       "MetadataDirectory": "./tests/Metadata",
       "ExcludeProjects": ["*.Tests", "tests/*"],
+      "PluginSolutions": ["../Contoso.Plugins/Contoso.Plugins.sln"],
       "EntryPoints": ["Contoso.Sync.Importer.Run"],
       "Principals": {
         "Contoso.Functions": { "Roles": ["Integration App"] },
@@ -378,6 +396,7 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
 | `Solution` | Solution or project to analyze. Without it, the tool uses the single `.sln`/`.slnx` in the current directory |
 | `MetadataDirectory` | Metadata folder. Defaults to `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` |
 | `ExcludeProjects` | Projects to leave out, such as test projects. See below |
+| `PluginSolutions` | Solutions or projects with plugin code that the analyzed code fires, used for plugin cascades only. `--plugin-solution` adds to these. See [Plugin code in another solution](#plugin-code-in-another-solution) |
 | `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds to these. A name that matches no method is reported as a warning |
 | `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
 | `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |

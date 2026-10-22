@@ -1,3 +1,4 @@
+using XrmMockup.PermissionAnalyzer.Tool;
 using XrmMockup.PermissionAnalyzer.Tool.Options;
 using XrmMockup.PermissionAnalyzer.Tool.Workspace;
 
@@ -22,6 +23,15 @@ public class ProjectFilterTests
     {
         var filter = new ProjectFilter(Root, [pattern]);
         Assert.Equal(excluded ? pattern.Replace('\\', '/') : null, filter.Excludes(ProjectPath(project)));
+    }
+
+    [Fact]
+    public void PathPatternsMatchRelativeToTheProjectsSolution()
+    {
+        var filter = new ProjectFilter(Root, ["tests/*"]);
+
+        Assert.Null(filter.Excludes(ProjectPath("plugins/tests/Unit/Unit.csproj")));
+        Assert.Equal("tests/*", filter.Excludes(ProjectPath("plugins/tests/Unit/Unit.csproj"), ProjectPath("plugins")));
     }
 
     [Fact]
@@ -50,6 +60,32 @@ public class ProjectFilterTests
             var settings = AnalysisSettings.Resolve(null, null, null, configuration, ["Tools"]);
 
             Assert.Equal(["*.Tests", "tests/*", "Tools"], settings.ExcludeProjects);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PluginSolutionsAreRelativeToWhereTheyAreGiven()
+    {
+        var directory = Directory.CreateTempSubdirectory("permissions-config").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(directory, "plugins"));
+            File.WriteAllText(Path.Combine(directory, "Contoso.slnx"), "<Solution />");
+            File.WriteAllText(Path.Combine(directory, "plugins", "Plugins.slnx"), "<Solution />");
+            File.WriteAllText(Path.Combine(directory, "appsettings.json"), """
+                { "XrmMockup": { "Permissions": { "Solution": "Contoso.slnx", "PluginSolutions": ["plugins/Plugins.slnx", "Contoso.slnx"] } } }
+                """);
+            var configuration = ConfigReader.Read(Path.Combine(directory, "appsettings.json"));
+
+            var settings = AnalysisSettings.Resolve(null, null, null, configuration, pluginSolutions: [Path.Combine(directory, "plugins", "Plugins.slnx")]);
+            Assert.Equal([Path.Combine(directory, "plugins", "Plugins.slnx")], settings.PluginSolutions);
+
+            var missing = Assert.Throws<ToolException>(() => AnalysisSettings.Resolve(null, null, null, configuration, pluginSolutions: [Path.Combine(directory, "Missing.sln")]));
+            Assert.Equal($"Plugin solution or project not found: {Path.Combine(directory, "Missing.sln")}", missing.Message);
         }
         finally
         {

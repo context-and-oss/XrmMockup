@@ -134,9 +134,12 @@ internal static class Analyze
         return references;
     });
 
-    public static CSharpCompilation Compile(string source, string assemblyName = "Test", params CSharpCompilation[] references)
+    /// <summary>
+    /// Compiles <paramref name="source"/> as <paramref name="file"/>, relative to <see cref="Root"/>.
+    /// </summary>
+    public static CSharpCompilation Compile(string source, string assemblyName = "Test", string file = "Code.cs", params CSharpCompilation[] references)
     {
-        var tree = CSharpSyntaxTree.ParseText(Prelude + source, path: Path.Combine(Root, "Code.cs"));
+        var tree = CSharpSyntaxTree.ParseText(Prelude + source, path: Path.Combine(Root, file));
         var compilation = CSharpCompilation.Create(
             assemblyName,
             [tree],

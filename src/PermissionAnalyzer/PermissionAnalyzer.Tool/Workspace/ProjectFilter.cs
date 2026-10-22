@@ -28,13 +28,15 @@ internal sealed class ProjectFilter
 
     /// <summary>
     /// The first pattern that excludes the project at <paramref name="projectPath"/>, or <c>null</c> to analyze it.
+    /// Path patterns match relative to <paramref name="solutionDirectory"/>, the directory of the solution the project
+    /// is loaded from, which is the analyzed one by default.
     /// </summary>
-    public string? Excludes(string? projectPath)
+    public string? Excludes(string? projectPath, string? solutionDirectory = null)
     {
         if (projectPath is null) return null;
 
         var name = Path.GetFileNameWithoutExtension(projectPath);
-        var relative = Path.GetRelativePath(_rootDirectory, projectPath).Replace('\\', '/');
+        var relative = Path.GetRelativePath(solutionDirectory ?? _rootDirectory, projectPath).Replace('\\', '/');
         foreach (var (pattern, regex, isPath) in _patterns)
         {
             if (regex.IsMatch(isPath ? relative : name))

@@ -28,6 +28,13 @@ public record PermissionsConfiguration
     public string[] ExcludeProjects { get; init; } = [];
 
     /// <summary>
+    /// Solutions or projects with the plugin code of the environment, relative to the configuration file, for code that
+    /// doesn't include it, such as an Azure Function app. Their plugin steps and custom APIs run when the analyzed code
+    /// fires them, but their own entry points aren't reported.
+    /// </summary>
+    public string[] PluginSolutions { get; init; } = [];
+
+    /// <summary>
     /// Methods to analyze as entry points besides the discovered ones, such as <c>Contoso.Sync.Importer.Run</c>.
     /// </summary>
     public string[] EntryPoints { get; init; } = [];

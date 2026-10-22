@@ -264,7 +264,7 @@ public class EntryPointTests
                         Contoso.Logic.Handler.HandleAsync(async () => { templates.Delete(id); return id; });
                 }
             }
-            """, "Contoso.Functions", library);
+            """, "Contoso.Functions", references: library);
 
         var builder = new ManifestBuilder(Analyze.Root);
         Assert.True(builder.Add(library));

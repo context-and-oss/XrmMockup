@@ -33,6 +33,12 @@ internal static class CliOptions
         public const string Description = "Leave out projects matching this pattern, e.g. \"*.Tests\" or \"tests/*\". Repeatable; adds to XrmMockup:Permissions:ExcludeProjects";
     }
 
+    internal static class PluginSolution
+    {
+        public const string Primary = "--plugin-solution";
+        public const string Description = "A solution or project with plugin code that the analyzed code fires but doesn't include. Used for plugin cascades only. Repeatable; adds to XrmMockup:Permissions:PluginSolutions";
+    }
+
     internal static class Config
     {
         public const string Primary = "--config";

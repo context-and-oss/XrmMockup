@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: Update steps with filtered attributes, from `AddFilteredAttributes` or the metadata, fire only for updates that set one of them, and with basis `filter-unknown` when the columns set can't all be determined
 * Add: A metadata plugin step that fires but whose code isn't loaded is reported as unresolved
 * Add: `--operation "<message> <table>"` analyzes a user operation, such as `Update account`, as the caller: the privileges of its request rule and of every plugin step it fires. `--attributes` gives the columns it sets, which decide the filtered Update steps it fires and the lookups it needs `Append` and `AppendTo` for
+* Add: `--plugin-solution` and the `PluginSolutions` setting load plugin code from other solutions, such as the plugins an Azure Function app fires, for plugin cascades only. Their entry points and unreached methods aren't listed unless a scope selects them, and their files are shown relative to the analyzed solution
 * Add: .NET Framework projects load outside Windows, with the reference assemblies from the `Microsoft.NETFramework.ReferenceAssemblies.net*` packages in the NuGet cache, and strong-name signing is ignored so a missing key file doesn't stop compilation
 * Change: The warning for a project that doesn't compile shows its first errors
 * Add: Table resolution through the record `Retrieve` returns, early-bound lookup properties (from the lookup's targets in the metadata) and `PrimaryEntityName` in plugin steps
