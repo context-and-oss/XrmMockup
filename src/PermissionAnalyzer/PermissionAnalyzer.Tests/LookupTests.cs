@@ -178,6 +178,38 @@ public class LookupTests
     }
 
     [Fact]
+    public void EarlyBoundLookupPropertyGivesTheTablesItRefersTo()
+    {
+        var manifest = Analyze.Code(
+            """
+            class C
+            {
+                void M(IOrganizationService service, Order order, Invoice invoice)
+                {
+                    service.Delete(order.CustomerId!.LogicalName, order.CustomerId.Id);
+                    service.Update(new Entity { LogicalName = invoice.AccountId!.LogicalName, Id = invoice.AccountId.Id });
+                }
+            }
+
+            [EntityLogicalName("ctx_invoice")]
+            public class Invoice : Entity
+            {
+                public Invoice() : base("ctx_invoice") { }
+
+                [AttributeLogicalName("ctx_accountid")]
+                public EntityReference? AccountId { get => GetAttributeValue<EntityReference>("ctx_accountid"); set => this["ctx_accountid"] = value; }
+            }
+            """ + Order,
+            lookups: [new("ctx_order", "ctx_customerid", ["account", "contact"]), new("ctx_invoice", "ctx_accountid", ["account"])]);
+        var method = Assert.Single(manifest.Unreached);
+
+        Assert.Empty(method.Unresolved);
+        Assert.Equal(
+            ["account:Write Direct", "account:Delete AllLookupTargets", "contact:Delete AllLookupTargets"],
+            method.Requirements.Select(r => $"{r.Table}:{r.Privilege} {r.Basis}"));
+    }
+
+    [Fact]
     public void KnownTargetOfPolymorphicLookupIsKept()
     {
         var manifest = Analyze.Code(

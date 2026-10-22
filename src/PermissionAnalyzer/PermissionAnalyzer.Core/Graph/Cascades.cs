@@ -17,8 +17,9 @@ internal sealed record CascadeResult(EvaluationResult Result, IReadOnlyList<stri
 /// Expands an evaluation with the plugin steps and custom APIs its operations fire, and the steps those fire in
 /// turn, as Dataverse runs them in the request pipeline. A fired step runs as the identity of the operation that
 /// fired it, unless it impersonates. Each step is expanded once per identity and basis, which also stops cycles.
+/// An operation on an unknown table only runs the steps without a table; the others are reported as unresolved.
 /// </summary>
-internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, Func<RunsAs, EntryContext> context)
+internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, Func<EntryCandidate, RunsAs, EntryContext> context)
 {
     private readonly IReadOnlyList<CascadeStep> _steps = steps.OrderBy(s => s.Id, StringComparer.Ordinal).ToList();
     private readonly Dictionary<(string, RunsAs), EvaluationResult> _evaluations = [];
@@ -49,11 +50,21 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
                 .Select(g => g.First());
             foreach (var trigger in triggers)
             {
+                if (trigger.Table == TriggerHit.AnyTable && Unmatched(trigger) is { Count: > 0 } unmatched)
+                {
+                    expanded.Unresolved.Add(new UnresolvedHit(
+                        trigger.Message,
+                        [],
+                        $"may fire any of {unmatched.Count} {trigger.Message} steps, because its table isn't known",
+                        trigger.RunsAs,
+                        trigger.Source));
+                }
+
                 foreach (var step in Matching(trigger))
                 {
                     fired.Add(step.Id);
                     var runsAs = step.ImpersonatingUserId is { } user ? RunsAs.User(user) : trigger.RunsAs;
-                    var basis = Max(Max(currentBasis, trigger.Basis), trigger.Table == TriggerHit.AnyTable ? RequirementBasis.CascadeUnknown : RequirementBasis.Direct);
+                    var basis = Max(currentBasis, trigger.Basis);
                     if (!done.Add((step.Id, runsAs, basis))) continue;
 
                     var table = trigger.Table is null ? trigger.Message : $"{trigger.Message} {trigger.Table}";
@@ -81,19 +92,27 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
     }
 
     /// <summary>
-    /// The steps registered for the trigger's message on its table. A step without a table runs on every table;
-    /// a trigger on an unknown table runs every step of its message.
+    /// The steps registered for the trigger's message on its table. A step without a table runs on every table, so
+    /// it is also the only step a trigger on an unknown table is known to run.
     /// </summary>
     private IEnumerable<CascadeStep> Matching(TriggerHit trigger) =>
         _steps.Where(s =>
             string.Equals(s.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)
-            && (s.Table is null || trigger.Table == TriggerHit.AnyTable || string.Equals(s.Table, trigger.Table, StringComparison.OrdinalIgnoreCase)));
+            && (s.Table is null || string.Equals(s.Table, trigger.Table, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// The steps of the trigger's message that run on one table, which a trigger on an unknown table may or may not
+    /// run. Firing them all would include the privileges of every such step in the solution, so they are reported
+    /// instead.
+    /// </summary>
+    private List<CascadeStep> Unmatched(TriggerHit trigger) =>
+        _steps.Where(s => s.Table is not null && string.Equals(s.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)).ToList();
 
     private EvaluationResult Evaluate(EntryCandidate code, RunsAs runsAs)
     {
         if (!_evaluations.TryGetValue((code.Id, runsAs), out var result))
         {
-            result = new Evaluator(graph, context(runsAs)).Evaluate(code.Handlers);
+            result = new Evaluator(graph, context(code, runsAs)).Evaluate(code.Handlers);
             _evaluations.Add((code.Id, runsAs), result);
         }
         return result;

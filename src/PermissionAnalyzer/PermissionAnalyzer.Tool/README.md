@@ -222,6 +222,10 @@ The table is found from:
   `service.Create(Build(flag))` or `RetrieveMultiple(Query<Contact>())`
 - type arguments of generic methods, such as `service.Get<Contact>(id)` where `Get<T>` uses
   `new T().LogicalName` or `Activator.CreateInstance<T>()`
+- the record `Retrieve` returns, which is of the table it asks for
+- an early-bound lookup property, such as `order.CustomerId.LogicalName`, from the lookup's targets in
+  the entity metadata, as for [lookups](#lookups)
+- `PrimaryEntityName` of the execution context in a plugin step, which is the step's table
 
 ### Requests
 
@@ -283,7 +287,10 @@ point. Steps come from code registrations and from the plugin steps in the metad
   own message. A request fires its message on its `Target` table, and the messages it runs as:
   `Upsert` also fires `Create` and `Update`, and `CreateMultiple` also fires `Create`.
 - A step without a table fires for every table. An operation on a table that can't be resolved fires
-  every step of its message, with basis `cascade-unknown`.
+  only those: the steps on a table are reported as unresolved ("may fire any of 12 Update steps"),
+  because including every step of the message would include most of the solution and tell nothing.
+- An operation on a polymorphic lookup's targets fires the steps of each target, with basis
+  `all-lookup-targets`.
 - A call to a custom API implemented in the analyzed code runs that code.
 - A metadata step whose plugin code isn't loaded is reported as unresolved, so missing plugin code is
   never treated as needing nothing.

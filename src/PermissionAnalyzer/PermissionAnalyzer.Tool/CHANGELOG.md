@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Fix: A `null` entity or reference passed to a helper is no longer reported as unresolved
 * Fix: A local passed to the call it is assigned from, such as `entity = Prepare(entity)`, no longer overflows the stack
 * Add: Plugin cascades: each entry point includes the requirements of the plugin steps and custom APIs its operations fire, directly or through other steps, under the identity of the operation that fired them unless the step impersonates. The fired steps are listed after `fires:`, and as `triggers` in JSON
-* Add: Requests fire the steps of the messages they run as, such as `Create` and `Update` for `Upsert`. An operation on an unknown table fires every step of its message, with basis `cascade-unknown`
+* Add: Requests fire the steps of the messages they run as, such as `Create` and `Update` for `Upsert`. An operation on an unknown table fires only the steps without a table, and reports the others as unresolved
 * Add: A metadata plugin step that fires but whose code isn't loaded is reported as unresolved
 * Add: .NET Framework projects load outside Windows, with the reference assemblies from the `Microsoft.NETFramework.ReferenceAssemblies.net*` packages in the NuGet cache, and strong-name signing is ignored so a missing key file doesn't stop compilation
 * Change: The warning for a project that doesn't compile shows its first errors
+* Add: Table resolution through the record `Retrieve` returns, early-bound lookup properties (from the lookup's targets in the metadata) and `PrimaryEntityName` in plugin steps

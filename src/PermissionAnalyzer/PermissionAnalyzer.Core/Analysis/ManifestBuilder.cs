@@ -74,7 +74,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         var candidates = new Dictionary<string, EntryCandidate>(_entries, StringComparer.Ordinal);
         var codeless = AddMetadataSteps(candidates);
         AddMethodEntries(candidates);
-        var cascades = new Cascades(_graph, CascadeSteps(candidates.Values, codeless), Context);
+        var cascades = new Cascades(_graph, CascadeSteps(candidates.Values, codeless), (step, caller) => Context(caller, step.Trigger?.Table));
 
         // Messages the solution implements or registers steps on, which no rule knows, are its custom APIs
         _customApis.Clear();
@@ -257,14 +257,15 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             // Who calls an explicit method isn't known; app code usually runs as its application user
             EntryPointKind.Method => Context(RunsAs.ApplicationUser with { Assumed = true }),
 
-            _ => Context(candidate.ImpersonatingUserId is { } user ? RunsAs.User(user) : RunsAs.Caller),
+            _ => Context(candidate.ImpersonatingUserId is { } user ? RunsAs.User(user) : RunsAs.Caller, candidate.Trigger?.Table),
         };
 
     /// <summary>
-    /// Code that runs as <paramref name="caller"/>, with injected services assumed to run as it too.
+    /// Code that runs as <paramref name="caller"/>, with injected services assumed to run as it too, for a step on
+    /// <paramref name="primaryTable"/>.
     /// </summary>
-    private static EntryContext Context(RunsAs caller) =>
-        new(caller, new Identity(caller with { Assumed = true }, InjectedAssumption));
+    private static EntryContext Context(RunsAs caller, string? primaryTable = null) =>
+        new(caller, new Identity(caller with { Assumed = true }, InjectedAssumption), primaryTable);
 
     /// <summary>
     /// Methods with operations that no entry point reaches, each analyzed on its own.

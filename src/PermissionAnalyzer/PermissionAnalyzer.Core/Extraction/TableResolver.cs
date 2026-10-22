@@ -64,6 +64,9 @@ internal sealed class TableResolver(
             ILocalReferenceOperation local => FromLocal(local, Name),
             IPropertyReferenceOperation { Property.Name: "LogicalName", Instance: { } instance } property
                 when IsEntityOrReference(property.Property.ContainingType) => Entity(instance),
+            IPropertyReferenceOperation { Property.Name: "PrimaryEntityName" } property
+                when symbols.Is(property.Property.ContainingType, symbols.ExecutionContext) =>
+                TableResolution.Slot(new TableSlot(TableSlot.PrimaryEntity, 0, TableShape.Name, Describe(op, "table name"))),
             IConditionalOperation { WhenFalse: { } whenFalse } conditional => Name(conditional.WhenTrue).Add(Name(whenFalse)),
             ICoalesceOperation coalesce => Name(coalesce.Value).Add(Name(coalesce.WhenNull)),
             _ => Unknown(op, "table name", TableShape.Name),
@@ -119,6 +122,13 @@ internal sealed class TableResolver(
 
             case ICoalesceOperation coalesce:
                 return Entity(coalesce.Value).Add(Entity(coalesce.WhenNull));
+
+            // The record Retrieve returns is of the table it is asked for
+            case IInvocationOperation retrieve when symbols.ServiceOperation(retrieve.TargetMethod) == "Retrieve":
+                return Name(retrieve.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == 0)?.Value);
+
+            case IPropertyReferenceOperation { Property.IsIndexer: false } property when LookupTargets(property) is { Count: > 0 } targets:
+                return Unknown(op, "entity", TableShape.Entity).WithinTargets(targets);
 
             default:
                 return Unknown(op, "entity", TableShape.Entity);
@@ -785,6 +795,17 @@ internal sealed class TableResolver(
         };
 
         if (set is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != "ownerid") yield return lookup;
+    }
+
+    /// <summary>
+    /// The tables an early-bound lookup property, such as <c>contact.ParentCustomerId</c>, can refer to by the
+    /// metadata; empty when the property isn't a lookup the metadata knows.
+    /// </summary>
+    private IReadOnlyCollection<string> LookupTargets(IPropertyReferenceOperation property)
+    {
+        if (lookups is null || !symbols.Is(property.Type, symbols.EntityReference)) return [];
+        if (symbols.AttributeNameOf(property.Property) is not { } column) return [];
+        return symbols.LogicalNameOf(property.Instance?.Type ?? property.Property.ContainingType) is { } table ? lookups.TargetsOf(table, column) : [];
     }
 
     private static string? Key(IOperation operation) => operation.ConstantValue is { HasValue: true, Value: string key } ? key : null;

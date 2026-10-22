@@ -193,7 +193,6 @@ about the code, not a likelihood:
 | `direct` | Table and privilege resolved from the call itself (types, constants, local data flow) |
 | `all-implementations` | Reached through an interface with no DI registration; every implementation is included (§5.5) |
 | `all-lookup-targets` | Polymorphic lookup whose target can't be resolved; every allowed target is included |
-| `cascade-unknown` | Needed by a plugin step that an operation on an unresolved table can fire; every step of the message is included (§5.6) |
 | `filter-unknown` | Update step with filtered attributes, called where the set attributes can't be determined; the step is included (§5.6) |
 | `execute-privilege` | Custom API execute privilege (§5.7) |
 
@@ -363,8 +362,13 @@ function too. Specifics:
 - **Steps without code**: a metadata step whose plugin type isn't in any loaded code is listed
   as a finding ("step `X` fires but its code wasn't analyzed"), so missing plugin code is never
   silently treated as needing nothing.
-- **Unresolved operations**: an operation whose table or message is unknown can't be matched to
-  steps. It is reported as a possible cascade (basis `cascade-unknown`) rather than ignored.
+- **Unresolved operations**: an operation whose table is unknown fires the steps registered without
+  a table only. The steps on a table are reported as one unresolved finding per operation ("may fire
+  any of N steps") rather than included: in a real solution every step of the message, and
+  everything those fire, would be most of the solution, which says nothing about the operation.
+  Tables are resolved where they can be first: the record `Retrieve` returns is of the table it
+  asks for, an early-bound lookup property refers to its targets in the metadata, and
+  `PrimaryEntityName` in a plugin step is the step's table.
 - **Output**: plugin requirements keep the full path, from the function through the request to
   the step and into the plugin code (`ProcessOrder → OrderService.Submit → Create
   ctx_order → plugin:Contoso.OrderPostPlugin:Create:ctx_order:PostOperation → …`), and the
@@ -669,7 +673,7 @@ location of each missing privilege.
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
-| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, `cascade-unknown`, steps without code), then `--operation` scope, FilteredAttributes, and plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
+| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code), then `--operation` scope, FilteredAttributes, and plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |

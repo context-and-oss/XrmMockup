@@ -181,7 +181,7 @@ public class CascadeTests
     }
 
     [Fact]
-    public void OperationOnAnUnknownTableFiresEveryStepOfItsMessage()
+    public void OperationOnAnUnknownTableIsReportedAsAPossibleCascade()
     {
         var manifest = Analyze.Code("""
             namespace Contoso
@@ -195,10 +195,101 @@ public class CascadeTests
             setup: builder => builder.AddEntryMethods(["Contoso.Importer.Run"]));
 
         var run = manifest.Entry("method:Contoso.Importer.Run(IOrganizationService, Entity)");
-        var task = Assert.Single(run.Requirements);
-        Assert.Equal(("task", Privilege.Delete, RequirementBasis.CascadeUnknown), (task.Table, task.Privilege, task.Basis));
-        Assert.Equal(["plugin:Contoso.ContactPlugin:Delete:contact:PreOperation"], run.Triggers);
-        Assert.Single(run.Unresolved, u => u.Operation == "Delete");
+        Assert.Empty(run.Requirements);
+        Assert.Empty(run.Triggers);
+        Assert.Equal(2, run.Unresolved.Count(u => u.Operation == "Delete"));
+        Assert.Single(run.Unresolved, u => u.Reason == "may fire any of 1 Delete steps, because its table isn't known");
+    }
+
+    [Fact]
+    public void OperationOnAnUnknownTableFiresStepsWithoutATable()
+    {
+        var manifest = Analyze.Code("""
+            namespace Contoso
+            {
+                public class AuditPlugin : Plugin
+                {
+                    public AuditPlugin() => RegisterPluginStep<Entity>(EventOperation.Delete, ExecutionStage.PostOperation, c => c.OrganizationService.Create(new Entity("task")));
+                }
+
+                public class Importer
+                {
+                    public void Run(IOrganizationService service, Entity entity) => service.Delete(entity.LogicalName, entity.Id);
+                }
+            }
+            """,
+            setup: builder => builder.AddEntryMethods(["Contoso.Importer.Run"]));
+
+        var run = manifest.Entry("method:Contoso.Importer.Run(IOrganizationService, Entity)");
+        Assert.Equal(["task:Create"], run.Requirements());
+        Assert.Single(run.Triggers);
+        Assert.DoesNotContain(run.Unresolved, u => u.Reason.StartsWith("may fire", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PrimaryEntityNameIsTheTableOfTheStep()
+    {
+        var manifest = Analyze.Code("""
+            namespace Contoso
+            {
+                public class AccountPlugin : Plugin
+                {
+                    public AccountPlugin() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c => Sync(c.OrganizationService, c.PluginExecutionContext));
+
+                    static void Sync(IOrganizationService service, IPluginExecutionContext context)
+                    {
+                        var record = service.Retrieve(context.PrimaryEntityName, context.PrimaryEntityId, new ColumnSet());
+                        service.Update(new Entity(record.LogicalName, record.Id));
+                    }
+                }
+
+                public class Importer
+                {
+                    public void Run(IOrganizationService service, IPluginExecutionContext context) =>
+                        service.Delete(context.PrimaryEntityName, Guid.Empty);
+                }
+            }
+            """,
+            setup: builder => builder.AddEntryMethods(["Contoso.Importer.Run"]));
+
+        var step = manifest.Entry("plugin:Contoso.AccountPlugin:Update:account:PostOperation");
+        Assert.Equal(["account:Read", "account:Write"], step.Requirements());
+        Assert.Empty(step.Unresolved);
+
+        var run = manifest.Entry("method:Contoso.Importer.Run(IOrganizationService, IPluginExecutionContext)");
+        Assert.Contains(run.Unresolved, u => u.Reason == "table name comes from property 'PrimaryEntityName'");
+    }
+
+    [Fact]
+    public void OperationOnALookupFiresTheStepsOfItsTargets()
+    {
+        var manifest = Analyze.Code("""
+            namespace Contoso
+            {
+                public class Importer
+                {
+                    public void Run(IOrganizationService service, Order order) =>
+                        service.Update(new Entity { LogicalName = order.CustomerId!.LogicalName, Id = order.CustomerId.Id });
+                }
+
+                [EntityLogicalName("ctx_order")]
+                public class Order : Entity
+                {
+                    public Order() : base("ctx_order") { }
+
+                    [AttributeLogicalName("ctx_customerid")]
+                    public EntityReference? CustomerId { get => GetAttributeValue<EntityReference>("ctx_customerid"); set => this["ctx_customerid"] = value; }
+                }
+            }
+            """ + Plugins,
+            setup: builder => builder.AddEntryMethods(["Contoso.Importer.Run"]),
+            lookups: [new LookupColumn("ctx_order", "ctx_customerid", ["account", "contact"])]);
+
+        var run = manifest.Entry("method:Contoso.Importer.Run(IOrganizationService, Order)");
+        Assert.Equal(["plugin:Contoso.AccountPlugin:Update:account:PostOperation"], run.Triggers);
+        var lead = Assert.Single(run.Requirements, r => r.Table == "lead");
+        Assert.Equal(RequirementBasis.AllLookupTargets, lead.Basis);
+        Assert.Empty(run.Unresolved);
     }
 
     [Fact]

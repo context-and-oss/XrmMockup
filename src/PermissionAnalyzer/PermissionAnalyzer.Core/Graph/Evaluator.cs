@@ -5,9 +5,10 @@ namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 
 /// <summary>
 /// Who an entry point's code runs as: the caller (or the step's impersonating user), and the identity of
-/// services that come from dependency injection.
+/// services that come from dependency injection. <see cref="PrimaryTable"/> is the table a plugin step is
+/// registered on, which the execution context's <c>PrimaryEntityName</c> holds.
 /// </summary>
-internal sealed record EntryContext(RunsAs Caller, Identity Injected);
+internal sealed record EntryContext(RunsAs Caller, Identity Injected, string? PrimaryTable = null);
 
 /// <summary>
 /// A resolved identity. <see cref="Assumption"/> says why it was assumed, when it was.
@@ -208,8 +209,12 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             foreach (var fired in tables.Fired)
             {
                 foreach (var table in fired.Value.Tables) result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, frame.Basis, source));
+                foreach (var table in fired.Value.LookupTargets.Except(fired.Value.Tables, StringComparer.Ordinal))
+                {
+                    result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, RequirementBasis.AllLookupTargets, source));
+                }
                 if (fired.Value.Reasons.Count > 0) result.Triggers.Add(new TriggerHit(fired.Key, TriggerHit.AnyTable, identity.RunsAs, frame.Basis, source));
-                if (fired.Value.Tables.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source));
+                if (fired.Value.Tables.Count == 0 && fired.Value.LookupTargets.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source));
             }
         }
     }
@@ -302,7 +307,8 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         foreach (var target in tables.LookupTargets) result.Add(TableResolution.LookupTarget(target));
         foreach (var slot in tables.Slots)
         {
-            if (frame.Bindings.TryGetValue((slot.Method, slot.Ordinal), out var binding) && binding.Tables?.TryGetValue(slot.Shape, out var bound) == true) result.Add(bound!);
+            if (slot.Method == TableSlot.PrimaryEntity) result.Add(entry.PrimaryTable is { } primary ? TableResolution.Table(primary) : TableResolution.Unresolved(slot.Reason));
+            else if (frame.Bindings.TryGetValue((slot.Method, slot.Ordinal), out var binding) && binding.Tables?.TryGetValue(slot.Shape, out var bound) == true) result.Add(bound!);
             else if (slot.Reason.Length > 0) result.Add(TableResolution.Unresolved(slot.Reason));
         }
         foreach (var returned in tables.Returns) result.Add(Returned(returned, frame, depth + 1));

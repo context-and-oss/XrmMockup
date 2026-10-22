@@ -221,6 +221,12 @@ internal static class RequestShapes
 internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, string Reason) : IComparable<TableSlot>
 {
     /// <summary>
+    /// The <see cref="Method"/> of the slot for the execution context's <c>PrimaryEntityName</c>, which the entry
+    /// point fills in: the table of the plugin step it runs for.
+    /// </summary>
+    public const string PrimaryEntity = "<primary entity>";
+
+    /// <summary>
     /// The ordinal a method's type parameter is bound under. Negative, so it never clashes with a parameter: a
     /// call binds type argument <c>i</c> as if it were argument <c>-1 - i</c>, read as <see cref="TableShape.Entity"/>.
     /// </summary>
