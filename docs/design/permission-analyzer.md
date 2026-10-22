@@ -193,6 +193,7 @@ about the code, not a likelihood:
 | `direct` | Table and privilege resolved from the call itself (types, constants, local data flow) |
 | `all-implementations` | Reached through an interface with no DI registration; every implementation is included (§5.5) |
 | `all-lookup-targets` | Polymorphic lookup whose target can't be resolved; every allowed target is included |
+| `cascade-unknown` | Needed by a plugin step that an operation on an unresolved table can fire; every step of the message is included (§5.6) |
 | `filter-unknown` | Update step with filtered attributes, called where the set attributes can't be determined; the step is included (§5.6) |
 | `execute-privilege` | Custom API execute privilege (§5.7) |
 
@@ -319,8 +320,24 @@ impersonated. Mockup does the same through `RequestExecutionPipeline`. The analy
    respects `FilteredAttributes` when the set attributes are known. When they aren't, the
    step is included with basis `filter-unknown`.
 3. Adds the step's requirements under the **effective** identity (caller, or the step's
-   impersonating user), up to a depth limit (default 8, matching Dataverse's loop
-   protection in spirit), with a cycle guard.
+   impersonating user), and expands the operations of the step in turn. Each step is expanded
+   once per identity and basis per entry point, which bounds the expansion and stops cycles, so
+   no depth limit is needed.
+
+The messages an operation fires are derived from the operation:
+
+- Direct calls fire their own message (`Create`, `Update`, `Delete`, `Retrieve`,
+  `RetrieveMultiple`, `Associate`, `Disassociate`; `CreateAndReturn` fires `Create`), on the
+  table of the call. `RetrieveMultiple` fires on the query's own table, not its linked tables.
+- A request fires its rule's message and the messages it runs as (§5.3): `Upsert` fires
+  `Upsert`, `Create` and `Update`, and `CreateMultiple` fires `CreateMultiple` and `Create`. The
+  table is the one of the rule's first member check, usually `Target`. A request without a rule,
+  such as a custom API call, fires its message without a table, which matches steps and custom
+  APIs registered without a table.
+- A step registered without a table matches every table.
+
+The fired step ids are listed per entry point under `triggers`, including steps fired by other
+steps.
 
 This is what makes the "query a specific operation" mode useful: `Update account` gives the
 full set of privileges a user needs for that update to succeed, including every plugin that
@@ -351,9 +368,10 @@ function too. Specifics:
 - **Output**: plugin requirements keep the full path, from the function through the request to
   the step and into the plugin code (`ProcessOrder → OrderService.Submit → Create
   ctx_order → plugin:Contoso.OrderPostPlugin:Create:ctx_order:PostOperation → …`), and the
-  entry point lists the steps it fires under `triggers` (§7). Asynchronous steps are included
-  and marked, since they need the same privileges even though their failure doesn't fail the
-  request.
+  entry point lists the steps it fires under `triggers` (§7). Asynchronous steps are included,
+  since they need the same privileges even though their failure doesn't fail the request.
+  Marking them as asynchronous needs the step mode, which the code registrations don't carry
+  yet, and is deferred.
 
 Real-time workflows (XAML in `Metadata/Workflows`) are a later extension: mockup already
 parses them, and their create/update steps can be turned into operations with the same rules.
@@ -651,7 +669,7 @@ location of each missing privilege.
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
 | 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
-| 4 | Plugin cascade expansion, `--operation` scope, FilteredAttributes; cascades from Azure Functions and app code, including plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
+| 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, `cascade-unknown`, steps without code), then `--operation` scope, FilteredAttributes, and plugin code loaded from other solutions (§5.6) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked | Near-complete coverage |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support, runtime recorder cross-check | |

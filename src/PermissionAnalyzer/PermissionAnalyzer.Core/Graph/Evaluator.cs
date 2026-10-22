@@ -31,6 +31,15 @@ internal sealed record UnresolvedHit(string Operation, IReadOnlyList<Privilege> 
 internal sealed record AssumptionHit(string Reason, RequirementSource Source);
 
 /// <summary>
+/// An operation that fires the plugin steps of <see cref="Message"/> on <see cref="Table"/>: <c>null</c> for no
+/// table, <see cref="AnyTable"/> for a table that isn't known.
+/// </summary>
+internal sealed record TriggerHit(string Message, string? Table, RunsAs RunsAs, RequirementBasis Basis, RequirementSource Source)
+{
+    public const string AnyTable = "*";
+}
+
+/// <summary>
 /// What an entry point or method needs, in the order found.
 /// </summary>
 internal sealed class EvaluationResult
@@ -38,6 +47,7 @@ internal sealed class EvaluationResult
     public List<RequirementHit> Requirements { get; } = [];
     public List<UnresolvedHit> Unresolved { get; } = [];
     public List<AssumptionHit> Assumptions { get; } = [];
+    public List<TriggerHit> Triggers { get; } = [];
 
     /// <summary>
     /// Every node the evaluation visited.
@@ -194,6 +204,13 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 var privileges = access.Privileges.Distinct().OrderBy(p => p).ToList();
                 result.Unresolved.Add(new UnresolvedHit(access.Operation, privileges, access.ReasonPrefix + reason, identity.RunsAs, source));
             }
+
+            foreach (var fired in tables.Fired)
+            {
+                foreach (var table in fired.Value.Tables) result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, frame.Basis, source));
+                if (fired.Value.Reasons.Count > 0) result.Triggers.Add(new TriggerHit(fired.Key, TriggerHit.AnyTable, identity.RunsAs, frame.Basis, source));
+                if (fired.Value.Tables.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source));
+            }
         }
     }
 
@@ -289,6 +306,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             else if (slot.Reason.Length > 0) result.Add(TableResolution.Unresolved(slot.Reason));
         }
         foreach (var returned in tables.Returns) result.Add(Returned(returned, frame, depth + 1));
+        foreach (var fired in tables.Fired) result.Add(TableResolution.Fires(fired.Key, BindTables(fired.Value, frame, depth)));
         return result;
     }
 

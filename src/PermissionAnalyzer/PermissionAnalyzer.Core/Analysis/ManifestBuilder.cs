@@ -72,8 +72,9 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     public Manifest Build(IEnumerable<string>? roleGovernedTables = null, EntryPointSelector? scope = null)
     {
         var candidates = new Dictionary<string, EntryCandidate>(_entries, StringComparer.Ordinal);
-        AddMetadataSteps(candidates);
+        var codeless = AddMetadataSteps(candidates);
         AddMethodEntries(candidates);
+        var cascades = new Cascades(_graph, CascadeSteps(candidates.Values, codeless), Context);
 
         // Messages the solution implements or registers steps on, which no rule knows, are its custom APIs
         _customApis.Clear();
@@ -85,9 +86,10 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         {
             if (scope is not null && !scope.Matches(Describe(candidate, [], [], []))) continue;
 
-            var result = new Evaluator(_graph, Context(candidate)).Evaluate(candidate.Handlers);
-            reached.UnionWith(result.Reached);
-            entryPoints.Add(Describe(candidate, result));
+            var context = Context(candidate);
+            var cascade = cascades.Expand(new Evaluator(_graph, context).Evaluate(candidate.Handlers), candidate.Id, context.Caller);
+            reached.UnionWith(cascade.Result.Reached);
+            entryPoints.Add(Describe(candidate, cascade));
         }
 
         var unreached = scope is null ? Unreached(reached) : [];
@@ -126,16 +128,24 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// <summary>
     /// Steps from the metadata. A step of a plugin that registers its steps in code adds the impersonating user
     /// to the matching code step, or runs <c>Execute</c> when no code step matches. A plain <c>IPlugin</c> gets
-    /// one entry point per step, or one for the whole plugin when the metadata has no steps for it.
+    /// one entry point per step, or one for the whole plugin when the metadata has no steps for it. Returns the
+    /// steps of plugins whose code isn't loaded.
     /// </summary>
-    private void AddMetadataSteps(Dictionary<string, EntryCandidate> candidates)
+    private List<CascadeStep> AddMetadataSteps(Dictionary<string, EntryCandidate> candidates)
     {
+        var codeless = new List<CascadeStep>();
         var classes = _plugins.Values.OrderBy(p => p.Type, StringComparer.Ordinal).ThenBy(p => p.Assembly, StringComparer.Ordinal).ToList();
         var stepsByClass = new Dictionary<PluginClass, List<PluginStepRegistration>>();
         foreach (var step in _steps)
         {
             var matches = classes.Where(c => c.Type == step.TypeName && step.AssemblyName is not null && c.Assembly == step.AssemblyName).ToList();
             if (matches.Count == 0) matches = classes.Where(c => c.Type == step.TypeName).ToList();
+            if (matches.Count == 0 && !string.IsNullOrEmpty(step.Message))
+            {
+                var table = string.IsNullOrEmpty(step.Table) ? null : step.Table!.ToLowerInvariant();
+                var id = EntryPointDiscovery.StepId(step.TypeName, step.Message, table, EntryPointDiscovery.StageName(step.Stage));
+                codeless.Add(new CascadeStep(id, step.Message, table, step.ImpersonatingUserId?.ToLowerInvariant(), null));
+            }
             foreach (var match in matches)
             {
                 if (!stepsByClass.TryGetValue(match, out var list)) stepsByClass.Add(match, list = []);
@@ -196,7 +206,17 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage), user, plugin.Declaration, handlers));
             }
         }
+        return codeless;
     }
+
+    /// <summary>
+    /// The plugin steps and custom APIs that operations fire, by message: every one, whatever the scope.
+    /// </summary>
+    private static IEnumerable<CascadeStep> CascadeSteps(IEnumerable<EntryCandidate> candidates, IEnumerable<CascadeStep> codeless) =>
+        candidates
+            .Where(c => c.Kind is EntryPointKind.PluginStep or EntryPointKind.CustomApi && c.Trigger?.Message is not null)
+            .Select(c => new CascadeStep(c.Id, c.Trigger!.Message!, c.Trigger.Table, c.ImpersonatingUserId, c))
+            .Concat(codeless.GroupBy(s => s.Id, StringComparer.Ordinal).Select(g => g.First()));
 
     private void AddMethodEntries(Dictionary<string, EntryCandidate> candidates)
     {
@@ -229,22 +249,22 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// Who the entry point's code runs as. Plugins and activities run as the calling user, or the step's
     /// impersonating user; functions and other code as an application user.
     /// </summary>
-    private static EntryContext Context(EntryCandidate candidate)
-    {
-        switch (candidate.Kind)
+    private static EntryContext Context(EntryCandidate candidate) =>
+        candidate.Kind switch
         {
-            case EntryPointKind.Function:
-                return new EntryContext(RunsAs.ApplicationUser, new Identity(RunsAs.ApplicationUser with { Assumed = true }, InjectedAssumption));
+            EntryPointKind.Function => Context(RunsAs.ApplicationUser),
 
-            case EntryPointKind.Method:
-                // Who calls an explicit method isn't known; app code usually runs as its application user
-                return new EntryContext(RunsAs.ApplicationUser with { Assumed = true }, new Identity(RunsAs.ApplicationUser with { Assumed = true }, InjectedAssumption));
+            // Who calls an explicit method isn't known; app code usually runs as its application user
+            EntryPointKind.Method => Context(RunsAs.ApplicationUser with { Assumed = true }),
 
-            default:
-                var caller = candidate.ImpersonatingUserId is { } user ? RunsAs.User(user) : RunsAs.Caller;
-                return new EntryContext(caller, new Identity(caller with { Assumed = true }, InjectedAssumption));
-        }
-    }
+            _ => Context(candidate.ImpersonatingUserId is { } user ? RunsAs.User(user) : RunsAs.Caller),
+        };
+
+    /// <summary>
+    /// Code that runs as <paramref name="caller"/>, with injected services assumed to run as it too.
+    /// </summary>
+    private static EntryContext Context(RunsAs caller) =>
+        new(caller, new Identity(caller with { Assumed = true }, InjectedAssumption));
 
     /// <summary>
     /// Methods with operations that no entry point reaches, each analyzed on its own.
@@ -267,10 +287,10 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .ToList();
     }
 
-    private EntryPoint Describe(EntryCandidate candidate, EvaluationResult result)
+    private EntryPoint Describe(EntryCandidate candidate, CascadeResult cascade)
     {
-        var (requirements, unresolved, assumptions) = Aggregate([result]);
-        return Describe(candidate, requirements, unresolved, assumptions);
+        var (requirements, unresolved, assumptions) = Aggregate([cascade.Result]);
+        return Describe(candidate, requirements, unresolved, assumptions, cascade.Fired);
     }
 
     /// <summary>
@@ -282,7 +302,12 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             ? RequestReasons.CustomApi(message)
             : reason;
 
-    private static EntryPoint Describe(EntryCandidate candidate, IReadOnlyList<Requirement> requirements, IReadOnlyList<UnresolvedOperation> unresolved, IReadOnlyList<Assumption> assumptions) =>
+    private static EntryPoint Describe(
+        EntryCandidate candidate,
+        IReadOnlyList<Requirement> requirements,
+        IReadOnlyList<UnresolvedOperation> unresolved,
+        IReadOnlyList<Assumption> assumptions,
+        IReadOnlyList<string>? triggers = null) =>
         new(
             candidate.Id,
             candidate.Kind,
@@ -293,7 +318,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             candidate.Declaration,
             requirements,
             unresolved,
-            assumptions);
+            assumptions,
+            triggers);
 
     /// <summary>
     /// Merges the hits of an evaluation: one requirement per table, privilege and identity, with the strongest

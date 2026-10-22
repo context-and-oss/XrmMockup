@@ -20,4 +20,10 @@ public enum RequirementBasis
     /// The record a lookup refers to can't be determined, so every table the lookup column can refer to is included.
     /// </summary>
     AllLookupTargets,
+
+    /// <summary>
+    /// Needed by a plugin step that an operation on an unknown table can fire: every step of the operation's
+    /// message is included.
+    /// </summary>
+    CascadeUnknown,
 }

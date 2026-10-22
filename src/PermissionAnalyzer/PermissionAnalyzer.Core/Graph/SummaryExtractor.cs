@@ -189,23 +189,29 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         switch (operation)
         {
             case "Create":
-                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Create), .. Lookups(site, resolver, first)];
+                return [site.Access(Fires("Create", resolver.Entity(first).OrUnresolved("entity is created without a table name")), Privilege.Create), .. Lookups(site, resolver, first)];
             case "CreateAndReturn":
-                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Create, Privilege.Read), .. Lookups(site, resolver, first)];
+                return [site.Access(Fires("Create", resolver.Entity(first).OrUnresolved("entity is created without a table name")), Privilege.Create, Privilege.Read), .. Lookups(site, resolver, first)];
             case "Update":
-                return [site.Access(resolver.Entity(first).OrUnresolved("entity is created without a table name"), Privilege.Write), .. Lookups(site, resolver, first)];
+                return [site.Access(Fires("Update", resolver.Entity(first).OrUnresolved("entity is created without a table name")), Privilege.Write), .. Lookups(site, resolver, first)];
             case "Retrieve":
-                return [site.Access(resolver.Name(first), Privilege.Read)];
+                return [site.Access(Fires("Retrieve", resolver.Name(first)), Privilege.Read)];
             case "Delete":
-                return [site.Access(resolver.Name(first), Privilege.Delete)];
+                return [site.Access(Fires("Delete", resolver.Name(first)), Privilege.Delete)];
             case "RetrieveMultiple":
-                return [site.Access(resolver.Query(first).OrUnresolved("query has no table name"), Privilege.Read)];
+                return
+                [
+                    site.Access(
+                        resolver.Query(first).OrUnresolved("query has no table name")
+                            .Add(TableResolution.Fires("RetrieveMultiple", resolver.Query(first, includeLinks: false).OrUnresolved("query has no table name"))),
+                        Privilege.Read),
+                ];
             case "Associate":
             case "Disassociate":
                 var related = invocation.Arguments.FirstOrDefault(a => symbols.Is(a.Parameter?.Type, symbols.EntityReferenceCollection));
                 return
                 [
-                    site.Access(resolver.Name(first), Privilege.Read, Privilege.AppendTo),
+                    site.Access(Fires(operation, resolver.Name(first)), Privilege.Read, Privilege.AppendTo),
                     site.Access(resolver.EntityReferences(related).OrUnresolved("no related records are added"), "related records: ", Privilege.Read, Privilege.Append),
                 ];
             case "Execute":
@@ -219,6 +225,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 return [];
         }
     }
+
+    /// <summary>
+    /// <paramref name="tables"/>, on which the call also fires the plugin steps of <paramref name="message"/>.
+    /// </summary>
+    private static TableResolution Fires(string message, TableResolution tables) => TableResolution.Empty.Add(tables).Add(TableResolution.Fires(message, tables));
 
     /// <summary>
     /// Append on an entity that gets a lookup, and AppendTo on the tables its lookups refer to.

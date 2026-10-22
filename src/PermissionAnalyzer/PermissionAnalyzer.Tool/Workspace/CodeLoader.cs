@@ -7,13 +7,19 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 
 /// <summary>
 /// Loads a solution or project with MSBuild and adds every C# project to a <see cref="ManifestBuilder"/>.
-/// The projects must be restored, as for a build.
+/// The projects must be restored, as for a build. Strong-name signing is turned off, because it only affects the
+/// output and its key file is often not on the machine.
 /// </summary>
 internal sealed class CodeLoader(ILogger<CodeLoader> logger)
 {
     public async Task AddAsync(string path, ManifestBuilder builder, ProjectFilter filter, CancellationToken cancellationToken)
     {
-        using var workspace = MSBuildWorkspace.Create();
+        var properties = FrameworkReferences.Properties();
+        if (properties.TryGetValue(FrameworkReferences.Property, out var frameworkRoot))
+        {
+            logger.LogDebug(".NET Framework reference assemblies from {Root}", frameworkRoot);
+        }
+        using var workspace = MSBuildWorkspace.Create(properties);
         // MSBuild reports warnings such as NuGet audit results as failures too, so they're only shown when a
         // project turns out not to load, below
         var failures = new List<string>();
@@ -71,12 +77,22 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
 
             var compilation = await project.GetCompilationAsync(cancellationToken)
                 ?? throw new ToolException($"Could not compile {project.Name}");
+            compilation = compilation.WithOptions(compilation.Options
+                .WithCryptoKeyFile(null)
+                .WithCryptoKeyContainer(null)
+                .WithDelaySign(null)
+                .WithPublicSign(false));
 
             var problems = Problems(project);
             if (compilation.GetSpecialType(SpecialType.System_Object).TypeKind == TypeKind.Error)
             {
                 // Not even the framework resolved, so nothing in the project can be analyzed
-                throw new ToolException($"Could not load {project.Name}: its references didn't resolve. Restore or build it on this machine first.{problems}");
+                var hint = problems.Contains("reference assemblies for .NETFramework", StringComparison.Ordinal)
+                    ? " Its .NET Framework reference assemblies weren't found: restore a project that references the matching " +
+                      "Microsoft.NETFramework.ReferenceAssemblies.net* package (such as net462), which puts them in the NuGet cache, " +
+                      $"or set {FrameworkReferences.Property} to a folder with them."
+                    : " Restore or build it on this machine first.";
+                throw new ToolException($"Could not load {project.Name}: its references didn't resolve.{hint}{problems}");
             }
 
             if (!builder.Add(compilation, cancellationToken))
@@ -95,10 +111,15 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
             analyzed++;
 
             // Calls the compiler can't bind are invisible to the analysis, so say how much is affected
-            var errors = compilation.GetDiagnostics(cancellationToken).Count(d => d.Severity == DiagnosticSeverity.Error);
-            if (errors > 0)
+            var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+            if (errors.Count > 0)
             {
-                logger.LogWarning("{Project} has {Count} compile errors; operations in code that doesn't compile may be missed. Restore and build the project first", project.Name, errors);
+                var first = string.Concat(errors.Take(3).Select(e => Environment.NewLine + "  " + e));
+                logger.LogWarning(
+                    "{Project} has {Count} compile errors; operations in code that doesn't compile may be missed. Restore and build the project first. The first:{Errors}",
+                    project.Name,
+                    errors.Count,
+                    first);
             }
             else
             {

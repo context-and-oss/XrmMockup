@@ -388,7 +388,9 @@ public class EntryPointTests
         Assert.Equal(
             ["method:Contoso.Importer.Run(IOrganizationService)", "method:Contoso.Importer.Run(IOrganizationService, string)"],
             methods.EntryPoints.Select(e => e.Id));
-        Assert.Equal(["account:Write as ApplicationUser (assumed)"], methods.EntryPoints[0].RequirementsWithIdentity());
+        // The update fires the account plugin's Update step, which runs as the same identity
+        Assert.Equal(["account:Write as ApplicationUser (assumed)", "contact:Create as ApplicationUser (assumed)"], methods.EntryPoints[0].RequirementsWithIdentity());
+        Assert.Equal(["plugin:Contoso.AccountPlugin:Update:account:PostOperation"], methods.EntryPoints[0].Triggers);
 
         var none = Analyze.Code(source, scope: EntryPointSelector.Function("Missing"));
         Assert.Empty(none.EntryPoints);

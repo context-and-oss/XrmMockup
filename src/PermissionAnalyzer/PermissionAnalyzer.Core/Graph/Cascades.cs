@@ -1,0 +1,128 @@
+using XrmMockup.PermissionAnalyzer.Core.Model;
+
+namespace XrmMockup.PermissionAnalyzer.Core.Graph;
+
+/// <summary>
+/// A plugin step or custom API that runs when an operation fires its message. <see cref="Code"/> is <c>null</c>
+/// for a step from the metadata whose plugin code isn't loaded.
+/// </summary>
+internal sealed record CascadeStep(string Id, string Message, string? Table, string? ImpersonatingUserId, EntryCandidate? Code);
+
+/// <summary>
+/// An evaluation with the hits of every step its operations fire, and the ids of those steps, sorted.
+/// </summary>
+internal sealed record CascadeResult(EvaluationResult Result, IReadOnlyList<string> Fired);
+
+/// <summary>
+/// Expands an evaluation with the plugin steps and custom APIs its operations fire, and the steps those fire in
+/// turn, as Dataverse runs them in the request pipeline. A fired step runs as the identity of the operation that
+/// fired it, unless it impersonates. Each step is expanded once per identity and basis, which also stops cycles.
+/// </summary>
+internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, Func<RunsAs, EntryContext> context)
+{
+    private readonly IReadOnlyList<CascadeStep> _steps = steps.OrderBy(s => s.Id, StringComparer.Ordinal).ToList();
+    private readonly Dictionary<(string, RunsAs), EvaluationResult> _evaluations = [];
+
+    /// <summary>
+    /// <paramref name="result"/> with everything it fires. Pass the step being expanded as <paramref name="self"/>,
+    /// so it doesn't fire itself again under the same identity.
+    /// </summary>
+    public CascadeResult Expand(EvaluationResult result, string? self = null, RunsAs? caller = null)
+    {
+        if (_steps.Count == 0 || result.Triggers.Count == 0) return new CascadeResult(result, []);
+
+        var expanded = new EvaluationResult { Truncated = result.Truncated };
+        Copy(result, expanded, [], RequirementBasis.Direct);
+
+        var fired = new SortedSet<string>(StringComparer.Ordinal);
+        var done = new HashSet<(string, RunsAs, RequirementBasis)>();
+        if (self is not null && caller is not null) done.Add((self, caller, RequirementBasis.Direct));
+
+        // Breadth first, so the first path to a step is the shortest
+        var queue = new Queue<(EvaluationResult Result, RequirementBasis Basis)>();
+        queue.Enqueue((result, RequirementBasis.Direct));
+        while (queue.Count > 0)
+        {
+            var (current, currentBasis) = queue.Dequeue();
+            var triggers = current.Triggers
+                .GroupBy(t => (Message: t.Message.ToLowerInvariant(), Table: t.Table?.ToLowerInvariant(), t.RunsAs, t.Basis))
+                .Select(g => g.First());
+            foreach (var trigger in triggers)
+            {
+                foreach (var step in Matching(trigger))
+                {
+                    fired.Add(step.Id);
+                    var runsAs = step.ImpersonatingUserId is { } user ? RunsAs.User(user) : trigger.RunsAs;
+                    var basis = Max(Max(currentBasis, trigger.Basis), trigger.Table == TriggerHit.AnyTable ? RequirementBasis.CascadeUnknown : RequirementBasis.Direct);
+                    if (!done.Add((step.Id, runsAs, basis))) continue;
+
+                    var table = trigger.Table is null ? trigger.Message : $"{trigger.Message} {trigger.Table}";
+                    var path = trigger.Source.Path.Concat([table, step.Id]).ToList();
+                    if (step.Code is not { } code)
+                    {
+                        expanded.Unresolved.Add(new UnresolvedHit(
+                            trigger.Message,
+                            [],
+                            $"fires plugin step {step.Id}, whose code isn't analyzed",
+                            runsAs,
+                            new RequirementSource(trigger.Source.Location, path)));
+                        continue;
+                    }
+
+                    var evaluation = Evaluate(code, runsAs);
+                    Copy(evaluation, expanded, path, basis);
+                    expanded.Truncated |= evaluation.Truncated;
+                    queue.Enqueue((Prefixed(evaluation, path), basis));
+                }
+            }
+        }
+
+        return new CascadeResult(expanded, fired.ToList());
+    }
+
+    /// <summary>
+    /// The steps registered for the trigger's message on its table. A step without a table runs on every table;
+    /// a trigger on an unknown table runs every step of its message.
+    /// </summary>
+    private IEnumerable<CascadeStep> Matching(TriggerHit trigger) =>
+        _steps.Where(s =>
+            string.Equals(s.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)
+            && (s.Table is null || trigger.Table == TriggerHit.AnyTable || string.Equals(s.Table, trigger.Table, StringComparison.OrdinalIgnoreCase)));
+
+    private EvaluationResult Evaluate(EntryCandidate code, RunsAs runsAs)
+    {
+        if (!_evaluations.TryGetValue((code.Id, runsAs), out var result))
+        {
+            result = new Evaluator(graph, context(runsAs)).Evaluate(code.Handlers);
+            _evaluations.Add((code.Id, runsAs), result);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Adds the hits of <paramref name="from"/> to <paramref name="to"/>, behind <paramref name="path"/> and with at
+    /// most <paramref name="basis"/> as their basis.
+    /// </summary>
+    private static void Copy(EvaluationResult from, EvaluationResult to, IReadOnlyList<string> path, RequirementBasis basis)
+    {
+        foreach (var hit in from.Requirements) to.Requirements.Add(hit with { Basis = Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
+        foreach (var hit in from.Unresolved) to.Unresolved.Add(hit with { Source = Prefix(hit.Source, path) });
+        foreach (var hit in from.Assumptions) to.Assumptions.Add(hit with { Source = Prefix(hit.Source, path) });
+        to.Reached.UnionWith(from.Reached);
+    }
+
+    /// <summary>
+    /// The triggers of <paramref name="result"/>, behind <paramref name="path"/>, to expand them in turn.
+    /// </summary>
+    private static EvaluationResult Prefixed(EvaluationResult result, IReadOnlyList<string> path)
+    {
+        var prefixed = new EvaluationResult();
+        prefixed.Triggers.AddRange(result.Triggers.Select(t => t with { Source = Prefix(t.Source, path) }));
+        return prefixed;
+    }
+
+    private static RequirementSource Prefix(RequirementSource source, IReadOnlyList<string> path) =>
+        path.Count == 0 ? source : source with { Path = [.. path, .. source.Path] };
+
+    private static RequirementBasis Max(RequirementBasis a, RequirementBasis b) => a > b ? a : b;
+}

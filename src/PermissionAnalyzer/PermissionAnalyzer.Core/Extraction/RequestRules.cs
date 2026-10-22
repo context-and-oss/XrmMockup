@@ -100,26 +100,33 @@ internal sealed class RequestRules
         if (!_rules.TryGetValue(message, out var rule)) return null;
 
         // A rule that is, through others, its own as-rule adds nothing more
-        if (!visiting.Add(message)) return new ExpandedRule([], [], []);
+        if (!visiting.Add(message)) return new ExpandedRule([], [], [], []);
 
         var checks = new List<RuleCheck>(rule.Checks);
         var requests = new List<string>();
         var missing = new List<string>();
+        var messages = new List<string> { MessageOf(rule.Message) };
         if (rule.Requests is { } nested) requests.Add(nested);
         foreach (var other in rule.As)
         {
             if (Expand(MessageOf(other), visiting) is not { } expanded)
             {
                 missing.Add(MessageOf(other));
+                messages.Add(MessageOf(other));
                 continue;
             }
+            messages.AddRange(expanded.Messages);
             checks.AddRange(rule.Targets is { } targets ? expanded.Checks.Select(c => c.Member == "Target" ? c with { Member = targets } : c) : expanded.Checks);
             requests.AddRange(expanded.Requests);
             missing.AddRange(expanded.Missing);
         }
         visiting.Remove(message);
 
-        var result = new ExpandedRule(checks, requests.Distinct(StringComparer.Ordinal).ToList(), missing.Distinct(StringComparer.Ordinal).ToList());
+        var result = new ExpandedRule(
+            checks,
+            requests.Distinct(StringComparer.Ordinal).ToList(),
+            missing.Distinct(StringComparer.Ordinal).ToList(),
+            messages.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
         // A rule expanded inside a cycle misses the part of the cycle above it, so only complete ones are kept
         if (visiting.Count == 0) _expanded[message] = result;
         return result;
@@ -138,7 +145,11 @@ internal sealed class RequestRules
 /// <param name="Checks">Every check the request makes.</param>
 /// <param name="Requests">The members that hold requests run as part of this one.</param>
 /// <param name="Missing">As-messages that have no rule.</param>
-internal sealed record ExpandedRule(IReadOnlyList<RuleCheck> Checks, IReadOnlyList<string> Requests, IReadOnlyList<string> Missing);
+/// <param name="Messages">
+/// The messages the request fires plugin steps for: its own and its as-messages, as Dataverse runs the steps of
+/// <c>Create</c> and <c>Update</c> for <c>Upsert</c>.
+/// </param>
+internal sealed record ExpandedRule(IReadOnlyList<RuleCheck> Checks, IReadOnlyList<string> Requests, IReadOnlyList<string> Missing, IReadOnlyList<string> Messages);
 
 /// <summary>
 /// The reasons a request isn't checked, built and recognized in one place, so the coverage summary can count them.

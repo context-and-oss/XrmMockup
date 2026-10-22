@@ -12,7 +12,8 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// A value that comes from a method parameter is kept as a <see cref="TableSlot"/>, so the call graph can fill
 /// it in from the argument at each call site. Where no call site binds it, the slot's reason is reported. A value
 /// returned by a method in the solution is kept as a <see cref="ReturnedTables"/>, resolved from the method's
-/// return values in the context of the call.
+/// return values in the context of the call. The plugin steps an operation fires are kept per message in
+/// <see cref="Fired"/>, with the tables they fire on, bound the same way.
 /// </remarks>
 internal sealed class TableResolution
 {
@@ -21,6 +22,7 @@ internal sealed class TableResolution
     private readonly SortedSet<string> _lookupTargets = new(StringComparer.Ordinal);
     private readonly SortedSet<TableSlot> _slots = new();
     private readonly SortedSet<ReturnedTables> _returns = new();
+    private readonly SortedDictionary<string, TableResolution> _fired = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyCollection<string> Tables => _tables;
 
@@ -46,11 +48,18 @@ internal sealed class TableResolution
     public IReadOnlyCollection<ReturnedTables> Returns => _returns;
 
     /// <summary>
+    /// The messages an operation fires plugin steps for, such as <c>Upsert</c>, <c>Create</c> and <c>Update</c> for an
+    /// <c>UpsertRequest</c>, each with the tables it fires on. A message with neither tables nor reasons fires on no
+    /// table; one with reasons fires on a table that isn't known.
+    /// </summary>
+    public IReadOnlyDictionary<string, TableResolution> Fired => _fired;
+
+    /// <summary>
     /// Set when nothing in the value depends on the call context: no parameter and no method's return value.
     /// </summary>
-    public bool IsBound => _slots.Count == 0 && _returns.Count == 0;
+    public bool IsBound => _slots.Count == 0 && _returns.Count == 0 && _fired.Values.All(f => f.IsBound);
 
-    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && IsBound;
+    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && _fired.Count == 0 && IsBound;
 
     public static TableResolution Empty => new();
 
@@ -89,6 +98,16 @@ internal sealed class TableResolution
         return result;
     }
 
+    /// <summary>
+    /// <paramref name="message"/> fired on <paramref name="tables"/>.
+    /// </summary>
+    public static TableResolution Fires(string message, TableResolution tables)
+    {
+        var result = new TableResolution();
+        result._fired.Add(message, Empty.Add(tables));
+        return result;
+    }
+
     public TableResolution Add(TableResolution other)
     {
         _tables.UnionWith(other._tables);
@@ -96,6 +115,11 @@ internal sealed class TableResolution
         _lookupTargets.UnionWith(other._lookupTargets);
         _slots.UnionWith(other._slots);
         _returns.UnionWith(other._returns);
+        foreach (var fired in other._fired)
+        {
+            // Copied, as the resolutions added may be shared
+            _fired[fired.Key] = _fired.TryGetValue(fired.Key, out var existing) ? Empty.Add(existing).Add(fired.Value) : Empty.Add(fired.Value);
+        }
         return this;
     }
 
@@ -119,6 +143,7 @@ internal sealed class TableResolution
         result._lookupTargets.UnionWith(targets.Select(t => t.ToLowerInvariant()));
         result._slots.UnionWith(_slots);
         result._returns.UnionWith(_returns);
+        foreach (var fired in _fired) result._fired.Add(fired.Key, fired.Value);
         return result;
     }
 
@@ -126,7 +151,8 @@ internal sealed class TableResolution
     /// A stable text form, used to tell call contexts apart.
     /// </summary>
     public override string ToString() =>
-        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "*" + string.Join("|", _lookupTargets) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns);
+        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "*" + string.Join("|", _lookupTargets) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns)
+        + "!" + string.Join("|", _fired.Select(f => $"{f.Key}=({f.Value})"));
 }
 
 /// <summary>
@@ -160,7 +186,8 @@ internal enum TableShape
     RequestShare,
 
     /// <summary>
-    /// A request read for what can't be tied to a privilege: requests without a rule, or of unknown type.
+    /// A request read for what can't be tied to a privilege: requests without a rule, or of unknown type, and the
+    /// plugin steps it fires.
     /// </summary>
     RequestOther,
 }

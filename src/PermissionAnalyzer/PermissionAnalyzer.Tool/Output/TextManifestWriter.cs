@@ -73,6 +73,7 @@ internal sealed class TextManifestWriter : IManifestWriter
         {
             var header = entryPoint.Declaration is { } declaration ? $"{entryPoint.Id}  {declaration}" : entryPoint.Id;
             if (entryPoint.ImpersonatingUserId is { } user) header += $"  (runs as user {user})";
+            if (entryPoint.Triggers.Count > 0) header += $"\n  fires: {string.Join(", ", entryPoint.Triggers)}";
             Section(header, entryPoint.Requirements, entryPoint.Unresolved, entryPoint.Assumptions, coverage?.For(entryPoint));
         }
 
@@ -212,6 +213,7 @@ internal sealed class TextManifestWriter : IManifestWriter
     {
         RequirementBasis.AllImplementations => "all-implementations",
         RequirementBasis.AllLookupTargets => "all-lookup-targets",
+        RequirementBasis.CascadeUnknown => "cascade-unknown",
         _ => basis.ToString().ToLowerInvariant(),
     };
 

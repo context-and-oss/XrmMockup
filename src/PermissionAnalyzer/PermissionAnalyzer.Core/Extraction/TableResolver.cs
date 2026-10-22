@@ -370,7 +370,12 @@ internal sealed class TableResolver(
     /// </summary>
     private TableResolution Apply(string message, Func<string, List<IOperation>> members, TableShape shape)
     {
-        if (_rules.Find(message) is not { } rule) return Other(shape, RequestReasons.NoRule(message));
+        if (_rules.Find(message) is not { } rule)
+        {
+            // Steps registered on a message without a rule, such as a custom action, fire on no table
+            var unknown = Other(shape, RequestReasons.NoRule(message));
+            return shape == TableShape.RequestOther ? unknown.Add(TableResolution.Fires(message, TableResolution.Empty)) : unknown;
+        }
 
         var result = TableResolution.Empty;
         foreach (var missing in rule.Missing) result.Add(Other(shape, RequestReasons.NoRule(missing)));
@@ -378,6 +383,7 @@ internal sealed class TableResolver(
         {
             foreach (var value in members(nested)) result.Add(Requests(value, shape));
         }
+        if (shape == TableShape.RequestOther) result.Add(Fired(message, rule, members));
 
         var privilege = RequestShapes.PrivilegeOf(shape);
         foreach (var check in rule.Checks)
@@ -413,6 +419,28 @@ internal sealed class TableResolver(
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// The plugin steps a request fires: those of each of its messages, on the table of its first check, usually
+    /// <c>Target</c>. A request whose checks name no table fires on no table.
+    /// </summary>
+    private TableResolution Fired(string message, ExpandedRule rule, Func<string, List<IOperation>> members)
+    {
+        var primary = rule.Checks.FirstOrDefault(c => c.Member is not null) ?? rule.Checks.FirstOrDefault(c => c.Table is not null);
+        var tables = TableResolution.Empty;
+        if (primary?.Member is { } member)
+        {
+            var values = members(member);
+            if (values.Count == 0) tables.Add(TableResolution.Unresolved($"{member} of the {message} request isn't set where the request is created"));
+            foreach (var value in values) tables.Add(MemberTables(value));
+        }
+        else if (primary?.Table is { } table)
+        {
+            tables.Add(TableResolution.Table(table));
+        }
+
+        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables)));
     }
 
     /// <summary>

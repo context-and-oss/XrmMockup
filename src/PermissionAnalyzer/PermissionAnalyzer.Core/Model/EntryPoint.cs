@@ -13,7 +13,8 @@ public sealed class EntryPoint(
     SourceLocation? declaration,
     IReadOnlyList<Requirement> requirements,
     IReadOnlyList<UnresolvedOperation> unresolved,
-    IReadOnlyList<Assumption> assumptions)
+    IReadOnlyList<Assumption> assumptions,
+    IReadOnlyList<string>? triggers = null)
 {
     /// <summary>
     /// A stable id such as <c>plugin:Contoso.AccountPostPlugin:Update:account:PostOperation</c>.
@@ -52,4 +53,10 @@ public sealed class EntryPoint(
     public IReadOnlyList<UnresolvedOperation> Unresolved { get; } = unresolved;
 
     public IReadOnlyList<Assumption> Assumptions { get; } = assumptions;
+
+    /// <summary>
+    /// The ids of the plugin steps and custom APIs the entry point's operations fire, directly or through other
+    /// steps, sorted. Their requirements are part of <see cref="Requirements"/>.
+    /// </summary>
+    public IReadOnlyList<string> Triggers { get; } = triggers ?? [];
 }

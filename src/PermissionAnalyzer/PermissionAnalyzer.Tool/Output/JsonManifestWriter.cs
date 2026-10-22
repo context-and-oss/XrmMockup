@@ -45,6 +45,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
                 Requirements(e.Requirements, coverage?.For(e)),
                 Unresolved(e.Unresolved),
                 Assumptions(e.Assumptions),
+                e.Triggers.Count > 0 ? e.Triggers : null,
                 Roles(coverage?.For(e)),
                 Impersonation(coverage?.For(e))))
                 .ToList(),
@@ -134,6 +135,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
         IReadOnlyList<RequirementDocument> Requirements,
         IReadOnlyList<UnresolvedDocument> Unresolved,
         IReadOnlyList<AssumptionDocument> Assumptions,
+        IReadOnlyList<string>? Triggers,
         IReadOnlyList<IdentityRolesDocument>? Roles,
         ImpersonationDocument? Impersonation);
 

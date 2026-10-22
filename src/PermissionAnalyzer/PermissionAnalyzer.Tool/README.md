@@ -250,7 +250,8 @@ collections built with `Add`, `AddRange` or collection expressions, including ba
 
 A request without a rule is reported as unresolved. When its message is a custom API (one found in
 the code, a plugin step message in the metadata, or a name with a publisher prefix such as
-`ctx_Approve`), it is reported as a custom API call; its privileges aren't analyzed yet. Add a rule
+`ctx_Approve`), it is reported as a custom API call: the privilege to execute it isn't checked. When the
+custom API is implemented in the analyzed code, its code runs as a [cascade](#plugin-cascades). Add a rule
 for your own messages in the [`Rules` setting](#request-rules).
 
 ### Lookups
@@ -268,6 +269,29 @@ basis `all-lookup-targets`. Without metadata such a lookup is reported as unreso
 
 The analysis only sees lookups set in the code. A record retrieved and written back unchanged, or one
 from a source it can't follow, adds no Append or AppendTo.
+
+### Plugin cascades
+
+An operation also runs the plugin steps registered for its message and table, and those steps need
+their privileges in the same request. Each entry point therefore includes the requirements of every
+step its operations fire, and of the steps those fire in turn, listed after `fires:` under the entry
+point. Steps come from code registrations and from the plugin steps in the metadata:
+
+- A step runs as the identity of the operation that fired it, such as the application user of an
+  Azure Function or the user it acts for through `CallerId`, unless the step impersonates a user.
+- `Create`, `Update`, `Delete`, `Retrieve`, `RetrieveMultiple`, `Associate` and `Disassociate` fire their
+  own message. A request fires its message on its `Target` table, and the messages it runs as:
+  `Upsert` also fires `Create` and `Update`, and `CreateMultiple` also fires `Create`.
+- A step without a table fires for every table. An operation on a table that can't be resolved fires
+  every step of its message, with basis `cascade-unknown`.
+- A call to a custom API implemented in the analyzed code runs that code.
+- A metadata step whose plugin code isn't loaded is reported as unresolved, so missing plugin code is
+  never treated as needing nothing.
+- Each step is expanded once per identity, so steps that fire each other don't loop.
+
+The source path of a cascaded requirement runs from the entry point through the operation (such as
+`Create contact`) and the step id into the step's code. Steps are fired whatever attributes are set;
+`FilteredAttributes` isn't applied yet.
 
 Calls inside lambdas and local functions count towards the method that contains them. A generic
 helper that no entry point calls is listed under unreached methods with its type parameter as the
@@ -365,6 +389,16 @@ xrmmockup-permissions required -x "*.Tests" -x "tests/*"
 
 Excluded projects are not compiled, so excluding them also makes the run faster.
 
+### .NET Framework projects
+
+Projects that target .NET Framework, such as plugin projects, need its reference assemblies. Windows
+has them from the Developer Packs. Elsewhere, the analyzer uses the
+`Microsoft.NETFramework.ReferenceAssemblies.net*` packages in the NuGet cache (`NUGET_PACKAGES` or
+`~/.nuget/packages`), which a restore of an SDK-style project targeting .NET Framework downloads.
+Set `TargetFrameworkRootPath` to use another folder.
+
+Strong-name signing is ignored, so a key file that isn't checked in doesn't stop the analysis.
+
 ## Security roles
 
 The metadata folder is also where plugin step registrations are read from (`Metadata.xml`).
@@ -376,7 +410,8 @@ grants them. `check` and `--role` use the roles from this folder, by name.
 ## Output
 
 `--format json` writes the same content as an object with `entryPoints` (each with its `id`, `kind`,
-`trigger`, `requirements`, `unresolved` and `assumptions`), `unreached` and `notRoleGoverned`.
+`trigger`, `requirements`, `unresolved`, `assumptions` and `triggers`, the ids of the steps it fires),
+`unreached` and `notRoleGoverned`.
 Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, each with the call
 `path` from the entry point.
 
