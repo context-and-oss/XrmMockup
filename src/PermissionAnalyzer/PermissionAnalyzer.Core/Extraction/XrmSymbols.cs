@@ -131,18 +131,9 @@ internal sealed class XrmSymbols
     /// </summary>
     public string? LogicalNameOf(ITypeSymbol? type)
     {
-        if (EntityLogicalNameAttribute is null) return null;
         for (var current = type; current is not null; current = current.BaseType)
         {
-            foreach (var attribute in current.GetAttributes())
-            {
-                if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, EntityLogicalNameAttribute)
-                    && attribute.ConstructorArguments.Length == 1
-                    && attribute.ConstructorArguments[0].Value is string name)
-                {
-                    return name;
-                }
-            }
+            if (NameArgument(current, EntityLogicalNameAttribute) is { } name) return name;
         }
         return null;
     }
@@ -150,11 +141,16 @@ internal sealed class XrmSymbols
     /// <summary>
     /// The column of an early-bound property, read from <c>[AttributeLogicalName]</c>.
     /// </summary>
-    public string? AttributeNameOf(IPropertySymbol property) =>
-        AttributeLogicalNameAttribute is null
+    public string? AttributeNameOf(IPropertySymbol property) => NameArgument(property, AttributeLogicalNameAttribute);
+
+    /// <summary>
+    /// The name given to <paramref name="attributeType"/> on <paramref name="symbol"/>, its only constructor argument.
+    /// </summary>
+    private static string? NameArgument(ISymbol symbol, INamedTypeSymbol? attributeType) =>
+        attributeType is null
             ? null
-            : property.GetAttributes()
-                .Where(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, AttributeLogicalNameAttribute) && a.ConstructorArguments.Length == 1)
+            : symbol.GetAttributes()
+                .Where(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attributeType) && a.ConstructorArguments.Length == 1)
                 .Select(a => a.ConstructorArguments[0].Value as string)
                 .FirstOrDefault(name => name is not null);
 

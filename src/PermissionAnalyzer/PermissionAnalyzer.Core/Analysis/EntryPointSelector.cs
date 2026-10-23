@@ -9,6 +9,8 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// </summary>
 public sealed class EntryPointSelector
 {
+    private const string MethodPrefix = "method:";
+
     private readonly Func<EntryPoint, bool> _matches;
     private readonly string _text;
 
@@ -47,7 +49,8 @@ public sealed class EntryPointSelector
     public static EntryPointSelector Methods(IReadOnlyList<string> methods) =>
         new($"--entry {string.Join(" --entry ", methods)}", e =>
             e.Kind == EntryPointKind.Method
-            && methods.Any(m => e.Id == "method:" + m || e.Id.StartsWith("method:" + m + "(", StringComparison.Ordinal)));
+            && e.Id.StartsWith(MethodPrefix, StringComparison.Ordinal)
+            && methods.Any(m => ManifestBuilder.MatchesMethod(e.Id.Substring(MethodPrefix.Length), m)));
 
     /// <summary>
     /// Operations added with <see cref="ManifestBuilder.AddOperation"/>.

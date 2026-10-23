@@ -31,7 +31,7 @@ internal sealed record FieldOrigin(string Type, string Field, bool OnThis) : Ser
 /// <summary>
 /// Provided by dependency injection or a service provider. Who it runs as depends on the host.
 /// </summary>
-internal sealed record InjectedOrigin(string Description) : ServiceOrigin;
+internal sealed record InjectedOrigin : ServiceOrigin;
 
 /// <summary>
 /// Returned by a method in the solution.

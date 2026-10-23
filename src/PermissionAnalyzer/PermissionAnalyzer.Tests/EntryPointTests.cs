@@ -97,6 +97,73 @@ public class EntryPointTests
     }
 
     [Fact]
+    public void ServiceReturnedThroughRecursiveCallsEndsAtTheDepthLimit()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, Execute);
+
+                private void Execute(LocalPluginContext context) => Services.Get(context.OrganizationService, 3).Create(new Contact());
+            }
+
+            public static class Services
+            {
+                public static IOrganizationService Get(IOrganizationService service, int n) => n == 0 ? service : Get(Get(service, n - 1), n - 1);
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Contains("contact:Create as Caller", entry.RequirementsWithIdentity());
+    }
+
+    [Fact]
+    public void ServiceFromAnOutArgumentIsAssumed()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, Execute);
+
+                private void Execute(LocalPluginContext context)
+                {
+                    if (TryGet(context, out var service)) service.Create(new Contact());
+                }
+
+                private static bool TryGet(LocalPluginContext context, out IOrganizationService service)
+                {
+                    service = context.OrganizationService;
+                    return true;
+                }
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Equal("local 'service' is passed by ref or out", Assert.Single(entry.Assumptions).Reason);
+    }
+
+    [Fact]
+    public void ServiceAssignedWithCoalesceIsFollowed()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, Execute);
+
+                private void Execute(LocalPluginContext context)
+                {
+                    IOrganizationService? service = null;
+                    service ??= context.OrganizationAdminService;
+                    service.Create(new Contact());
+                }
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Contains("contact:Create as System", entry.RequirementsWithIdentity());
+    }
+
+    [Fact]
     public void InjectedServiceUsesRegisteredImplementation()
     {
         var manifest = Analyze.Code("""

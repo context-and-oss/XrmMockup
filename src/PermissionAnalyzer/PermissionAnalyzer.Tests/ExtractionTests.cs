@@ -123,6 +123,44 @@ public class ExtractionTests
     }
 
     [Fact]
+    public void FetchXmlBuiltFromItselfKeepsEachPart()
+    {
+        var method = Analyze.Method("""
+            class C
+            {
+                void M(IOrganizationService service)
+                {
+                    var links = "<link-entity name='contact' from='contactid' to='primarycontactid' />";
+                    links = links + "<link-entity name='lead' from='leadid' to='originatingleadid' />";
+                    service.RetrieveMultiple(new FetchExpression("<fetch><entity name='account'>" + links + "</entity></fetch>"));
+                }
+            }
+            """);
+
+        Assert.Equal(["account:Read", "contact:Read", "lead:Read"], method.Requirements());
+        Assert.Empty(method.Unresolved);
+    }
+
+    [Fact]
+    public void QueryAssignedByCoalesceIsRead()
+    {
+        var method = Analyze.Method("""
+            class C
+            {
+                void M(IOrganizationService service)
+                {
+                    var query = default(QueryExpression);
+                    query ??= new QueryExpression("contact");
+                    service.RetrieveMultiple(query);
+                }
+            }
+            """);
+
+        // The analysis doesn't follow the flow, so the null the local starts as is still reported
+        Assert.Equal(["contact:Read"], method.Requirements());
+    }
+
+    [Fact]
     public void AssociateNeedsAppendToOnTargetAndAppendOnRelated()
     {
         var method = Analyze.Method("""

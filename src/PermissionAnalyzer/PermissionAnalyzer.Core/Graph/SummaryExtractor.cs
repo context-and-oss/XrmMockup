@@ -16,6 +16,8 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     // How far constants are followed through fields and locals, such as a user id in a static field.
     private const int MaxConstantDepth = 8;
 
+    private const string NoEntityTable = "entity has no table name";
+
     private static readonly HashSet<string> RegistrationMethods = new(StringComparer.Ordinal)
     {
         "AddScoped", "AddTransient", "AddSingleton",
@@ -206,11 +208,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         switch (operation)
         {
             case "Create":
-                return [site.Access(Fires("Create", resolver.Entity(first).OrUnresolved("entity is created without a table name"), resolver.Columns(first)), Privilege.Create), .. Lookups(site, resolver, first)];
+                return Write(site, resolver, "Create", first, Privilege.Create);
             case "CreateAndReturn":
-                return [site.Access(Fires("Create", resolver.Entity(first).OrUnresolved("entity is created without a table name"), resolver.Columns(first)), Privilege.Create, Privilege.Read), .. Lookups(site, resolver, first)];
+                return Write(site, resolver, "Create", first, Privilege.Create, Privilege.Read);
             case "Update":
-                return [site.Access(Fires("Update", resolver.Entity(first).OrUnresolved("entity is created without a table name"), resolver.Columns(first)), Privilege.Write), .. Lookups(site, resolver, first)];
+                return Write(site, resolver, "Update", first, Privilege.Write);
             case "Retrieve":
                 return [site.Access(Fires("Retrieve", resolver.Name(first)), Privilege.Read)];
             case "Delete":
@@ -260,21 +262,16 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 var tables = invocation.TargetMethod.IsGenericMethod ? resolver.TypeArgument(invocation.TargetMethod.TypeArguments[0]) : resolver.Name(first);
                 return [Query(site, tables, invocation)];
             case "AddObject":
-                return [site.Access(Fires("Create", resolver.Entity(first).OrUnresolved("entity is created without a table name"), resolver.Columns(first)), Privilege.Create), .. Lookups(site, resolver, first)];
+                return Write(site, resolver, "Create", first, Privilege.Create);
             case "UpdateObject":
-                return [site.Access(Fires("Update", resolver.Entity(first).OrUnresolved("entity is created without a table name"), resolver.Columns(first)), Privilege.Write), .. Lookups(site, resolver, first)];
+                return Write(site, resolver, "Update", first, Privilege.Write);
             case "DeleteObject":
-                return [site.Access(Fires("Delete", resolver.Entity(first).OrUnresolved("entity is created without a table name")), Privilege.Delete)];
+                return [site.Access(Fires("Delete", resolver.Entity(first).OrUnresolved(NoEntityTable)), Privilege.Delete)];
             case "AddLink":
             case "DeleteLink":
                 return Link(site, method == "AddLink" ? "Associate" : "Disassociate", resolver, first, target);
             case "AddRelatedObject":
-                return
-                [
-                    site.Access(Fires("Create", resolver.Entity(target).OrUnresolved("entity is created without a table name"), resolver.Columns(target)), Privilege.Create),
-                    .. Lookups(site, resolver, target),
-                    .. Link(site, "Associate", resolver, first, target),
-                ];
+                return [.. Write(site, resolver, "Create", target, Privilege.Create), .. Link(site, "Associate", resolver, first, target)];
             case "LoadProperty":
                 return [site.Access(TableResolution.Unresolved("related records are read through a relationship, whose table isn't known"), Privilege.Read)];
             case "Execute":
@@ -290,6 +287,16 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// </summary>
     private static AccessFact Query(Site site, TableResolution tables, IOperation query) =>
         site.Access(IsJoined(query) ? tables : Fires("RetrieveMultiple", tables), Privilege.Read);
+
+    /// <summary>
+    /// Writing a record: the privileges on its table, firing <paramref name="message"/> with the columns it sets, and
+    /// Append and AppendTo for its lookups.
+    /// </summary>
+    private static AccessFact[] Write(Site site, TableResolver resolver, string message, IOperation? entity, params Privilege[] privileges) =>
+    [
+        site.Access(Fires(message, resolver.Entity(entity).OrUnresolved(NoEntityTable), resolver.Columns(entity)), privileges),
+        .. Lookups(site, resolver, entity),
+    ];
 
     private static AccessFact[] Link(Site site, string message, TableResolver resolver, IOperation? source, IOperation? target) =>
     [
@@ -339,26 +346,25 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     {
         if (!IsInSource(target) && (!isVirtual || IsFramework(target.ContainingType))) return null;
 
+        var created = Creation(instance);
+        var unwrapped = Unwrap(instance);
         var receiver = target.IsStatic ? ReceiverKind.None
             : target.MethodKind == MethodKind.LocalFunction || IsThis(instance) ? ReceiverKind.This
-            : Creation(instance) is not null ? ReceiverKind.Created
+            : created is not null ? ReceiverKind.Created
             : ReceiverKind.Other;
 
-        var creation = receiver == ReceiverKind.Created ? Construction(Creation(instance)!, root) : null;
+        var creation = receiver == ReceiverKind.Created ? Construction(created!, root) : null;
         var receiverType = receiver switch
         {
             ReceiverKind.Created => creation?.ReceiverType,
-            ReceiverKind.Other when Unwrap(instance)?.Type is { } type => Nodes.TypeId(type),
+            ReceiverKind.Other when unwrapped?.Type is { } type => Nodes.TypeId(type),
             _ => Nodes.TypeId(target.ContainingType),
         };
 
         var argumentFacts = Arguments(target, arguments, isVirtual, root);
         if (receiver != ReceiverKind.None && target.MethodKind != MethodKind.Constructor && symbols.IsContext(target.ContainingType))
         {
-            argumentFacts = new SortedDictionary<int, ArgumentFact>(argumentFacts.ToDictionary(a => a.Key, a => a.Value))
-            {
-                [ArgumentFact.ReceiverOrdinal] = new ArgumentFact(ServiceOf(instance, root), null),
-            };
+            argumentFacts[ArgumentFact.ReceiverOrdinal] = new ArgumentFact(ServiceOf(instance, root), null);
         }
 
         return new CallFact(
@@ -369,7 +375,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             receiverType,
             argumentFacts,
             creation,
-            TypeArguments(Creation(instance)?.Type ?? Unwrap(instance)?.Type, target, root));
+            TypeArguments(created?.Type ?? unwrapped?.Type, target, root));
     }
 
     /// <summary>
@@ -397,8 +403,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     {
         Dictionary<string, IReadOnlyList<TableResolution>>? result = null;
         var resolver = Resolver(root);
-        IEnumerable<ITypeSymbol> types = [target.ContainingType];
-        for (var type = receiver; type is not null; type = type.BaseType) types = types.Append(type);
+        IEnumerable<ITypeSymbol> types = receiver is null ? [target.ContainingType] : [target.ContainingType, receiver, .. BaseTypes(receiver)];
         foreach (var type in types.OfType<INamedTypeSymbol>())
         {
             var arguments = Nodes.TypeArguments(type);
@@ -429,10 +434,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// What each argument passes on: its services, and its tables for every way the callee might read them. The
     /// type arguments of a generic method are passed as tables too, under <see cref="TableSlot.TypeParameterOrdinal"/>.
     /// </summary>
-    private IReadOnlyDictionary<int, ArgumentFact> Arguments(IMethodSymbol target, IReadOnlyList<IArgumentOperation> arguments, bool isVirtual, IMethodSymbol root)
+    private SortedDictionary<int, ArgumentFact> Arguments(IMethodSymbol target, IReadOnlyList<IArgumentOperation> arguments, bool isVirtual, IMethodSymbol root)
     {
         var result = new SortedDictionary<int, ArgumentFact>();
         var tablesMatter = isVirtual || IsInSource(target);
+        var resolver = Resolver(root);
         foreach (var argument in arguments)
         {
             if (argument.Parameter is not { } parameter || argument.ArgumentKind == ArgumentKind.ParamArray) continue;
@@ -442,7 +448,6 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             Dictionary<TableShape, TableResolution>? tables = null;
             if (tablesMatter)
             {
-                var resolver = Resolver(root);
                 foreach (var shape in resolver.ShapesOf(parameter.Type))
                 {
                     tables ??= new Dictionary<TableShape, TableResolution>();
@@ -455,8 +460,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
         if (tablesMatter && target.IsGenericMethod)
         {
-            var resolver = Resolver(root);
-            var typeArguments = (target.ReducedFrom is not null ? target.GetConstructedReducedFrom() ?? target : target).TypeArguments;
+            var typeArguments = (target.GetConstructedReducedFrom() ?? target).TypeArguments;
             for (var i = 0; i < typeArguments.Length; i++)
             {
                 result[TableSlot.TypeParameterOrdinal(i)] = new ArgumentFact(null, new Dictionary<TableShape, TableResolution>
@@ -604,7 +608,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
         if (method.Name is "GetService" or "GetRequiredService")
         {
-            return [new InjectedOrigin("service comes from the service provider")];
+            return [new InjectedOrigin()];
         }
 
         if (IsInSource(method) && Call(method, invocation.Instance, invocation.IsVirtual, invocation.Arguments, NameLocation(invocation.Syntax), root) is { } call)
@@ -731,16 +735,18 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         }
     }
 
+    private static IEnumerable<INamedTypeSymbol> BaseTypes(ITypeSymbol type)
+    {
+        for (var current = type.BaseType; current is not null; current = current.BaseType) yield return current;
+    }
+
     private void AddType(INamedTypeSymbol type)
     {
         var id = Nodes.TypeId(type);
         if (_graph.Types.ContainsKey(id) || type.TypeKind is not (TypeKind.Class or TypeKind.Struct or TypeKind.Interface)) return;
 
         var ancestors = new SortedSet<string>(StringComparer.Ordinal);
-        for (var current = type.BaseType; current is not null && current.SpecialType != SpecialType.System_Object; current = current.BaseType)
-        {
-            ancestors.Add(Nodes.TypeId(current));
-        }
+        foreach (var current in BaseTypes(type).Where(t => t.SpecialType != SpecialType.System_Object)) ancestors.Add(Nodes.TypeId(current));
         foreach (var @interface in type.AllInterfaces) ancestors.Add(Nodes.TypeId(@interface));
 
         var summary = new TypeSummary(id, type.IsAbstract || type.IsStatic || type.TypeKind == TypeKind.Interface, type.TypeKind == TypeKind.Interface, ancestors.ToList());
@@ -748,9 +754,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         var typeParameters = Nodes.TypeParameters(type);
         if (typeParameters.Count > 0)
         {
-            IEnumerable<INamedTypeSymbol> generic = type.AllInterfaces;
-            for (var current = type.BaseType; current is not null; current = current.BaseType) generic = generic.Append(current);
-            foreach (var ancestor in generic)
+            foreach (var ancestor in type.AllInterfaces.Concat(BaseTypes(type)))
             {
                 var arguments = Nodes.TypeArguments(ancestor);
                 if (arguments.Count == 0 || !IsInSource(ancestor)) continue;
@@ -759,7 +763,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         }
 
         // Most derived first, so an override replaces the method it overrides
-        for (var current = type; current is not null; current = current.BaseType)
+        foreach (var current in BaseTypes(type).Prepend(type))
         {
             foreach (var method in current.GetMembers().OfType<IMethodSymbol>())
             {
@@ -917,6 +921,9 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 case ISimpleAssignmentOperation assignment when IsLocal(assignment.Target, local):
                     values.Add(assignment.Value);
                     break;
+                case ICoalesceAssignmentOperation assignment when IsLocal(assignment.Target, local):
+                    values.Add(assignment.Value);
+                    break;
                 case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument when IsLocal(argument.Value, local):
                     failure = $"local '{local.Name}' is passed by ref or out";
                     break;
@@ -996,6 +1003,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 case IConversionOperation conversion: operation = conversion.Operand; break;
                 case IArgumentOperation argument: operation = argument.Value; break;
                 case IParenthesizedOperation parenthesized: operation = parenthesized.Operand; break;
+                case IDeclarationExpressionOperation declaration: operation = declaration.Expression; break;
                 default: return operation;
             }
         }

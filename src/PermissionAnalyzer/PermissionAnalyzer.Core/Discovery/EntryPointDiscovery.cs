@@ -16,6 +16,11 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
     private static readonly HashSet<string> StepMethods = new(StringComparer.Ordinal) { "RegisterPluginStep", "RegisterStep" };
     private static readonly HashSet<string> ApiMethods = new(StringComparer.Ordinal) { "RegisterCustomAPI", "RegisterAPI" };
 
+    /// <summary>
+    /// A message, stage or custom API name that is set at runtime.
+    /// </summary>
+    private const string Unknown = "?";
+
     private static readonly IReadOnlyDictionary<int, string> StageNames = new Dictionary<int, string>
     {
         [10] = "PreValidation",
@@ -104,6 +109,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         if (!isStep && !ApiMethods.Contains(method.Name)) return null;
 
         var arguments = invocation.Arguments.Where(a => a.Parameter is not null).OrderBy(a => a.Parameter!.Ordinal).ToList();
+        // The handler comes after a step's message and stage, and after an API's name
         var handler = arguments.LastOrDefault(a => a.Parameter!.Type.TypeKind == TypeKind.Delegate || a.Parameter.Ordinal >= (isStep ? 2 : 1));
         var service = method.TypeArguments.Length == 2 ? method.TypeArguments[1]
             : method.Name == "RegisterAPI" && method.TypeArguments.Length == 1 ? method.TypeArguments[0]
@@ -113,15 +119,15 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
 
         if (!isStep)
         {
-            var api = arguments.FirstOrDefault()?.Value.ConstantValue is { HasValue: true, Value: string apiName } ? apiName : "?";
+            var api = arguments.FirstOrDefault()?.Value.ConstantValue is { HasValue: true, Value: string apiName } ? apiName : Unknown;
             return new EntryCandidate($"custom-api:{api}", EntryPointKind.CustomApi, name, compilation.AssemblyName, new Trigger(Message: api), null, declaration, handlers, ExecutePrivilegeOf(invocation));
         }
 
-        var message = Name(arguments.ElementAtOrDefault(0)?.Value) ?? "?";
-        var stage = Name(arguments.ElementAtOrDefault(1)?.Value) ?? "?";
+        var message = Name(arguments.ElementAtOrDefault(0)?.Value) ?? Unknown;
+        var stage = Name(arguments.ElementAtOrDefault(1)?.Value) ?? Unknown;
         var table = method.TypeArguments.Length > 0 ? symbols.LogicalNameOf(method.TypeArguments[0]) : null;
         var impersonation = UserContext(invocation);
-        var filter = message == "Update" ? FilteredAttributes(invocation) : null;
+        var filter = Trigger.Filters(message) ? FilteredAttributes(invocation) : null;
 
         return new EntryCandidate(
             StepId(name, message, table, stage),
@@ -142,13 +148,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
     /// </summary>
     private static IReadOnlyList<Handler> Handlers(IOperation? value, string pluginType, ITypeSymbol? service)
     {
-        var op = value;
-        while (op is IConversionOperation or IParenthesizedOperation)
-        {
-            op = op is IConversionOperation conversion ? conversion.Operand : ((IParenthesizedOperation)op).Operand;
-        }
-
-        switch (op)
+        switch (Unwrap(value))
         {
             case IDelegateCreationOperation { Target: IAnonymousFunctionOperation lambda }:
                 return [new Handler(Nodes.Id(lambda.Symbol), pluginType)];
@@ -247,7 +247,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
             .Where(c => c.TargetMethod.Name == "SetExecutionMode" && c.Arguments.Length > 0)
             .Any(c => Unwrap(c.Arguments[0].Value) is var mode
                 && (mode is IFieldReferenceOperation { Field: { Name: "Asynchronous", ContainingType.TypeKind: TypeKind.Enum } }
-                    || mode?.ConstantValue is { HasValue: true, Value: 1 }));
+                    || mode?.ConstantValue is { HasValue: true, Value: 1 })); // ExecutionMode.Asynchronous
 
     /// <summary>
     /// The column a filtered attribute names: a constant, or the early-bound property a lambda selects.
@@ -274,15 +274,14 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         IOperation current = registration;
         while (current.Parent is { } parent)
         {
-            if (parent is IConversionOperation or IArgumentOperation)
+            if (parent is IConversionOperation)
             {
                 current = parent;
                 continue;
             }
-            if (parent is not IInvocationOperation call || !ReferenceEquals(Unwrap(call.Instance), registration) && !ReferenceEquals(call.Instance, current)) break;
+            if (parent is not IInvocationOperation call || !ReferenceEquals(call.Instance, current)) yield break;
             yield return call;
             current = call;
-            registration = call;
         }
     }
 

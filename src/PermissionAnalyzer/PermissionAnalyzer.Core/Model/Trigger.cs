@@ -12,4 +12,10 @@ public sealed record Trigger(
     string? Stage = null,
     string? Binding = null,
     IReadOnlyList<string>? FilteredAttributes = null,
-    bool Asynchronous = false);
+    bool Asynchronous = false)
+{
+    /// <summary>
+    /// As in XrmMockup, a step's filtered attributes apply to Update only. Messages ignore case.
+    /// </summary>
+    internal static bool Filters(string? message) => string.Equals(message, "Update", StringComparison.OrdinalIgnoreCase);
+}

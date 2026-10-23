@@ -126,6 +126,16 @@ public class OperationTests
         Assert.Equal(["Update ctx_order", UpdateStep], lead.Path.Take(2));
     }
 
+    [Fact]
+    public void OperationNeedsTheGlobalPrivilegesAndAssumptionsOfItsRule()
+    {
+        var merge = Run("Merge", "account");
+        Assert.Equal(["prvMerge"], merge.GlobalRequirements.Select(r => r.Privilege));
+
+        var send = Run("SendEmail", "email");
+        Assert.Contains(send.Assumptions, a => a.Reason.StartsWith("SendEmail sends the email as the calling user", StringComparison.Ordinal));
+    }
+
     private static EntryPoint Run(string message, string table, IReadOnlyList<string>? columns = null, IEnumerable<LookupColumn>? lookups = null)
     {
         var manifest = Analyze.Code(

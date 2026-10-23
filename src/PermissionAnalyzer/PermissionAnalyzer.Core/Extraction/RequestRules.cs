@@ -104,7 +104,9 @@ internal sealed class RequestRules
     /// The message of a request type or name: <c>AssignRequest</c> and <c>Assign</c> are both <c>Assign</c>.
     /// </summary>
     public static string MessageOf(string name) =>
-        name.Length > "Request".Length && name.EndsWith("Request", StringComparison.Ordinal) ? name.Substring(0, name.Length - "Request".Length) : name;
+        name.Length > RequestSuffix.Length && name.EndsWith(RequestSuffix, StringComparison.Ordinal) ? name.Substring(0, name.Length - RequestSuffix.Length) : name;
+
+    private const string RequestSuffix = "Request";
 
     /// <summary>
     /// The checks of <paramref name="message"/> with those of its <see cref="RequestRule.As"/> messages, or
@@ -128,12 +130,12 @@ internal sealed class RequestRules
         var missing = new List<string>();
         var messages = new List<string> { MessageOf(rule.Message) };
         if (rule.Requests is { } nested) requests.Add(nested);
-        foreach (var other in rule.As)
+        foreach (var other in rule.As.Select(MessageOf))
         {
-            if (Expand(MessageOf(other), visiting) is not { } expanded)
+            if (Expand(other, visiting) is not { } expanded)
             {
-                missing.Add(MessageOf(other));
-                messages.Add(MessageOf(other));
+                missing.Add(other);
+                messages.Add(other);
                 continue;
             }
             messages.AddRange(expanded.Messages);

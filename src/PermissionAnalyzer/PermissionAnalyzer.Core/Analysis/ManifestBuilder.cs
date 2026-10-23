@@ -84,7 +84,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         }
         foreach (var plugin in discovery.Plugins)
         {
-            var key = plugin.Type + "\n" + plugin.Assembly;
+            var key = Key(plugin);
             if (!cascadesOnly) _cascadeOnlyPlugins.Remove(key);
             else if (!_plugins.ContainsKey(key)) _cascadeOnlyPlugins.Add(key);
 
@@ -170,20 +170,20 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             if (scope is not null && !scope.Matches(Describe(candidate, [], [], []))) continue;
 
             var context = Context(candidate);
+            var evaluator = new Evaluator(_graph, context);
             if (scope is null && cascadeOnly.Contains(candidate.Id))
             {
                 // Not reported, but what it reaches isn't unreached
-                reached.UnionWith(new Evaluator(_graph, context).Evaluate(candidate.Handlers).Reached);
+                reached.UnionWith(evaluator.Evaluate(candidate.Handlers).Reached);
                 continue;
             }
 
-            var evaluator = new Evaluator(_graph, context);
             var evaluation = _operations.TryGetValue(candidate.Id, out var user)
                 ? Unprefixed(evaluator.EvaluateAlone(user.Node(candidate.Id, _rules, _lookups), user.Display))
                 : evaluator.Evaluate(candidate.Handlers);
             var cascade = cascades.Expand(evaluation, candidate.Id, context.Caller);
             reached.UnionWith(cascade.Result.Reached);
-            entryPoints.Add(Describe(candidate, cascade));
+            entryPoints.Add(Describe(candidate, cascade, context.Caller));
         }
 
         var unreached = scope is null ? Unreached(reached) : [];
@@ -219,20 +219,21 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
 
         // The same registration compiled for another target framework, or a step registered twice
         var handlers = existing.Handlers.Concat(entry.Handlers).Distinct().ToList();
-        var declaration = existing.Declaration is null || entry.Declaration is not null && entry.Declaration.CompareTo(existing.Declaration) < 0
-            ? entry.Declaration
-            : existing.Declaration;
         _entries[entry.Id] = existing with
         {
             // Independent of the order compilations are added in
-            Assembly = string.CompareOrdinal(entry.Assembly, existing.Assembly) < 0 ? entry.Assembly : existing.Assembly,
+            Assembly = First(existing.Assembly, entry.Assembly, string.CompareOrdinal),
             Handlers = handlers.OrderBy(h => h.Target, StringComparer.Ordinal).ThenBy(h => h.ObjectType, StringComparer.Ordinal).ToList(),
-            Declaration = declaration,
-            ImpersonatingUserId = existing.ImpersonatingUserId is null || entry.ImpersonatingUserId is not null && string.CompareOrdinal(entry.ImpersonatingUserId, existing.ImpersonatingUserId) < 0
-                ? entry.ImpersonatingUserId
-                : existing.ImpersonatingUserId,
+            Declaration = First(existing.Declaration, entry.Declaration, (x, y) => x.CompareTo(y)),
+            ImpersonatingUserId = First(existing.ImpersonatingUserId, entry.ImpersonatingUserId, string.CompareOrdinal),
         };
     }
+
+    /// <summary>
+    /// The value that sorts first, ignoring <c>null</c>.
+    /// </summary>
+    private static T? First<T>(T? a, T? b, Func<T, T, int> compare) where T : class =>
+        a is null ? b : b is null ? a : compare(b, a) < 0 ? b : a;
 
     /// <summary>
     /// Steps from the metadata. A step of a plugin that registers its steps in code adds the impersonating user
@@ -252,9 +253,9 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             if (matches.Count == 0) matches = classes.Where(c => c.Type == step.TypeName).ToList();
             if (matches.Count == 0 && !string.IsNullOrEmpty(step.Message))
             {
-                var table = string.IsNullOrEmpty(step.Table) ? null : step.Table!.ToLowerInvariant();
+                var table = Lower(step.Table);
                 var id = EntryPointDiscovery.StepId(step.TypeName, step.Message, table, EntryPointDiscovery.StageName(step.Stage));
-                codeless.Add(new CascadeStep(id, step.Message, table, step.ImpersonatingUserId?.ToLowerInvariant(), Filter(step), null, step.Asynchronous));
+                codeless.Add(new CascadeStep(id, step.Message, table, Lower(step.ImpersonatingUserId), Filter(step), null, step.Asynchronous));
             }
             foreach (var match in matches)
             {
@@ -290,8 +291,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             foreach (var step in steps)
             {
                 var stage = EntryPointDiscovery.StageName(step.Stage);
-                var table = string.IsNullOrEmpty(step.Table) ? null : step.Table!.ToLowerInvariant();
-                var user = step.ImpersonatingUserId?.ToLowerInvariant();
+                var table = Lower(step.Table);
+                var user = Lower(step.ImpersonatingUserId);
                 var filter = Filter(step);
 
                 var code = plugin.HasCodeSteps
@@ -303,16 +304,10 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                         && string.Equals(c.Trigger?.Stage, stage, StringComparison.OrdinalIgnoreCase))
                     : null;
 
-                if (code is not null)
-                {
-                    candidates[code.Id] = Registered(code, user, filter, step.Asynchronous);
-                    continue;
-                }
-
                 var id = EntryPointDiscovery.StepId(plugin.Type, step.Message, table, stage);
-                if (candidates.TryGetValue(id, out var existing))
+                if ((code ?? (candidates.TryGetValue(id, out var existing) ? existing : null)) is { } registered)
                 {
-                    candidates[id] = Registered(existing, user, filter, step.Asynchronous);
+                    candidates[registered.Id] = Registered(registered, user, filter, step.Asynchronous);
                     continue;
                 }
                 candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage, FilteredAttributes: filter, Asynchronous: step.Asynchronous), user, plugin.Declaration, handlers));
@@ -322,13 +317,20 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         return codeless;
     }
 
-    private bool IsCascadeOnly(PluginClass plugin) => _cascadeOnlyPlugins.Contains(plugin.Type + "\n" + plugin.Assembly);
+    private bool IsCascadeOnly(PluginClass plugin) => _cascadeOnlyPlugins.Contains(Key(plugin));
+
+    private static string Key(PluginClass plugin) => plugin.Type + "\n" + plugin.Assembly;
+
+    /// <summary>
+    /// A table or user id from the metadata, lowercased; <c>null</c> when it isn't set.
+    /// </summary>
+    private static string? Lower(string? value) => string.IsNullOrEmpty(value) ? null : value!.ToLowerInvariant();
 
     /// <summary>
     /// The columns an Update step from the metadata is filtered on, lowercased.
     /// </summary>
     private static IReadOnlyList<string>? Filter(PluginStepRegistration step) =>
-        step.Message.Equals("Update", StringComparison.OrdinalIgnoreCase) ? step.FilteredAttributes : null;
+        Trigger.Filters(step.Message) ? step.FilteredAttributes : null;
 
     /// <summary>
     /// <paramref name="candidate"/> with the user, filtered attributes and mode of its registration in the metadata,
@@ -356,7 +358,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         foreach (var method in _entryMethods)
         {
             var matches = _graph.Nodes.Values
-                .Where(n => n.Id == n.Member && (n.Id == method || n.Id.StartsWith(method + "(", StringComparison.Ordinal)))
+                .Where(n => n.Id == n.Member && MatchesMethod(n.Id, method))
                 .OrderBy(n => n.Id, StringComparer.Ordinal);
             foreach (var node in matches)
             {
@@ -369,11 +371,17 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     }
 
     /// <summary>
+    /// A method name given to <see cref="AddEntryMethods"/> matches every overload of the method, or one by its full id.
+    /// </summary>
+    internal static bool MatchesMethod(string id, string method) =>
+        id == method || id.StartsWith(method + "(", StringComparison.Ordinal);
+
+    /// <summary>
     /// Method entries named in <see cref="AddEntryMethods"/> that match no method in the solution.
     /// </summary>
     public IReadOnlyList<string> UnmatchedEntryMethods() =>
         _entryMethods
-            .Where(m => !_graph.Nodes.Values.Any(n => n.Id == n.Member && (n.Id == m || n.Id.StartsWith(m + "(", StringComparison.Ordinal))))
+            .Where(m => !_graph.Nodes.Values.Any(n => n.Id == n.Member && MatchesMethod(n.Id, m)))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(m => m, StringComparer.Ordinal)
             .ToList();
@@ -406,7 +414,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// </summary>
     private List<MethodManifest> Unreached(HashSet<string> reached)
     {
-        var evaluator = new Evaluator(_graph, new EntryContext(RunsAs.Caller, new Identity(RunsAs.Caller with { Assumed = true }, InjectedAssumption)));
+        var evaluator = new Evaluator(_graph, Context(RunsAs.Caller));
         return _graph.Nodes.Values
             .Where(n => n.Accesses.Count > 0 && !reached.Contains(n.Id) && _reportedNodes.Contains(n.Id))
             .GroupBy(n => n.Member, StringComparer.Ordinal)
@@ -422,9 +430,9 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .ToList();
     }
 
-    private EntryPoint Describe(EntryCandidate candidate, CascadeResult cascade)
+    private EntryPoint Describe(EntryCandidate candidate, CascadeResult cascade, RunsAs caller)
     {
-        var (requirements, unresolved, assumptions, globalRequirements) = Aggregate([cascade.Result], Context(candidate).Caller, candidate.Kind == EntryPointKind.CustomApi ? candidate : null);
+        var (requirements, unresolved, assumptions, globalRequirements) = Aggregate([cascade.Result], caller, candidate.Kind == EntryPointKind.CustomApi ? candidate : null);
         return Describe(candidate, requirements, unresolved, assumptions, cascade.Fired, globalRequirements);
     }
 
@@ -549,7 +557,10 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
 
         if (truncated)
         {
-            var location = assumptions.FirstOrDefault()?.Source ?? requirements.SelectMany(r => r.Sources).FirstOrDefault();
+            var location = assumptions.FirstOrDefault()?.Source
+                ?? requirements.SelectMany(r => r.Sources).FirstOrDefault()
+                ?? unresolved.FirstOrDefault()?.Source
+                ?? globalRequirements.SelectMany(r => r.Sources).FirstOrDefault();
             if (location is not null)
             {
                 assumptions.Insert(0, new Assumption($"analysis stopped after {Evaluator.MaxVisits} calls; requirements may be incomplete", location));

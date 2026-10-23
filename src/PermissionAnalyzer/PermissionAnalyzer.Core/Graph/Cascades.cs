@@ -79,7 +79,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
                 {
                     fired.Add(step.Id);
                     var runsAs = step.ImpersonatingUserId is { } user ? RunsAs.User(user) : trigger.RunsAs;
-                    var basis = Max(Max(currentBasis, trigger.Basis), filterBasis);
+                    var basis = RequirementBases.Max(RequirementBases.Max(currentBasis, trigger.Basis), filterBasis);
                     if (!done.Add((step.Id, runsAs, basis))) continue;
 
                     var table = trigger.Table is null ? trigger.Message : $"{trigger.Message} {trigger.Table}";
@@ -120,7 +120,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
             if (Bypassed(step, trigger.Bypass)) continue;
 
             // As in XrmMockup, a filter applies to Update only
-            if (step.FilteredAttributes is not { Count: > 0 } filter || !step.Message.Equals("Update", StringComparison.OrdinalIgnoreCase))
+            if (step.FilteredAttributes is not { Count: > 0 } filter || !Trigger.Filters(step.Message))
             {
                 yield return (step, RequirementBasis.Direct);
             }
@@ -162,10 +162,10 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
     /// </summary>
     private static void Copy(EvaluationResult from, EvaluationResult to, IReadOnlyList<string> path, RequirementBasis basis)
     {
-        foreach (var hit in from.Requirements) to.Requirements.Add(hit with { Basis = Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
+        foreach (var hit in from.Requirements) to.Requirements.Add(hit with { Basis = RequirementBases.Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
         foreach (var hit in from.Unresolved) to.Unresolved.Add(hit with { Source = Prefix(hit.Source, path) });
         foreach (var hit in from.Assumptions) to.Assumptions.Add(hit with { Source = Prefix(hit.Source, path) });
-        foreach (var hit in from.Globals) to.Globals.Add(hit with { Basis = Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
+        foreach (var hit in from.Globals) to.Globals.Add(hit with { Basis = RequirementBases.Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
         to.Reached.UnionWith(from.Reached);
     }
 
@@ -181,6 +181,4 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
 
     private static RequirementSource Prefix(RequirementSource source, IReadOnlyList<string> path) =>
         path.Count == 0 ? source : source with { Path = [.. path, .. source.Path] };
-
-    private static RequirementBasis Max(RequirementBasis a, RequirementBasis b) => a > b ? a : b;
 }

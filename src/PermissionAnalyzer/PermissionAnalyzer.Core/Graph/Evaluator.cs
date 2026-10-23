@@ -144,8 +144,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 {
                     if (!graph.Nodes.TryGetValue(target, out var callee)) continue;
                     var bindings = Bind(call, frame, callee);
-                    var callBasis = basis > frame.Basis ? basis : frame.Basis;
-                    Enqueue(new Frame(target, state, bindings, callBasis, [.. frame.Path, callee.Display]));
+                    Enqueue(new Frame(target, state, bindings, RequirementBases.Max(basis, frame.Basis), [.. frame.Path, callee.Display]));
                 }
             }
         }
@@ -166,11 +165,10 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
     private IEnumerable<Frame> Start(Handler handler)
     {
-        var path = new List<string>();
         if (handler.ServiceType is { } service)
         {
             var call = new CallFact(new SourceLocation("", 0, 0), handler.Target, true, ReceiverKind.Other, service, new Dictionary<int, ArgumentFact>());
-            var frame = new Frame(handler.Target, null, NoBindings, RequirementBasis.Direct, path);
+            var frame = new Frame(handler.Target, null, NoBindings, RequirementBasis.Direct, []);
             foreach (var (target, state, basis) in Dispatch(call, frame, 0))
             {
                 if (graph.Nodes.TryGetValue(target, out var node))
@@ -196,6 +194,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         if (identities.Count == 0) identities = [Unknown("service is null")];
 
         var tables = BindTables(access.Tables, frame, 0);
+        var privileges = access.Privileges.Distinct().OrderBy(p => p).ToList();
         foreach (var identity in identities)
         {
             if (identity.Assumption is { } assumption) result.Assumptions.Add(new AssumptionHit(assumption, source));
@@ -219,7 +218,6 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
             foreach (var reason in tables.Reasons)
             {
-                var privileges = access.Privileges.Distinct().OrderBy(p => p).ToList();
                 result.Unresolved.Add(new UnresolvedHit(access.Operation, privileges, access.ReasonPrefix + reason, identity.RunsAs, source));
             }
 
@@ -319,7 +317,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             : new Dictionary<(string, int), Binding>();
         foreach (var argument in call.Arguments)
         {
-            var services = argument.Value.Service is { } origins ? Resolve(origins, caller, 0) : null;
+            var services = argument.Value.Service is { } origins ? Resolve(origins, caller, depth) : null;
             var tables = argument.Value.Tables?.ToDictionary(t => t.Key, t => BindTables(t.Value, caller, depth));
             bindings[(callee.Id, argument.Key)] = new Binding(services, tables);
         }
@@ -455,7 +453,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 foreach (var (target, state, _) in Dispatch(returned.Call, frame, depth + 1))
                 {
                     if (!graph.Nodes.TryGetValue(target, out var callee)) continue;
-                    var calleeFrame = new Frame(target, state, Bind(returned.Call, frame, callee), frame.Basis, frame.Path, frame.Injected);
+                    var calleeFrame = new Frame(target, state, Bind(returned.Call, frame, callee, depth + 1), frame.Basis, frame.Path, frame.Injected);
                     foreach (var value in callee.Returns) result.AddRange(Resolve(value, calleeFrame, depth + 1));
                 }
                 return result.Count > 0 ? result : [Unknown($"service is returned by '{ShortName(returned.Call.Target)}'")];
@@ -487,7 +485,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         var state = new ObjectState(constructor.ReceiverType);
         if (depth <= MaxDepth && graph.Nodes.TryGetValue(constructor.Target, out var node))
         {
-            RunConstructor(node, Bind(constructor, caller, node), state, caller.Injected, depth + 1);
+            RunConstructor(node, Bind(constructor, caller, node, depth), state, caller.Injected, depth + 1);
         }
         return state.Freeze();
     }
@@ -540,7 +538,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         {
             if (graph.Nodes.TryGetValue(call.Target, out var chained) && chained.Id != constructor.Id)
             {
-                RunConstructor(chained, Bind(call, frame, chained), state, injected, depth + 1);
+                RunConstructor(chained, Bind(call, frame, chained, depth), state, injected, depth + 1);
             }
         }
 

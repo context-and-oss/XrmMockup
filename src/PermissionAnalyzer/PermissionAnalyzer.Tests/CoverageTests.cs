@@ -302,6 +302,21 @@ public class CoverageTests
     }
 
     [Fact]
+    public void TablesNoRoleGovernsAreCoveredForIdentitiesWithoutRoles()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c => c.OrganizationService.Create(new Entity("ctx_log")));
+            }
+            """, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions());
+
+        Assert.Equal(["ctx_log:Create as Caller: NotGoverned"], Results(report, Assert.Single(manifest.EntryPoints)));
+        Assert.Equal(0, report.Summary.NotChecked);
+    }
+
+    [Fact]
     public void SuppressedPrivilegesDontFail()
     {
         var manifest = Analyze.Code(PluginSource, Governed);

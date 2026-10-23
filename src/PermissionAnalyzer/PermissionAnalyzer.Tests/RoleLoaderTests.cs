@@ -40,7 +40,7 @@ public class RoleLoaderTests
                 {
                     Name = "Salesperson",
                     Privileges = [],
-                    GlobalPrivileges = old ? null : new(),
+                    GlobalPrivileges = old ? null! : new(),
                 });
             }
 

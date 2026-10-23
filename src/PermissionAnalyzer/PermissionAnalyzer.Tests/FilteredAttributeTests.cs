@@ -180,6 +180,21 @@ public class FilteredAttributeTests
         Assert.Empty(manifest.Entry("method:Contoso.Importer.Run(IOrganizationService)").Triggers);
     }
 
+    [Fact]
+    public void FilterOfAStepRegisteredByMessageNameIgnoresCase()
+    {
+        var manifest = Analyze.Code("""
+            public class AccountPlugin : Plugin
+            {
+                public AccountPlugin() =>
+                    RegisterPluginStep<Account>("update", ExecutionStage.PostOperation, c => c.OrganizationService.Delete("lead", Guid.Empty))
+                        .AddFilteredAttributes("Name");
+            }
+            """);
+
+        Assert.Equal(["name"], Assert.Single(manifest.EntryPoints).Trigger!.FilteredAttributes);
+    }
+
     private static EntryPoint Run(string members, string parameter = "")
     {
         var manifest = Analyze.Code(

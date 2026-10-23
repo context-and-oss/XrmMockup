@@ -101,16 +101,7 @@ public static class CoverageEvaluator
                 var roles = IdentityOf(identity);
                 var result = Check(requirement, roles, notGoverned, options.Suppress);
                 coverage.Add(requirement, result);
-                if (result.Status == CoverageStatus.Missing)
-                {
-                    var key = (requirement.Table, requirement.Privilege, identity, roles.Roles!.ToString());
-                    if (!missing.TryGetValue(key, out var found))
-                    {
-                        found = (roles.Roles, new SortedSet<string>(StringComparer.Ordinal));
-                        missing.Add(key, found);
-                    }
-                    found.In.Add(id);
-                }
+                if (result.Status == CoverageStatus.Missing) AddMissing(missing, (requirement.Table, requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
             }
 
             foreach (var requirement in globalRequirements)
@@ -119,16 +110,7 @@ public static class CoverageEvaluator
                 var roles = IdentityOf(identity);
                 var result = Check(requirement, roles, options.Suppress);
                 globalCoverage.Add(requirement, result);
-                if (result.Status == CoverageStatus.Missing)
-                {
-                    var key = (requirement.Privilege, identity, roles.Roles!.ToString());
-                    if (!missingGlobal.TryGetValue(key, out var found))
-                    {
-                        found = (roles.Roles, new SortedSet<string>(StringComparer.Ordinal));
-                        missingGlobal.Add(key, found);
-                    }
-                    found.In.Add(id);
-                }
+                if (result.Status == CoverageStatus.Missing) AddMissing(missingGlobal, (requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
             }
 
             var needsRole = unresolved.Where(u => u.RunsAs.Kind != RunsAsKind.System).ToList();
@@ -191,12 +173,22 @@ public static class CoverageEvaluator
             return result != 0 ? result : string.CompareOrdinal(x.Roles, y.Roles);
         });
 
+    /// <summary>
+    /// Records that <paramref name="id"/> needs a privilege <paramref name="roles"/> lack.
+    /// </summary>
+    private static void AddMissing<TKey>(SortedDictionary<TKey, (RoleSet Roles, SortedSet<string> In)> missing, TKey key, RoleSet roles, string id)
+    {
+        if (!missing.TryGetValue(key, out var found)) missing.Add(key, found = (roles, new SortedSet<string>(StringComparer.Ordinal)));
+        found.In.Add(id);
+    }
+
     private static RequirementCoverage Check(Requirement requirement, IdentityRoles identity, HashSet<string> notGoverned, IReadOnlyList<Suppression> suppress)
     {
         if (requirement.RunsAs.Kind == RunsAsKind.System) return new RequirementCoverage(CoverageStatus.System);
+        // No role can grant a table no role governs, whatever roles the identity has
+        if (notGoverned.Contains(requirement.Table)) return new RequirementCoverage(CoverageStatus.NotGoverned);
         if (identity.Roles is not { } roles) return new RequirementCoverage(CoverageStatus.NotChecked);
         if (roles.Depth(requirement.Table, requirement.Privilege) is { } depth) return new RequirementCoverage(CoverageStatus.Granted, depth);
-        if (notGoverned.Contains(requirement.Table)) return new RequirementCoverage(CoverageStatus.NotGoverned);
 
         return suppress.FirstOrDefault(s => s.Matches(requirement)) is { } suppression
             ? new RequirementCoverage(CoverageStatus.Suppressed, Reason: suppression.Reason)

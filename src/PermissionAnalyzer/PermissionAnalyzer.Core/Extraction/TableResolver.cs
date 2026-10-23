@@ -69,8 +69,7 @@ internal sealed class TableResolver(
             IPropertyReferenceOperation { Property.Name: "PrimaryEntityName" } property
                 when symbols.Is(property.Property.ContainingType, symbols.ExecutionContext) =>
                 TableResolution.Slot(new TableSlot(TableSlot.PrimaryEntity, 0, TableShape.Name, Describe(op, "table name"))),
-            IConditionalOperation { WhenFalse: { } whenFalse } conditional => Name(conditional.WhenTrue).Add(Name(whenFalse)),
-            ICoalesceOperation coalesce => Name(coalesce.Value).Add(Name(coalesce.WhenNull)),
+            _ when Branches(op) is { } branches => Union(branches, Name),
             _ => Unknown(op, "table name", TableShape.Name),
         };
     }
@@ -112,18 +111,14 @@ internal sealed class TableResolver(
             case IInvocationOperation { TargetMethod.Name: "ToEntityReference", Instance: { } instance }:
                 return Entity(instance);
 
-            case IPropertyReferenceOperation { Property.Name: "Entities", Instance: { } records } property
-                when symbols.Is(property.Property.ContainingType, symbols.EntityCollection):
+            case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
                 return Records(records);
 
             case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
                 return EntityElements(source);
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Entity(conditional.WhenTrue).Add(Entity(whenFalse));
-
-            case ICoalesceOperation coalesce:
-                return Entity(coalesce.Value).Add(Entity(coalesce.WhenNull));
+            case { } when Branches(op) is { } branches:
+                return Union(branches, Entity);
 
             // The record Retrieve returns is of the table it is asked for
             case IInvocationOperation retrieve when symbols.ServiceOperation(retrieve.TargetMethod) == "Retrieve":
@@ -179,11 +174,8 @@ internal sealed class TableResolver(
                 return includeLinks && symbols.Is(local.Type, symbols.QueryExpression) ? result.Add(NestedLinks(local)) : result;
             }
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Query(conditional.WhenTrue, includeLinks).Add(Query(whenFalse, includeLinks));
-
-            case ICoalesceOperation coalesce:
-                return Query(coalesce.Value, includeLinks).Add(Query(coalesce.WhenNull, includeLinks));
+            case { } when Branches(op) is { } branches:
+                return Union(branches, v => Query(v, includeLinks));
 
             default:
                 return Unknown(op, "query", includeLinks ? TableShape.Query : TableShape.QueryMainTable);
@@ -216,7 +208,7 @@ internal sealed class TableResolver(
                 return FromLocal(local, EntityReferences, null, (node, symbol) => node switch
                 {
                     IInvocationOperation { TargetMethod.Name: "Add" } add when IsLocal(add.Instance, symbol) =>
-                        add.Arguments.Aggregate(TableResolution.Empty, (result, argument) => result.Add(Entity(argument.Value))),
+                        Union(add.Arguments.Select(a => a.Value), Entity),
                     IInvocationOperation { TargetMethod.Name: var name } call when IsLocal(call.Instance, symbol) && name is "AddRange" or "Insert" or "InsertRange" =>
                         TableResolution.Unresolved($"local '{symbol.Name}' gets records through {name}"),
                     _ => null,
@@ -319,7 +311,7 @@ internal sealed class TableResolver(
             }
 
             case IArrayCreationOperation or ICollectionExpressionOperation:
-                return CollectionElements(op).Aggregate(TableResolution.Empty, (result, element) => result.Add(Requests(element, shape)));
+                return Union(CollectionElements(op), element => Requests(element, shape));
 
             case ILocalReferenceOperation local:
                 return FromLocal(
@@ -338,11 +330,8 @@ internal sealed class TableResolver(
             case IInvocationOperation invocation when IsFramework(invocation):
                 return Passthrough(invocation, t => IsRequestLike(t), value => Requests(value, shape), value => Requests(value, shape)) ?? UnknownRequest(op, shape);
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Requests(conditional.WhenTrue, shape).Add(Requests(whenFalse, shape));
-
-            case ICoalesceOperation coalesce:
-                return Requests(coalesce.Value, shape).Add(Requests(coalesce.WhenNull, shape));
+            case { } when Branches(op) is { } branches:
+                return Union(branches, v => Requests(v, shape));
 
             default:
                 return UnknownRequest(op, shape);
@@ -371,7 +360,7 @@ internal sealed class TableResolver(
         foreach (var name in names)
         {
             result.Add(Unwrap(name)?.ConstantValue is { HasValue: true, Value: string { Length: > 0 } message }
-                ? Apply(RequestRules.MessageOf(message), Members, shape)
+                ? Apply(message, Members, shape)
                 : Other(shape, "request name is computed at runtime"));
         }
         return result;
@@ -410,7 +399,7 @@ internal sealed class TableResolver(
         var privilege = RequestShapes.PrivilegeOf(shape);
         foreach (var check in rule.Checks)
         {
-            if (check.When is { } when && !members(when).Any(v => Unwrap(v)?.ConstantValue is not { HasValue: true, Value: false })) continue;
+            if (check.When is { } when && !members(when).Any(MayBeTrue)) continue;
 
             var needed = privilege is { } p && check.Privileges.Contains(p);
             if (check.AccessMask is { } mask)
@@ -435,9 +424,7 @@ internal sealed class TableResolver(
             }
             else if (check.Member is { } member)
             {
-                var values = members(member);
-                if (values.Count == 0) result.Add(TableResolution.Unresolved($"{member} of the {message} request isn't set where the request is created"));
-                foreach (var value in values) result.Add(MemberTables(value));
+                result.Add(MemberTables(message, member, members(member)));
             }
         }
         return result;
@@ -455,13 +442,12 @@ internal sealed class TableResolver(
         if (primary?.Member is { } member)
         {
             var values = members(member);
-            if (values.Count == 0) tables.Add(TableResolution.Unresolved($"{member} of the {message} request isn't set where the request is created"));
-            foreach (var value in values) tables.Add(MemberTables(value));
+            tables.Add(MemberTables(message, member, values));
 
             // The columns of an entity the request writes, such as the Target of an UpdateRequest
             if (values.Count > 0 && values.All(v => IsEntityLike(Unwrap(v)?.Type) && !symbols.Is(Unwrap(v)?.Type, symbols.EntityReference)))
             {
-                columns = values.Aggregate(TableResolution.Empty, (result, value) => result.Add(Columns(value)));
+                columns = Union(values, Columns);
             }
         }
         else if (primary?.Table is { } table)
@@ -486,7 +472,7 @@ internal sealed class TableResolver(
         bypass = PluginBypass.None;
 
         var plugins = members(BypassCustomPluginExecution);
-        if (plugins.Any(v => Unwrap(v)?.ConstantValue is not { HasValue: true, Value: false }))
+        if (plugins.Any(MayBeTrue))
         {
             result.Add(TableResolution.Global(GlobalRequirement.BypassCustomPlugins, message));
         }
@@ -542,6 +528,17 @@ internal sealed class TableResolver(
         var shapes = op?.Type is { } type ? ShapesOf(type).Where(s => !RequestShapes.IsRequest(s)).ToList() : [];
         return shapes.Count > 0 ? Resolve(op, shapes[0]) : TableResolution.Unresolved(Describe(op, "request member"));
     }
+
+    private TableResolution MemberTables(string message, string member, List<IOperation> values)
+    {
+        if (values.Count == 0) return TableResolution.Unresolved($"{member} of the {message} request isn't set where the request is created");
+        return Union(values, MemberTables);
+    }
+
+    /// <summary>
+    /// Whether a flag can be set: anything but the constant <c>false</c>.
+    /// </summary>
+    private static bool MayBeTrue(IOperation value) => Unwrap(value)?.ConstantValue is not { HasValue: true, Value: false };
 
     /// <summary>
     /// The privileges of the access rights in the member at <paramref name="path"/>, such as
@@ -619,11 +616,11 @@ internal sealed class TableResolver(
                 return [assignment.Value];
 
             case ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: true } indexer } assignment
-                when IsOwnedBy(indexer.Instance) && indexer.Arguments.Length == 1 && IsKey(indexer.Arguments[0].Value, member):
+                when IsOwnedBy(indexer.Instance) && indexer.Arguments.Length == 1 && Key(indexer.Arguments[0].Value) == member:
                 return [assignment.Value];
 
             case IInvocationOperation { TargetMethod.Name: "Add", Arguments.Length: 2 } add
-                when IsOwnedBy(add.Instance) && IsKey(add.Arguments[0].Value, member):
+                when IsOwnedBy(add.Instance) && Key(add.Arguments[0].Value) == member:
                 return [add.Arguments[1].Value];
 
             case IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" } add
@@ -657,8 +654,6 @@ internal sealed class TableResolver(
         }
     }
 
-    private static bool IsKey(IOperation operation, string member) => operation.ConstantValue is { HasValue: true, Value: string key } && key == member;
-
     private static bool IsImplicitReceiver(IOperation? operation) => operation is IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ImplicitReceiver };
 
     /// <summary>
@@ -685,8 +680,7 @@ internal sealed class TableResolver(
             case IInvocationOperation invocation when symbols.ServiceOperation(invocation.TargetMethod) == "RetrieveMultiple":
                 return Query(invocation.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == 0), includeLinks: false).OrUnresolved("query has no table name");
 
-            case IPropertyReferenceOperation { Property.Name: "Entities", Instance: { } records } property
-                when symbols.Is(property.Property.ContainingType, symbols.EntityCollection):
+            case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
                 return Records(records);
 
             case IObjectCreationOperation creation:
@@ -705,15 +699,12 @@ internal sealed class TableResolver(
             }
 
             case IArrayCreationOperation or ICollectionExpressionOperation:
-                return CollectionElements(op).Aggregate(TableResolution.Empty, (result, element) => result.Add(EntityOrRecords(element)));
+                return Union(CollectionElements(op), EntityOrRecords);
 
             case ILocalReferenceOperation local:
                 return FromLocal(local, Records, Records, (node, symbol) => node switch
                 {
-                    IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" or "Insert" or "InsertRange" } add
-                        when IsLocal(add.Instance, symbol) || (Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: "Entities" } entities && IsLocal(entities.Instance, symbol)) =>
-                        add.Arguments.Where(a => IsEntityLike(Unwrap(a.Value)?.Type) || IsRecordsLike(Unwrap(a.Value)?.Type))
-                            .Aggregate(TableResolution.Empty, (result, a) => result.Add(EntityOrRecords(a.Value))),
+                    _ when Added(node, symbol, EntityOrRecords) is { } added => added,
                     ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: "EntityName" } property } assignment when IsLocal(property.Instance, symbol) =>
                         Name(assignment.Value),
                     _ => null,
@@ -725,11 +716,8 @@ internal sealed class TableResolver(
             case IInvocationOperation invocation when IsFramework(invocation):
                 return Passthrough(invocation, t => IsRecordsLike(t) || IsEntityLike(t), Records, EntityOrRecords) ?? Unknown(op, "records", TableShape.Records);
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Records(conditional.WhenTrue).Add(Records(whenFalse));
-
-            case ICoalesceOperation coalesce:
-                return Records(coalesce.Value).Add(Records(coalesce.WhenNull));
+            case { } when Branches(op) is { } branches:
+                return Union(branches, Records);
 
             default:
                 return Unknown(op, "records", TableShape.Records);
@@ -778,10 +766,9 @@ internal sealed class TableResolver(
             }
 
             case IArrayCreationOperation or ICollectionExpressionOperation:
-                return CollectionElements(op).Aggregate(TableResolution.Empty, (result, element) => result.Add(Lookups(element, shape)));
+                return Union(CollectionElements(op), element => Lookups(element, shape));
 
-            case IPropertyReferenceOperation { Property.Name: "Entities", Instance: { } records } property
-                when symbols.Is(property.Property.ContainingType, symbols.EntityCollection):
+            case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
                 return Lookups(records, shape);
 
             case IInvocationOperation { TargetMethod.Name: "ToEntity", Instance: { } instance } when IsEntityLike(instance.Type):
@@ -789,13 +776,8 @@ internal sealed class TableResolver(
 
             case ILocalReferenceOperation local:
             {
-                var result = FromLocal(local, value => Lookups(value, shape), collection => Lookups(collection, shape), (node, symbol) =>
-                    node is IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" or "Insert" or "InsertRange" } add
-                    && (IsLocal(add.Instance, symbol) || (Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: "Entities" } entities && IsLocal(entities.Instance, symbol)))
-                        ? add.Arguments.Where(a => IsEntityLike(Unwrap(a.Value)?.Type) || IsRecordsLike(Unwrap(a.Value)?.Type))
-                            .Aggregate(TableResolution.Empty, (result, a) => result.Add(Lookups(a.Value, shape)))
-                        : null,
-                    silent: true);
+                var result = FromLocal(local, value => Lookups(value, shape), collection => Lookups(collection, shape),
+                    (node, symbol) => Added(node, symbol, value => Lookups(value, shape)), silent: true);
 
                 // Lookups set through the local, once it is no longer being resolved, so its table can be
                 return IsEntityLike(local.Type)
@@ -818,11 +800,8 @@ internal sealed class TableResolver(
             case IInvocationOperation invocation when IsFramework(invocation):
                 return Passthrough(invocation, t => IsEntityLike(t) || IsRecordsLike(t), value => Lookups(value, shape), value => Lookups(value, shape)) ?? TableResolution.Empty;
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Lookups(conditional.WhenTrue, shape).Add(Lookups(whenFalse, shape));
-
-            case ICoalesceOperation coalesce:
-                return Lookups(coalesce.Value, shape).Add(Lookups(coalesce.WhenNull, shape));
+            case { } when Branches(op) is { } branches:
+                return Union(branches, v => Lookups(v, shape));
 
             default:
                 return Unknown(op, "entity", shape, silent: true);
@@ -845,7 +824,7 @@ internal sealed class TableResolver(
 
             case IObjectCreationOperation creation when IsEntityLike(creation.Type):
                 return creation.Initializer is { } members
-                    ? Inside(members).Aggregate(TableResolution.Empty, (result, node) => result.Add(ColumnsSet(node, IsImplicitReceiver, null)))
+                    ? Union(Inside(members), node => ColumnsSet(node, IsImplicitReceiver, null))
                     : TableResolution.Empty;
 
             case IInvocationOperation { TargetMethod.Name: "ToEntity", Instance: { } instance } when IsEntityLike(instance.Type):
@@ -862,11 +841,8 @@ internal sealed class TableResolver(
                 return result;
             }
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Columns(conditional.WhenTrue).Add(Columns(whenFalse));
-
-            case ICoalesceOperation coalesce:
-                return Columns(coalesce.Value).Add(Columns(coalesce.WhenNull));
+            case { } when Branches(op) is { } branches:
+                return Union(branches, Columns);
 
             default:
                 return Unknown(op, "entity", TableShape.Columns);
@@ -922,13 +898,16 @@ internal sealed class TableResolver(
         return result;
     }
 
+    // XrmMockup doesn't check AppendTo on the owner a lookup sets, so ownerid is no lookup here
+    private const string OwnerColumn = "ownerid";
+
     /// <summary>
     /// The lookup <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, with its column when
     /// known, where the value is an <c>EntityReference</c> (see <see cref="SetColumn"/>).
     /// </summary>
     private IEnumerable<(string? Column, IOperation Value)> SetLookup(IOperation node, Func<IOperation?, bool> isObject)
     {
-        if (SetColumn(node, isObject) is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != "ownerid") yield return lookup;
+        if (SetColumn(node, isObject) is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != OwnerColumn) yield return lookup;
     }
 
     /// <summary>
@@ -970,6 +949,22 @@ internal sealed class TableResolver(
     private static string? Key(IOperation operation) => operation.ConstantValue is { HasValue: true, Value: string key } ? key : null;
 
     private TableResolution EntityOrRecords(IOperation value) => IsEntityLike(Unwrap(value)?.Type) ? Entity(value) : Records(value);
+
+    /// <summary>
+    /// The collection whose <c>EntityCollection.Entities</c> <paramref name="property"/> reads.
+    /// </summary>
+    private IOperation? EntitiesOf(IPropertyReferenceOperation property) =>
+        property is { Property.Name: "Entities", Instance: { } records } && symbols.Is(property.Property.ContainingType, symbols.EntityCollection) ? records : null;
+
+    /// <summary>
+    /// The entities and collections of them that <paramref name="node"/> adds to the local <paramref name="symbol"/>
+    /// or to its <c>Entities</c>, read with <paramref name="resolve"/>; <c>null</c> when it adds none.
+    /// </summary>
+    private TableResolution? Added(IOperation node, ILocalSymbol symbol, Func<IOperation, TableResolution> resolve) =>
+        node is IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" or "Insert" or "InsertRange" } add
+        && (IsLocal(add.Instance, symbol) || (Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: "Entities" } entities && IsLocal(entities.Instance, symbol)))
+            ? Union(add.Arguments.Select(a => a.Value).Where(v => IsEntityLike(Unwrap(v)?.Type) || IsRecordsLike(Unwrap(v)?.Type)), resolve)
+            : null;
 
     /// <summary>
     /// What a framework call such as <c>ToList</c>, <c>Chunk</c> or <c>Select</c> passes on from the collections it
@@ -1040,14 +1035,7 @@ internal sealed class TableResolver(
     private TableResolution Elements(IOperation? operation)
     {
         var op = Unwrap(operation);
-        var elements = op switch
-        {
-            IArrayCreationOperation { Initializer: { } initializer } => initializer.ElementValues,
-            ICollectionExpressionOperation collection => collection.Elements,
-            _ => default(IEnumerable<IOperation>?),
-        };
-
-        if (elements is not null) return elements.Aggregate(TableResolution.Empty, (result, element) => result.Add(EntityOrRecords(element is ISpreadOperation spread ? spread.Operand : element)));
+        if (op is IArrayCreationOperation { Initializer: not null } or ICollectionExpressionOperation) return Union(CollectionElements(op), EntityOrRecords);
         return IsRecordsLike(op?.Type) && !symbols.Is(op?.Type, symbols.EntityReferenceCollection) ? Records(op) : Unknown(op, "related records", TableShape.EntityReferences);
     }
 
@@ -1097,7 +1085,8 @@ internal sealed class TableResolver(
 
             case ILocalReferenceOperation local:
             {
-                if (!_visiting.Add(local.Local)) return [];
+                // A local built from itself, such as links = links + "...", repeats a part the analysis can't count
+                if (!_visiting.Add(local.Local)) return topLevel ? [] : [Hole.ToString()];
                 try
                 {
                     var templates = new List<string>();
@@ -1114,11 +1103,8 @@ internal sealed class TableResolver(
                 }
             }
 
-            case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                return Templates(conditional.WhenTrue, topLevel, failures, includeLinks).Concat(Templates(whenFalse, topLevel, failures, includeLinks)).ToList();
-
-            case ICoalesceOperation coalesce:
-                return Templates(coalesce.Value, topLevel, failures, includeLinks).Concat(Templates(coalesce.WhenNull, topLevel, failures, includeLinks)).ToList();
+            case { } when Branches(op) is { } branches:
+                return branches.SelectMany(b => Templates(b, topLevel, failures, includeLinks)).ToList();
 
             default:
                 if (!topLevel) return [Hole.ToString()];
@@ -1218,6 +1204,10 @@ internal sealed class TableResolver(
                     values.Add(new LocalValue(assignment.Value, false));
                     break;
 
+                case ICoalesceAssignmentOperation coalesce when IsLocal(coalesce.Target, local):
+                    values.Add(new LocalValue(coalesce.Value, false));
+                    break;
+
                 case ICompoundAssignmentOperation compound when IsLocal(compound.Target, local):
                     failures.Add(TableResolution.Unresolved($"local '{local.Name}' is changed by a compound assignment"));
                     break;
@@ -1265,9 +1255,7 @@ internal sealed class TableResolver(
             .Where(a => a.Target is IPropertyReferenceOperation property && property.Property.Name == member)
             .ToList();
 
-        return assignments is { Count: > 0 }
-            ? assignments.Aggregate(TableResolution.Empty, (result, assignment) => result.Add(resolve(assignment.Value)))
-            : null;
+        return assignments is { Count: > 0 } ? Union(assignments.Select(a => a.Value), resolve) : null;
     }
 
     private static IArgumentOperation? FirstStringArgument(IOperation call)
@@ -1336,6 +1324,19 @@ internal sealed class TableResolver(
     private static bool IsParameter(IOperation? operation, IParameterSymbol parameter) =>
         Unwrap(operation) is IParameterReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Parameter, parameter);
 
+    /// <summary>
+    /// The values a conditional or coalesce can take; <c>null</c> for any other value.
+    /// </summary>
+    private static IOperation[]? Branches(IOperation? operation) => operation switch
+    {
+        IConditionalOperation { WhenFalse: { } whenFalse } conditional => [conditional.WhenTrue, whenFalse],
+        ICoalesceOperation coalesce => [coalesce.Value, coalesce.WhenNull],
+        _ => null,
+    };
+
+    private static TableResolution Union(IEnumerable<IOperation> values, Func<IOperation, TableResolution> resolve) =>
+        values.Aggregate(TableResolution.Empty, (result, value) => result.Add(resolve(value)));
+
     private static IOperation Root(IOperation operation)
     {
         while (operation.Parent is not null) operation = operation.Parent;
@@ -1367,7 +1368,7 @@ internal sealed class TableResolver(
             IFieldReferenceOperation field => field.Field.Name,
             _ => "an indexer",
         };
-        var arguments = indexer.Arguments.Select(a => a.Value.ConstantValue is { HasValue: true, Value: string key } ? $"\"{key}\"" : "…");
+        var arguments = indexer.Arguments.Select(a => Key(a.Value) is { } key ? $"\"{key}\"" : "…");
         return $"{target}[{string.Join(", ", arguments)}]";
     }
 

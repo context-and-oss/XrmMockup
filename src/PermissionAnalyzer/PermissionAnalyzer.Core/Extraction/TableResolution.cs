@@ -285,14 +285,35 @@ internal static class RequestShapes
     public static IReadOnlyList<TableShape> All { get; } =
         [.. Enum.GetValues(typeof(Privilege)).Cast<Privilege>().Select(For), TableShape.RequestOther];
 
-    public static TableShape For(Privilege privilege) => TableShape.RequestCreate + (int)privilege;
+    public static TableShape For(Privilege privilege) => privilege switch
+    {
+        Privilege.Create => TableShape.RequestCreate,
+        Privilege.Read => TableShape.RequestRead,
+        Privilege.Write => TableShape.RequestWrite,
+        Privilege.Delete => TableShape.RequestDelete,
+        Privilege.Append => TableShape.RequestAppend,
+        Privilege.AppendTo => TableShape.RequestAppendTo,
+        Privilege.Assign => TableShape.RequestAssign,
+        Privilege.Share => TableShape.RequestShare,
+        _ => throw new ArgumentOutOfRangeException(nameof(privilege), privilege, null),
+    };
 
     /// <summary>
     /// The privilege a request shape is read for; <c>null</c> for <see cref="TableShape.RequestOther"/> and the
     /// other shapes.
     /// </summary>
-    public static Privilege? PrivilegeOf(TableShape shape) =>
-        shape is >= TableShape.RequestCreate and < TableShape.RequestOther ? (Privilege)(shape - TableShape.RequestCreate) : null;
+    public static Privilege? PrivilegeOf(TableShape shape) => shape switch
+    {
+        TableShape.RequestCreate => Privilege.Create,
+        TableShape.RequestRead => Privilege.Read,
+        TableShape.RequestWrite => Privilege.Write,
+        TableShape.RequestDelete => Privilege.Delete,
+        TableShape.RequestAppend => Privilege.Append,
+        TableShape.RequestAppendTo => Privilege.AppendTo,
+        TableShape.RequestAssign => Privilege.Assign,
+        TableShape.RequestShare => Privilege.Share,
+        _ => null,
+    };
 
     public static bool IsRequest(TableShape shape) => shape >= TableShape.RequestCreate;
 }

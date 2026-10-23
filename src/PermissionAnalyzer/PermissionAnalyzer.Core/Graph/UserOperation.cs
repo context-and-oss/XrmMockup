@@ -35,6 +35,8 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
 
         var fired = TableResolution.Empty;
         foreach (var message in rule.Messages) fired.Add(TableResolution.Fires(message, table, columns));
+        foreach (var global in rule.GlobalPrivileges) fired.Add(TableResolution.Global(global, Message));
+        foreach (var assumption in rule.Assumptions) fired.Add(TableResolution.Assumed(assumption));
         node.Accesses.Add(Access(fired));
 
         foreach (var missing in rule.Missing) node.Accesses.Add(Access(TableResolution.Unresolved(RequestReasons.NoRule(missing))));
@@ -81,10 +83,12 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
         {
             foreach (var name in target) referred.Add(target.Count == 1 ? TableResolution.Table(name) : TableResolution.LookupTarget(name));
         }
-        yield return new AccessFact(Message, Location, [Privilege.AppendTo], referred, "lookup value: ", Service);
+        yield return Access(referred, "lookup value: ", Privilege.AppendTo);
     }
 
-    private AccessFact Access(TableResolution tables, params Privilege[] privileges) => new(Message, Location, privileges, tables, "", Service);
+    private AccessFact Access(TableResolution tables, params Privilege[] privileges) => Access(tables, "", privileges);
+
+    private AccessFact Access(TableResolution tables, string reasonPrefix, params Privilege[] privileges) => new(Message, Location, privileges, tables, reasonPrefix, Service);
 
     private static IReadOnlyList<ServiceOrigin> Service { get; } = [new FixedOrigin(RunsAs.Caller)];
 }
