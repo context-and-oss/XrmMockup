@@ -6,18 +6,21 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
-  run-ci:
+  ci:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: windows-latest
 
     steps:
       - name: Get latest code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.x
@@ -54,7 +57,7 @@ jobs:
         run: dotnet pack src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj --configuration Release --no-build --output ./nupkg
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages
           path: ./nupkg
