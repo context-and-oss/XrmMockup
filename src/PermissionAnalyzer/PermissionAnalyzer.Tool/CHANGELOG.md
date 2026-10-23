@@ -6,56 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### v1.0.0-rc.1 - 23 October 2026
-* Add: `required` command, which lists the table privileges each method needs for its direct `IOrganizationService` calls (`Create`, `Retrieve`, `RetrieveMultiple`, `Update`, `Delete`, `Associate`, `Disassociate` and their async forms)
-* Add: Table resolution from early-bound types, constants, `new Entity("…")`, query expressions, FetchXML, assignments to locals in the same method and loops over `RetrieveMultiple` results. Anything else is reported as unresolved, with the reason
-* Add: Text and JSON output (`--format`), and tables that no downloaded security role mentions
-* Add: Configuration under `XrmMockup:Permissions` in `appsettings.json` (`Solution`, `MetadataDirectory`, `ExcludeProjects`)
-* Add: `--exclude` to leave out projects, such as test projects, by name or path pattern
-* Add: Entry point discovery: XrmPluginCore plugin steps and custom APIs, plugin steps from `Metadata.xml`, code activities and Azure Functions (isolated and in-process). Requirements are now listed per entry point
-* Add: Call graph across the solution, following services and tables passed as arguments, fields and constructor parameters, with the call path shown for each source
-* Add: Dependency injection resolution of interface calls, falling back to every implementation (basis `all-implementations`)
-* Add: The identity each requirement runs as (`Caller`, `User`, `ApplicationUser`, `ImpersonatedCaller`, `System`), including impersonation from `SetUserContext` and plugin step metadata, with assumptions listed when it can't be determined
-* Add: `--plugin`, `--custom-api`, `--function` and `--entry` to analyze one entry point, and the `EntryPoints` setting for extra entry methods
-* Add: Methods with service calls that no entry point reaches are listed separately
-* Add: `--verbosity` (`-v`). By default the text report shows only the privileges to change: per set of roles, what it lacks across every entry point, a line per table. Higher levels show more: `compact` adds the entry points that need them, grouped when they need the same; `normal` lists what needs attention per entry point (missing, unchecked and unverifiable requirements and unresolved operations), with up to three source locations and no call paths; `detailed` adds the granted requirements, assumptions, fired steps and privileges per table; `full` adds every source and call path, as before. The last line says what was left out. JSON is always complete
-* Add: `--table`, `--privilege`, `--runs-as` and `--basis` narrow the text and JSON report to some requirements. They apply after analysis, so the counts, the result and the exit code don't change
-* Add: `--format markdown`, the report as GitHub-flavored Markdown for a pull request comment or job summary: the result, a table per set of roles with what it lacks, and the entry points that need it and the unresolved operations folded away
-* Add: `--format sarif`, the findings as SARIF 2.1.0 for GitHub code scanning: missing privileges as errors (suppressed ones with their reason), unresolved operations as warnings and unchecked or unverifiable privileges as notes, at the call site, with the entry points that reach it as related locations. Paths are relative to the git repository
-* Change: `--solution` also takes a project (`.csproj`), analyzed with the projects it references, so entry points reach code in shared libraries. Methods in those libraries that the project doesn't reach aren't listed as unreached. `--project` is removed
-* Change: A missing metadata folder is a warning, because security roles and plugin steps are then not used
-* Add: `check` command, which checks the requirements against security roles from the metadata, per identity: `--role` for the caller and the application user, `--caller-role` for users acted for through `CallerId`, and the `Principals` and `Users` settings. Exits with `1` when a privilege is missing; `--strict` also fails on unresolved operations, unchecked identities and unverifiable privileges
-* Add: `--role` and `--caller-role` on `required`, which mark each requirement as granted or missing without changing the exit code
-* Add: `Principals`, `Users` and `Suppress` settings under `XrmMockup:Permissions`
-* Add: Unknown role names are an error that suggests the closest names
-* Add: Table resolution through the values helper methods return, with the arguments of each call, and through type arguments of generic methods
-* Add: A `Not checked` line after the result, listing unresolved operations, identities without roles, the impersonation privilege and Append/AppendTo, and `unresolvedExecute` and `incomplete` in the JSON result. `check` warns when it passes with something not checked
-* Add: A `Missing privileges` list after the result, with each missing privilege once, the roles that lack it and the entry points that need it, also as `missing` in JSON. The `check` error names the missing privileges
-* Change: The counts line names unreached methods and counts distinct table privileges next to the requirements per entry point and method
-* Add: Requests passed to `Execute` are checked against rules for their message, including `Upsert`, the `*Multiple` requests, `ExecuteMultiple`/`ExecuteTransaction`, `Assign`, `SetState`, `GrantAccess`, `QualifyLead` and others. Requests are followed through locals, helpers, parameters and collections, and requests that need no table privilege are no longer reported
-* Add: `Rules` setting under `XrmMockup:Permissions`, to add rules for custom messages or replace built-in ones
-* Change: Requests without a rule and custom API calls are counted apart under `Not checked`, and as `unresolvedNoRule` and `unresolvedCustomApi` in the JSON result instead of `unresolvedExecute`
-* Add: Append on the record and AppendTo on the referenced table for lookups set on records that are created or updated, directly or through requests. Lookups are found on early-bound properties, indexers and `Attributes.Add`, and followed through locals, collections, helpers and parameters
-* Add: Lookup targets are read from the entity metadata in the metadata folder, and give the table of a lookup value that can't be resolved; every target of a polymorphic lookup is included with basis `all-lookup-targets`
-* Change: The `Not checked` line no longer lists Append/AppendTo, and is left out when everything was checked
-* Fix: A `null` entity or reference passed to a helper is no longer reported as unresolved
-* Fix: A local passed to the call it is assigned from, such as `entity = Prepare(entity)`, no longer overflows the stack
-* Add: Plugin cascades: each entry point includes the requirements of the plugin steps and custom APIs its operations fire, directly or through other steps, under the identity of the operation that fired them unless the step impersonates. The fired steps are listed after `fires:`, and as `triggers` in JSON
-* Add: Requests fire the steps of the messages they run as, such as `Create` and `Update` for `Upsert`. An operation on an unknown table fires only the steps without a table, and reports the others as unresolved
-* Add: Update steps with filtered attributes, from `AddFilteredAttributes` or the metadata, fire only for updates that set one of them, and with basis `filter-unknown` when the columns set can't all be determined
-* Add: A metadata plugin step that fires but whose code isn't loaded is reported as unresolved
-* Add: `--operation "<message> <table>"` analyzes a user operation, such as `Update account`, as the caller: the privileges of its request rule and of every plugin step it fires. `--attributes` gives the columns it sets, which decide the filtered Update steps it fires and the lookups it needs `Append` and `AppendTo` for
-* Add: `--plugin-solution` and the `PluginSolutions` setting load plugin code from other solutions, such as the plugins an Azure Function app fires, for plugin cascades only. Their entry points and unreached methods aren't listed unless a scope selects them, and their files are shown relative to the analyzed solution
-* Add: .NET Framework projects load outside Windows, with the reference assemblies from the `Microsoft.NETFramework.ReferenceAssemblies.net*` packages in the NuGet cache, and strong-name signing is ignored so a missing key file doesn't stop compilation
-* Change: The warning for a project that doesn't compile shows its first errors
-* Add: Table resolution through the record `Retrieve` returns, early-bound lookup properties (from the lookup's targets in the metadata) and `PrimaryEntityName` in plugin steps
-* Add: `OrganizationServiceContext` calls, including generated contexts: `CreateQuery`, query properties such as `AccountSet`, LINQ joins, `AddObject`, `UpdateObject`, `DeleteObject`, `AddLink`, `DeleteLink`, `AddRelatedObject`, `LoadProperty` (unresolved) and `Execute`. A context runs as the service it's created with
-* Add: Table resolution through type arguments of generic types, such as `Repository<Contact>`, including subclasses, overrides and calls through generic interfaces
-* Add: Custom API execute privileges, from `WithExecutePrivilege<T>`, `WithExecutePrivilege(schemaName, privilege)` and `WithExecutePrivilegeName` on the registration, or from `PrivilegeCatalog.xml` for custom APIs whose code isn't analyzed. Calls need them with basis `execute-privilege`, and so does the custom API's own entry point. Names are looked up in the catalog; one that can't be is reported as unresolved
-* Add: Privileges not tied to a table, such as `prvActOnBehalfOfAnotherUser`, are listed per entry point and checked against the roles' global privileges from the metadata. They are `unverifiable` with roles from metadata that predates them
-* Change: `prvActOnBehalfOfAnotherUser` for setting `CallerId` is a requirement of the identity that sets it, instead of the `!` line and the JSON `impersonation` property
-* Add: `Suppress` accepts a privilege not tied to a table by name, without `Table`
-* Add: Requests that need a privilege not tied to a table: `BulkDelete`, `ImportSolution`, `ExportSolution`, `PublishXml`, `PublishAllXml`, `ExecuteWorkflow`, `DeleteRecordChangeHistory`, `DeleteAuditData`, the audit history requests, and `prvMerge` for `Merge`. The privileges are looked up in the privilege catalog
-* Add: `GlobalPrivileges` and `Assumption` on configured request rules
-* Add: The bypass parameters `BypassCustomPluginExecution`, `BypassBusinessLogicExecution` and `BypassBusinessLogicExecutionStepIds` need `prvBypassCustomPlugins` or `prvBypassCustomBusinessLogic`, and the plugin steps they bypass don't run in the cascade. A step's mode is read from `SetExecutionMode` and the metadata
-* Add: Setting `overriddencreatedon` on a created record needs `prvOverrideCreatedOnCreatedBy`
-* Add: `SendEmail` lists the assumption that the email is sent as the caller, since sending as another user needs `prvSendAsUser`
+* Add: `required` command, which lists the Dataverse table privileges, and privileges not tied to a table, that a solution or project needs, found by static analysis of its `IOrganizationService`, request and `OrganizationServiceContext` calls
+* Add: `check` command, which checks them against security roles from the XrmMockup metadata and exits with `1` when a privilege is missing (`--strict` also fails on what couldn't be checked)
+* Add: Entry points (XrmPluginCore plugin steps and custom APIs, plugin steps from the metadata, code activities and Azure Functions), followed through the call graph and dependency injection, with the identity each operation runs as
+* Add: Plugin cascades, including filtered attributes, bypass parameters and plugin code from other solutions (`--plugin-solution`)
+* Add: Scopes to analyze one entry point or user operation (`--plugin`, `--custom-api`, `--function`, `--entry`, `--operation`)
+* Add: Roles per identity from `--role`, `--caller-role` and the `Principals` and `Users` settings, with `Suppress` and `Rules` for custom messages, under `XrmMockup:Permissions` in `appsettings.json`
+* Add: Text, JSON, Markdown and SARIF output (`--format`), with `--verbosity` levels and `--table`, `--privilege`, `--runs-as` and `--basis` filters. The default shows only the privileges to change per role
+* Add: Operations whose table can't be determined are reported as unresolved, with the reason
