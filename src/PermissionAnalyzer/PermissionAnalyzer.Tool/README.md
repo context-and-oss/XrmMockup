@@ -35,9 +35,26 @@ xrmmockup-permissions required
 Example output:
 
 ```
+Caller needs:
+  account  Read
+  contact  Create
+
+1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
+Not shown: entry points, sources and requirements with nothing to fix. --verbosity compact adds the entry points, normal the sources, detailed everything
+```
+
+The output lists the privileges each identity needs (see [Runs as](#runs-as)), a line per table
+with its privileges in the order the role editor shows them; SYSTEM needs no role, so it isn't
+listed. The last line but one counts distinct table privileges, and separately each requirement
+once per entry point or unreached method that needs it.
+
+`--verbosity compact` adds the entry points that need the privileges, and `--verbosity normal` lists
+each entry point's requirements with where the call is:
+
+```
 plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation  src/Plugins/AccountPostPlugin.cs:14
   account   Read    Caller  src/Plugins/AccountPostPlugin.cs:20
-  contact   Create  Caller  src/Services/ContactService.cs:31 (AccountPostPlugin.ctor (lambda, line 16) → ContactService.CreateFor)
+  contact   Create  Caller  src/Services/ContactService.cs:31
   task      Create  System  src/Plugins/AccountPostPlugin.cs:44
   ? Update [Write] as Caller: entity comes from InputParameters["Target"]  src/Plugins/AccountPostPlugin.cs:40
 
@@ -47,18 +64,20 @@ Privileges per table
   task      Create
 
 1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
+Not shown: every source and call path. --verbosity full adds them
 ```
 
-The last line counts distinct table privileges, and separately each requirement once per entry point
-or unreached method that needs it.
+At `normal`, each entry point lists its requirements with the identity they run as and where the
+call is, up to three locations. With `--verbosity full`, every location is listed, and a call
+in another method shows the call path from the entry point after it, such as
+`(AccountPostPlugin.ctor (lambda, line 16) → ContactService.CreateFor)`. See
+[Verbosity and filters](#verbosity-and-filters) for what each level shows.
 
-Each entry point lists its requirements with the identity they run as (see [Runs as](#runs-as)) and
-where the call is. A call in another method shows the call path from the entry point after it.
-
-- Lines starting with `?` are calls whose table can't be determined statically. They are listed with
+- Lines starting with `?` are calls whose table can't be determined statically, shown from
+  `--verbosity normal`; below it they are only counted. They are listed with
   the reason instead of being dropped, so the result never hides a call.
 - Lines starting with `~` are assumptions the analysis had to make, such as the identity of a
-  service passed in from outside.
+  service passed in from outside. They are listed from `--verbosity detailed`.
 - `Not reached from any entry point` lists methods that make service calls but that no entry point
   calls. Add them with `--entry` or `EntryPoints` if something outside the solution calls them.
 
@@ -77,6 +96,11 @@ Lists the table privileges each entry point needs.
 | `--config` | `-c` | Path to `appsettings.json` (default: the current directory) |
 | `--format` | `-f` | `text` (default) or `json` |
 | `--output` | `-o` | Write to a file instead of standard output |
+| `--verbosity` | `-v` | How much of the text report to show: `minimal` (default), `compact`, `normal`, `detailed` or `full` (see [Verbosity and filters](#verbosity-and-filters)) |
+| `--table` | | Only report requirements on these tables. Comma-separated or repeatable |
+| `--privilege` | | Only report these privileges, such as `Write` or `prvBulkDelete`. Comma-separated or repeatable |
+| `--runs-as` | | Only report requirements of these identities, such as `ApplicationUser`. Comma-separated or repeatable |
+| `--basis` | | Only report requirements with these bases, such as `filter-unknown`. Comma-separated or repeatable |
 | `--plugin` | | Only one plugin, or one of its steps: `<type>[:<message>[:<stage>]]`, such as `AccountPostPlugin:Update` |
 | `--custom-api` | | Only one custom API, by unique name |
 | `--function` | | Only one Azure Function, by function name |
@@ -112,16 +136,45 @@ xrmmockup-permissions check   # roles from Principals and Users in appsettings.j
 Example output:
 
 ```
+Missing from Salesperson (--role), for Caller:
+  contact  Create
+
+1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
+Result: 1 granted, 1 missing, 1 as SYSTEM
+Not checked: 1 unresolved operation (1 with an unknown table)
+Not shown: entry points, sources and requirements with nothing to fix. --verbosity compact adds the entry points, normal the sources, detailed everything
+```
+
+Each block is the privileges a set of roles lacks, merged over every entry point and identity that
+uses it, so it reads as the changes to make to the roles. Requirements whose identity has no roles get
+a block of their own, with how to give it some. With `--verbosity normal`, the requirements that need
+attention are listed per entry point, with where each call is:
+
+```
 plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation  src/Plugins/AccountPostPlugin.cs:14
   roles for Caller: Salesperson (--role)
-  ✔ account   Read    Caller  BusinessUnit  src/Plugins/AccountPostPlugin.cs:20
-  ✘ contact   Create  Caller  missing       src/Services/ContactService.cs:31 (AccountPostPlugin.ctor (lambda, line 16) → ContactService.CreateFor)
-  · task      Create  System  SYSTEM        src/Plugins/AccountPostPlugin.cs:44
-...
+  ✘ contact   Create  Caller  missing  src/Services/ContactService.cs:31
+  ? Update [Write] as Caller: entity comes from InputParameters["Target"]  src/Plugins/AccountPostPlugin.cs:40
+
+1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
 Result: 1 granted, 1 missing, 1 as SYSTEM
 Missing privileges:
   ✘ contact  Create  Caller  Salesperson (--role)  in plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation
 Not checked: 1 unresolved operation (1 with an unknown table)
+Not shown: 2 requirements with nothing to fix. --verbosity detailed lists them, full also adds every source and call path
+```
+
+With `--verbosity detailed`, the requirements the roles
+grant and those running as SYSTEM are listed too:
+
+```
+plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation  src/Plugins/AccountPostPlugin.cs:14
+  roles for Caller: Salesperson (--role)
+  ✔ account   Read    Caller  BusinessUnit  src/Plugins/AccountPostPlugin.cs:20
+  ✘ contact   Create  Caller  missing       src/Services/ContactService.cs:31
+  · task      Create  System  SYSTEM        src/Plugins/AccountPostPlugin.cs:44
+  ? Update [Write] as Caller: entity comes from InputParameters["Target"]  src/Plugins/AccountPostPlugin.cs:40
+...
 ```
 
 Each requirement is checked against the roles of the identity it runs as:
@@ -545,9 +598,76 @@ grants them. `check` and `--role` use the roles from this folder, by name.
 
 ## Output
 
+### Verbosity and filters
+
+On a real solution most requirements are already granted, so the text report starts with only what
+to change, and `--verbosity` shows more:
+
+| Level | Shows |
+|-------|-------|
+| `minimal` (default) | Only the privileges to change: a block per set of roles with what it lacks, merged over every entry point and identity, a line per table so a role can be changed one table at a time. Requirements that weren't checked or are unverifiable get blocks of their own. Without roles, a block per identity with every privilege it needs, except SYSTEM. Ends with the counts, `Result` and `Not checked` |
+| `compact` | Also, under each block, the entry points and methods that need its privileges, those that need the same ones listed together |
+| `normal` | Requirements the roles don't grant (`✘`), that weren't checked or are unverifiable (`·`), and unresolved operations (`?`). An entry point or method with none of these is left out. Without roles nothing is granted, so every requirement is shown, with `Privileges per table`. Up to three source locations per requirement, without call paths |
+| `detailed` | Also the requirements that are granted, not governed, suppressed or run as SYSTEM, every entry point and method, assumptions (`~`), the steps each entry point fires and `Privileges per table` |
+| `full` | Also every source location with its call path |
+
+For three functions run by an app user, `compact` shows the changes to make to `Integration App`,
+and then what each is for:
+
+```text
+Missing from Integration App (--role), for ApplicationUser:
+  account     Write
+  annotation  Create, Append
+  contact     Read
+  salesorder  Read
+
+  By entry point:
+
+    function:CancelOrder
+    function:SubmitOrder
+      annotation  Create, Append
+      contact     Read
+      salesorder  Read
+
+    function:ProcessOrder
+      account  Write
+
+3 entry points, 0 unreached methods, 4 tables, 8 table privileges (15 requirements counted per entry point and method), 0 unresolved
+Result: 6 granted, 9 missing
+Not shown: sources and requirements with nothing to fix. --verbosity normal adds the sources, detailed everything
+```
+
+`minimal` stops before `By entry point`.
+
+The last line says what the level left out, such as `Not shown: 242 requirements with nothing to fix,
+73 assumptions`. The counts, `Result`, `Not checked` and the exit code are always those of the whole
+analysis.
+
+`--table`, `--privilege`, `--runs-as` and `--basis` narrow the report, for example to answer why a
+function needs `Write` on `account`:
+
+```bash
+xrmmockup-permissions check --function ProcessOrder --role "Integration App" --table account --privilege Write --verbosity full
+```
+
+Each takes several values, comma-separated or repeated, and matches any of them ignoring case;
+different filters combine. `--runs-as` takes `Caller`, `User`, `ApplicationUser`, `ImpersonatedCaller`
+or `System`, and `--basis` takes `direct`, `execute-privilege`, `all-implementations`,
+`all-lookup-targets` or `filter-unknown`. A privilege not tied to a table has no table, so `--table`
+leaves it out; it matches `--privilege` by name. An unresolved operation has no known table or basis,
+so only `--runs-as` and `--privilege` apply to it. `Missing privileges` lists only the privileges that a
+requirement matching the filters is missing. Filters apply after analysis: a line such as
+`Filtered by --table account: 12 of 270 requirements match` says how much matched, and nothing that is
+computed, counted or checked changes.
+
+### JSON
+
 `--format json` writes the same content as an object with `entryPoints` (each with its `id`, `kind`,
 `trigger`, `requirements`, `unresolved`, `assumptions` and `triggers`, the ids of the steps it fires),
-`unreached` and `notRoleGoverned`.
+`unreached` and `notRoleGoverned`. JSON is complete at every `--verbosity`, with every source and
+call path. Filters narrow it like the text: requirements and unresolved operations they don't match
+are left out, so are entry points and methods left without any, and `missing` lists only what a matching
+requirement is missing. `result` stays the count of the whole analysis.
 Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, each with the call
 `path` from the entry point. A privilege not tied to a table has no `table`, and its name as
 `privilege`.

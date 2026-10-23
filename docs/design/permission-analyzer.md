@@ -518,7 +518,8 @@ Shared options:
 | `--format text\|json\|markdown\|sarif` | Output format (default `text`; `sarif` for GitHub code scanning) |
 | `--output <file>` | Write report to file |
 | `--include-system` | Also list operations that run as SYSTEM |
-| `--basis <list>` | Only show requirements with the given basis (§5.2); filtering is applied after analysis, so it never changes what is computed |
+| `--verbosity minimal\|compact\|normal\|detailed\|full` / `-v` | How much of the text report to show (phase 5.5, §10): `minimal` (default) shows only the privileges to change per set of roles, `compact` adds the entry points that need them, `normal` shows what needs attention with its sources, `detailed` adds what is granted, `full` adds every source and call path |
+| `--table <list>`, `--privilege <list>`, `--runs-as <list>`, `--basis <list>` | Only show requirements on the given tables, with the given privileges, identities or bases (§5.2); filtering is applied after analysis, so it never changes what is computed |
 
 ### 6.1 Scope selectors
 
@@ -779,27 +780,53 @@ location of each missing privilege.
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
 | 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope, plugin code loaded from other solutions (§5.6)) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
-| 5.5 | Output clean-up (below): filtering, and verbosity levels where the default shows what needs attention and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
+| 5.5 | Output clean-up (below, done): filtering, and verbosity levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
 
-**Output clean-up (phase 5.5).** On a real solution the output is long, and most of it is
+**Output clean-up (phase 5.5, done).** On a real solution the output is long, and most of it is
 requirements the roles already grant. That is rarely what a reader needs, but it must stay
 available, for example to review a role or to answer "why does this function need Write on
-account". Proposed direction, to settle when the phase starts:
+account". On a sample Azure Functions app, the text report went from 454 lines (335 KB, lines of up to
+20,000 characters from call paths) to 15 lines at the default `minimal`: ten tables to change in one role, the counts, `Result` and
+what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
 
-- **Verbosity**: a `--verbosity` option. The default shows what needs attention: missing
-  privileges, unresolved operations and the `Not checked` items, plus a summary line with how
-  many requirements are granted. A detailed level adds the granted requirements, and a full
-  level adds every source and call path, as today.
-- **Filtering**: options to narrow the output to some tables, privileges, identities
-  (`RunsAs`) or bases, such as the `--basis` option in §6 that isn't built yet. Filters, like
-  verbosity, apply after analysis, so they never change what is computed or whether `check`
-  fails.
-- **JSON** stays complete at every verbosity, so tools and a later role verification always get
-  the full result; filters may apply to it.
-- Without roles (`required` without `--role`), nothing is granted, so the default stays close
-  to today's output and filtering does most of the work.
+- **Verbosity**: `--verbosity minimal|compact|normal|detailed|full`. `minimal` (the default)
+  replaces the sections and the `Missing privileges` list with the changes to make, without
+  sources: a block per set of roles (`Missing from Order API (--role), for
+  ApplicationUser:`) with what it lacks, merged over every entry point and identity that uses
+  it, since a role is changed once whatever needs it. Each table has a line, in table order, with
+  its privileges in the order of the role editor's columns (`ctx_orderline
+  Create, Read, Append`), so a role can be changed one table at a time. Unchecked requirements get a
+  block per identity with the reason (`Caller needs (not checked: pass --role):`), unverifiable
+  ones a block per set of roles. Without roles, each block is what an identity needs, leaving out
+  SYSTEM, which needs no role. `compact` adds, under each block, the entry points and methods that
+  need its privileges: those that need exactly the same ones are listed together, with their
+  tables listed the same way, which answers which entry points a change is for. `normal` shows the requirements
+  that are missing, not checked or unverifiable, the unresolved operations, and only the entry
+  points and methods that have any. Sources are shown as up to three locations, without call
+  paths. With roles, `Privileges per table` is left out, since `Missing privileges` says what to
+  change. A last line says what was left out (`Not shown: 242 requirements with nothing to fix,
+  73 assumptions. --verbosity detailed lists them, ...`). `detailed` adds the granted, not
+  governed, suppressed and SYSTEM requirements, every section, assumptions, the steps each entry
+  point fires and the privileges per table. `full` is the output from before the phase, byte for
+  byte, with every source and its call path.
+- **Filtering**: `--table`, `--privilege`, `--runs-as` and `--basis`, each comma-separated or
+  repeatable, matching any value ignoring case; different filters combine. A privilege not tied
+  to a table has no table, so a table filter leaves it out. An unresolved operation has no known
+  table or basis, so only the identity and privilege filters apply to it, and a privilege filter
+  keeps it when it has no privileges or one of them matches. `Missing privileges` keeps the
+  merged privileges that some matching requirement is missing, so a basis filter, which merged
+  privileges don't carry, narrows it too. Filters, like verbosity, apply after analysis: the
+  counts line, `Result`, `Not checked` and the exit code are those of the whole analysis, and a
+  `Filtered by ...: n of m requirements match` line says how much matched.
+- **JSON** ignores the verbosity, so tools and a later role verification always get the full
+  result with every call path. Filters apply to it: requirements and unresolved operations they
+  don't match are left out, as are sections left without any, and `missing` is narrowed as in
+  the text. `result` stays the count of the whole analysis.
+- Without roles (`required` without `--role`), nothing is granted, so `normal` shows every
+  requirement and the privileges per table, and differs from `full` only in the sources and in
+  leaving out assumptions and fired steps.
 
 **Idea: minimum required depth.** A `--min-depth` option (or per-table setting) that only
 counts a privilege as covered at or above a given depth, so CI could, for example, require

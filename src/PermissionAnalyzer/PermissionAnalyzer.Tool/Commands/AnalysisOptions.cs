@@ -1,5 +1,7 @@
 using System.CommandLine;
 using XrmMockup.PermissionAnalyzer.Core.Analysis;
+using XrmMockup.PermissionAnalyzer.Core.Model;
+using XrmMockup.PermissionAnalyzer.Tool.Output;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 
@@ -22,7 +24,12 @@ internal sealed class AnalysisOptions
     private readonly Option<string[]> _attributes = new(CliOptions.Attributes.Primary) { Description = CliOptions.Attributes.Description };
     private readonly Option<string[]> _role = new(CliOptions.Role.Primary, CliOptions.Role.Alias) { Description = CliOptions.Role.Description };
     private readonly Option<string[]> _callerRole = new(CliOptions.CallerRole.Primary) { Description = CliOptions.CallerRole.Description };
+    private readonly Option<string[]> _table = new(CliOptions.Table.Primary) { Description = CliOptions.Table.Description };
+    private readonly Option<string[]> _privilege = new(CliOptions.Privilege.Primary) { Description = CliOptions.Privilege.Description };
+    private readonly Option<string[]> _runsAs = new(CliOptions.RunsAs.Primary) { Description = CliOptions.RunsAs.Description };
+    private readonly Option<string[]> _basis = new(CliOptions.Basis.Primary) { Description = CliOptions.Basis.Description };
     private readonly Option<string> _format;
+    private readonly Option<string> _verbosity;
 
     public AnalysisOptions()
     {
@@ -32,6 +39,12 @@ internal sealed class AnalysisOptions
             DefaultValueFactory = _ => CliOptions.Format.AllowedValues[0]
         };
         _format.AcceptOnlyFromAmong(CliOptions.Format.AllowedValues);
+        _verbosity = new Option<string>(CliOptions.Verbosity.Primary, CliOptions.Verbosity.Alias)
+        {
+            Description = CliOptions.Verbosity.Description,
+            DefaultValueFactory = _ => CliOptions.Verbosity.AllowedValues[0]
+        };
+        _verbosity.AcceptOnlyFromAmong(CliOptions.Verbosity.AllowedValues);
     }
 
     /// <summary>
@@ -39,7 +52,7 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output })
+        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _verbosity, _table, _privilege, _runsAs, _basis })
         {
             command.Options.Add(option);
         }
@@ -59,6 +72,15 @@ internal sealed class AnalysisOptions
             if (result.GetResult(_attributes) is not null && result.GetResult(_operation) is null)
             {
                 result.AddError($"{CliOptions.Attributes.Primary} needs {CliOptions.Operation.Primary}.");
+            }
+
+            foreach (var name in Values(result.GetValue(_runsAs)).Where(n => ParseRunsAs(n) is null))
+            {
+                result.AddError($"Unknown identity '{name}' in {CliOptions.RunsAs.Primary}. Use {string.Join(", ", Enum.GetNames<RunsAsKind>())}.");
+            }
+            foreach (var name in Values(result.GetValue(_basis)).Where(n => BasisNames.Parse(n) is null))
+            {
+                result.AddError($"Unknown basis '{name}' in {CliOptions.Basis.Primary}. Use {string.Join(", ", BasisNames.All)}.");
             }
         });
     }
@@ -92,8 +114,27 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_role) ?? [],
             parseResult.GetValue(_callerRole) ?? [],
             operation,
-            parseResult.GetValue(_pluginSolution) ?? []);
+            parseResult.GetValue(_pluginSolution) ?? [],
+            new ReportOptions(
+                Enum.Parse<Verbosity>(parseResult.GetValue(_verbosity)!, ignoreCase: true),
+                new ReportFilter(
+                    Values(parseResult.GetValue(_table)),
+                    Values(parseResult.GetValue(_privilege)),
+                    Values(parseResult.GetValue(_runsAs)).Select(n => ParseRunsAs(n)!.Value).Distinct().ToList(),
+                    Values(parseResult.GetValue(_basis)).Select(n => BasisNames.Parse(n)!.Value).Distinct().ToList())));
     }
+
+    /// <summary>
+    /// The values of a repeatable option whose values may also be comma-separated.
+    /// </summary>
+    private static IReadOnlyList<string> Values(string[]? values) =>
+        (values ?? []).SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>
+    /// The identity by name, ignoring case; <c>null</c> for any other text, numbers included.
+    /// </summary>
+    private static RunsAsKind? ParseRunsAs(string name) =>
+        Enum.GetValues<RunsAsKind>().Cast<RunsAsKind?>().FirstOrDefault(k => string.Equals(k.ToString(), name, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>
@@ -111,7 +152,8 @@ internal sealed record AnalysisRequest(
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> CallerRoles,
     OperationRequest? Operation = null,
-    IReadOnlyList<string>? PluginSolutions = null);
+    IReadOnlyList<string>? PluginSolutions = null,
+    ReportOptions? Report = null);
 
 /// <summary>
 /// The user operation of <c>--operation</c>, with the columns of <c>--attributes</c> when given.

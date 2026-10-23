@@ -10,10 +10,15 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// The manifest as JSON, for diffing in CI and for other tools. Privileges and identities keep their names
 /// (<c>AppendTo</c>, <c>ApplicationUser</c>); a basis and a coverage status are written in kebab case
 /// (<c>all-implementations</c>, <c>not-checked</c>). A privilege not tied to a table is a requirement without a
-/// table, with the privilege name as its privilege. Coverage properties are only written with coverage.
+/// table, with the privilege name as its privilege. Coverage properties are only written with coverage. A filter
+/// leaves out the requirements and unresolved operations it doesn't match, the entry points and methods left without
+/// any and the missing privileges no matching requirement is missing; the result counts stay those of the whole
+/// analysis.
 /// </summary>
-internal sealed class JsonManifestWriter : IManifestWriter
+internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifestWriter
 {
+    private readonly ReportFilter _filter = filter ?? ReportFilter.None;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -34,8 +39,9 @@ internal sealed class JsonManifestWriter : IManifestWriter
 
     public void Write(Manifest manifest, CoverageReport? coverage, TextWriter writer)
     {
+        (IReadOnlyList<MissingPrivilege> Missing, IReadOnlyList<MissingGlobalPrivilege> MissingGlobal)? missing = coverage is null ? null : _filter.Missing(manifest, coverage);
         var document = new ManifestDocument(
-            manifest.EntryPoints.Select(e => new EntryPointDocument(
+            manifest.EntryPoints.Where(e => _filter.IsEmpty || _filter.Matches(e.Requirements, e.GlobalRequirements, e.Unresolved)).Select(e => new EntryPointDocument(
                 e.Id,
                 e.Kind,
                 e.Type,
@@ -49,7 +55,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
                 e.Triggers.Count > 0 ? e.Triggers : null,
                 Roles(coverage?.For(e))))
                 .ToList(),
-            manifest.Unreached.Select(m => new MethodDocument(
+            manifest.Unreached.Where(m => _filter.IsEmpty || _filter.Matches(m.Requirements, m.GlobalRequirements, m.Unresolved)).Select(m => new MethodDocument(
                 m.Id,
                 Declaration(m.Declaration),
                 Requirements(m.Requirements, m.GlobalRequirements, coverage?.For(m)),
@@ -58,8 +64,8 @@ internal sealed class JsonManifestWriter : IManifestWriter
                 Roles(coverage?.For(m))))
                 .ToList(),
             manifest.NotRoleGoverned,
-            coverage?.Missing.Select(m => new MissingDocument(m.Table, m.Privilege.ToString(), m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In))
-                .Concat(coverage.MissingGlobal.Select(m => new MissingDocument(null, m.Privilege, m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In)))
+            missing?.Missing.Select(m => new MissingDocument(m.Table, m.Privilege.ToString(), m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In))
+                .Concat(missing.Value.MissingGlobal.Select(m => new MissingDocument(null, m.Privilege, m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In)))
                 .ToList(),
             coverage?.Summary is { } summary
                 ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.Unverifiable, summary.Incomplete)
@@ -69,11 +75,11 @@ internal sealed class JsonManifestWriter : IManifestWriter
         writer.Write('\n');
     }
 
-    private static IReadOnlyList<RequirementDocument> Requirements(
+    private IReadOnlyList<RequirementDocument> Requirements(
         IEnumerable<Requirement> requirements,
         IEnumerable<GlobalRequirement> globalRequirements,
         SectionCoverage? coverage) =>
-        requirements.Select(r => new RequirementDocument(
+        requirements.Where(_filter.Matches).Select(r => new RequirementDocument(
             r.Table,
             r.Privilege.ToString(),
             r.RunsAs.Kind,
@@ -82,7 +88,7 @@ internal sealed class JsonManifestWriter : IManifestWriter
             r.Basis,
             r.Sources.Select(Source).ToList(),
             Coverage(coverage?.For(r))))
-            .Concat(globalRequirements.Select(r => new RequirementDocument(
+            .Concat(globalRequirements.Where(_filter.Matches).Select(r => new RequirementDocument(
                 null,
                 r.Privilege,
                 r.RunsAs.Kind,
@@ -99,8 +105,8 @@ internal sealed class JsonManifestWriter : IManifestWriter
     private static IReadOnlyList<IdentityRolesDocument>? Roles(SectionCoverage? coverage) =>
         coverage?.Identities.Select(i => new IdentityRolesDocument(i.RunsAs.Kind, i.RunsAs.UserId, i.Roles?.Names, i.Roles?.Origin, i.Note)).ToList();
 
-    private static IReadOnlyList<UnresolvedDocument> Unresolved(IEnumerable<UnresolvedOperation> unresolved) =>
-        unresolved.Select(u => new UnresolvedDocument(
+    private IReadOnlyList<UnresolvedDocument> Unresolved(IEnumerable<UnresolvedOperation> unresolved) =>
+        unresolved.Where(_filter.Matches).Select(u => new UnresolvedDocument(
             u.Operation,
             u.Privileges,
             u.Reason,

@@ -103,6 +103,38 @@ internal static class CliOptions
         public const string Description = "Security role of the user that app code acts for by setting CallerId, by name. Repeatable";
     }
 
+    internal static class Verbosity
+    {
+        public const string Primary = "--verbosity";
+        public const string Alias = "-v";
+        public const string Description = "How much of the text report to show: minimal (default) shows only the privileges to change per role, compact adds the entry points that need them, normal shows what needs attention with its sources, detailed adds granted requirements and assumptions, full adds every source and call path. JSON is always complete";
+        public static readonly string[] AllowedValues = ["minimal", "compact", "normal", "detailed", "full"];
+    }
+
+    internal static class Table
+    {
+        public const string Primary = "--table";
+        public const string Description = "Only report requirements on these tables. Comma-separated or repeatable";
+    }
+
+    internal static class Privilege
+    {
+        public const string Primary = "--privilege";
+        public const string Description = "Only report these privileges, such as Write or prvBulkDelete. Comma-separated or repeatable";
+    }
+
+    internal static class RunsAs
+    {
+        public const string Primary = "--runs-as";
+        public const string Description = "Only report requirements of these identities: Caller, User, ApplicationUser, ImpersonatedCaller or System. Comma-separated or repeatable";
+    }
+
+    internal static class Basis
+    {
+        public const string Primary = "--basis";
+        public const string Description = "Only report requirements with these bases: direct, execute-privilege, all-implementations, all-lookup-targets or filter-unknown. Comma-separated or repeatable";
+    }
+
     internal static class Strict
     {
         public const string Primary = "--strict";

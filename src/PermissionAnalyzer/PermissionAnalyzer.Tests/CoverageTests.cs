@@ -401,7 +401,7 @@ public class CoverageTests
         var manifest = Analyze.Code(PluginSource, Governed);
         var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
         using var output = new StringWriter();
-        new TextManifestWriter().Write(manifest, report, output);
+        new TextManifestWriter(new ReportOptions(Verbosity.Detailed)).Write(manifest, report, output);
         var lines = output.ToString().Split('\n');
 
         Assert.Contains("  roles for Caller: Salesperson (--role)", lines);
@@ -460,7 +460,7 @@ public class CoverageTests
         var manifest = Analyze.Code(FunctionSource, Governed);
         var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
         using var output = new StringWriter();
-        new TextManifestWriter().Write(manifest, report, output);
+        new TextManifestWriter(new ReportOptions(Verbosity.Detailed)).Write(manifest, report, output);
         var text = output.ToString();
 
         Assert.Matches(@"\n  · prvActOnBehalfOfAnotherUser +global +ApplicationUser +unverifiable +", text);
