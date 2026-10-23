@@ -19,6 +19,9 @@ namespace DG.Tools.XrmMockup
     /// </summary>
     internal class RequestExecutionPipeline
     {
+        // Optional request parameter which is passed to plugins as a shared variable
+        internal const string TagParameter = "tag";
+
         private readonly ICoreOperations core;
         private readonly PluginManager pluginManager;
         private readonly WorkflowManager workflowManager;
@@ -73,8 +76,16 @@ namespace DG.Tools.XrmMockup
                 pluginContext.PrimaryEntityId = existingEntity == null ? Guid.Empty : existingEntity.Id;
             }
 
-            foreach (var prop in request.Parameters)
-                pluginContext.InputParameters[prop.Key] = prop.Value;
+            var inputParameters = core.HandlesCustomApi(request.RequestName)
+                ? core.GetCustomApiInputParameters(request)
+                : request.Parameters;
+            foreach (var prop in inputParameters)
+            {
+                if (prop.Key == TagParameter)
+                    pluginContext.SharedVariables[TagParameter] = prop.Value;
+                else
+                    pluginContext.InputParameters[prop.Key] = prop.Value;
+            }
 
             if (parentPluginContext != null)
             {
@@ -167,6 +178,8 @@ namespace DG.Tools.XrmMockup
             // Shared variables move to the parent context when transitioning stage 10 → stage 20
             ctx.PluginContext.ParentContext = ctx.PluginContext.Clone();
             ctx.PluginContext.SharedVariables.Clear();
+            if (ctx.Request.Parameters.TryGetValue(TagParameter, out var tag))
+                ctx.PluginContext.SharedVariables[TagParameter] = tag;
 
             pluginManager.TriggerSync(ctx.RequestMessage, ExecutionStage.PreOperation,
                 ctx.EntityInfo.Item1, ctx.PreImage, null, ctx.PluginContext,

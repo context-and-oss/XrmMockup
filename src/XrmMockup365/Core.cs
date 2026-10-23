@@ -155,7 +155,7 @@ namespace DG.Tools.XrmMockup
                 initData.Workflows, initData.Metadata.EntityMetadata, workflowLogger);
 
             var apiLogger = loggerFactory.CreateLogger(typeof(CustomApiManager).FullName);
-            customApiManager = new CustomApiManager(this, initData.Settings.BaseCustomApiTypes, apiLogger);
+            customApiManager = new CustomApiManager(this, initData.Settings.BaseCustomApiTypes, initData.Settings.StrictCustomApiParameters, apiLogger);
 
             var typesMissingRegistration = pluginManager.missingRegistrations
                 .Intersect(customApiManager.missingRegistration)
@@ -845,6 +845,8 @@ namespace DG.Tools.XrmMockup
         }
 
         public bool HandlesCustomApi(string requestName) => customApiManager.HandlesRequest(requestName);
+
+        public IEnumerable<KeyValuePair<string, object>> GetCustomApiInputParameters(OrganizationRequest request) => customApiManager.GetInputParameters(request);
 
         public OrganizationResponse ExecuteCustomApi(OrganizationRequest request, PluginContext pluginContext)
         {
