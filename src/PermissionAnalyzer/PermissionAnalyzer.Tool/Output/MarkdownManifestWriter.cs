@@ -71,7 +71,7 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
         writer.Write("| Table | Privileges |\n| --- | --- |\n");
         foreach (var table in tables)
         {
-            var privileges = table.Privileges.SequenceEqual([RoleChanges.GlobalPrivilege]) ? "not tied to a table" : string.Join(", ", table.Privileges);
+            var privileges = table.IsGlobal ? "not tied to a table" : string.Join(", ", table.Privileges);
             writer.Write($"| {Code(table.Table)} | {privileges} |\n");
         }
         writer.Write('\n');

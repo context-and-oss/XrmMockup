@@ -72,13 +72,10 @@ public static class CoverageEvaluator
         var missing = new SortedDictionary<(string Table, Privilege Privilege, RunsAs RunsAs, string Roles), (RoleSet Roles, SortedSet<string> In)>(MissingOrder);
         var missingGlobal = new SortedDictionary<(string Privilege, RunsAs RunsAs, string Roles), (RoleSet Roles, SortedSet<string> In)>(MissingGlobalOrder);
 
-        SectionCoverage Section(
-            string id,
-            EntryPoint? entryPoint,
-            IReadOnlyList<Requirement> requirements,
-            IReadOnlyList<GlobalRequirement> globalRequirements,
-            IReadOnlyList<UnresolvedOperation> unresolved)
+        SectionCoverage Section(IManifestSection manifestSection)
         {
+            var id = manifestSection.Id;
+            var entryPoint = manifestSection as EntryPoint;
             var applicationUser = ApplicationUserRoles(entryPoint, options, principals);
             var identities = new SortedDictionary<RunsAs, IdentityRoles>();
             var coverage = new Dictionary<Requirement, RequirementCoverage>();
@@ -95,7 +92,7 @@ public static class CoverageEvaluator
                 return roles;
             }
 
-            foreach (var requirement in requirements)
+            foreach (var requirement in manifestSection.Requirements)
             {
                 var identity = requirement.RunsAs with { Assumed = false };
                 var roles = IdentityOf(identity);
@@ -104,7 +101,7 @@ public static class CoverageEvaluator
                 if (result.Status == CoverageStatus.Missing) AddMissing(missing, (requirement.Table, requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
             }
 
-            foreach (var requirement in globalRequirements)
+            foreach (var requirement in manifestSection.GlobalRequirements)
             {
                 var identity = requirement.RunsAs with { Assumed = false };
                 var roles = IdentityOf(identity);
@@ -113,7 +110,7 @@ public static class CoverageEvaluator
                 if (result.Status == CoverageStatus.Missing) AddMissing(missingGlobal, (requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
             }
 
-            var needsRole = unresolved.Where(u => u.RunsAs.Kind != RunsAsKind.System).ToList();
+            var needsRole = manifestSection.Unresolved.Where(u => u.RunsAs.Kind != RunsAsKind.System).ToList();
             var section = new SectionCoverage(
                 coverage,
                 globalCoverage,
@@ -126,15 +123,10 @@ public static class CoverageEvaluator
         }
 
         var entryPoints = new Dictionary<string, SectionCoverage>(StringComparer.Ordinal);
-        foreach (var entryPoint in manifest.EntryPoints)
-        {
-            entryPoints[entryPoint.Id] = Section(entryPoint.Id, entryPoint, entryPoint.Requirements, entryPoint.GlobalRequirements, entryPoint.Unresolved);
-        }
-
         var unreached = new Dictionary<string, SectionCoverage>(StringComparer.Ordinal);
-        foreach (var method in manifest.Unreached)
+        foreach (var section in manifest.Sections)
         {
-            unreached[method.Id] = Section(method.Id, null, method.Requirements, method.GlobalRequirements, method.Unresolved);
+            (section is EntryPoint ? entryPoints : unreached)[section.Id] = Section(section);
         }
 
         var all = sections.SelectMany(s => s.All).ToList();

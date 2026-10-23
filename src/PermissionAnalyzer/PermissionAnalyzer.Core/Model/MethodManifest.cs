@@ -9,7 +9,7 @@ public sealed class MethodManifest(
     IReadOnlyList<Requirement> requirements,
     IReadOnlyList<UnresolvedOperation> unresolved,
     IReadOnlyList<Assumption> assumptions,
-    IReadOnlyList<GlobalRequirement>? globalRequirements = null)
+    IReadOnlyList<GlobalRequirement>? globalRequirements = null) : IManifestSection
 {
     /// <summary>
     /// Fully qualified method signature, e.g. <c>Contoso.Plugins.AccountPostPlugin.Execute(LocalPluginContext)</c>.

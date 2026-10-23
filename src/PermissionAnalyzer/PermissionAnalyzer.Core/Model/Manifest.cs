@@ -24,16 +24,21 @@ public sealed class Manifest(
     public IReadOnlyList<string>? NotRoleGoverned { get; } = notRoleGoverned;
 
     /// <summary>
+    /// The entry points, then the unreached methods.
+    /// </summary>
+    public IReadOnlyList<IManifestSection> Sections { get; } = [.. entryPoints, .. unreached];
+
+    /// <summary>
     /// Every requirement, of entry points and unreached methods.
     /// </summary>
     public IEnumerable<Requirement> AllRequirements =>
-        EntryPoints.SelectMany(e => e.Requirements).Concat(Unreached.SelectMany(m => m.Requirements));
+        Sections.SelectMany(s => s.Requirements);
 
     /// <summary>
     /// Every requirement of a privilege not tied to a table, of entry points and unreached methods.
     /// </summary>
     public IEnumerable<GlobalRequirement> AllGlobalRequirements =>
-        EntryPoints.SelectMany(e => e.GlobalRequirements).Concat(Unreached.SelectMany(m => m.GlobalRequirements));
+        Sections.SelectMany(s => s.GlobalRequirements);
 
     /// <summary>
     /// Every table that appears in a requirement, sorted.

@@ -171,7 +171,5 @@ public sealed class CoverageReport(
     /// </summary>
     public bool UsesConfiguredRoles { get; } = usesConfiguredRoles;
 
-    public SectionCoverage For(EntryPoint entryPoint) => entryPoints[entryPoint.Id];
-
-    public SectionCoverage For(MethodManifest method) => unreached[method.Id];
+    public SectionCoverage For(IManifestSection section) => section is EntryPoint ? entryPoints[section.Id] : unreached[section.Id];
 }

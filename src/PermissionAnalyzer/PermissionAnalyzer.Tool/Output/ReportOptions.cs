@@ -90,8 +90,8 @@ internal sealed class ReportFilter(
     /// <summary>
     /// The section has a requirement or unresolved operation the filter matches.
     /// </summary>
-    public bool Matches(IEnumerable<Requirement> requirements, IEnumerable<GlobalRequirement> globalRequirements, IEnumerable<UnresolvedOperation> unresolved) =>
-        requirements.Any(Matches) || globalRequirements.Any(Matches) || unresolved.Any(Matches);
+    public bool Matches(IManifestSection section) =>
+        section.Requirements.Any(Matches) || section.GlobalRequirements.Any(Matches) || section.Unresolved.Any(Matches);
 
     /// <summary>
     /// The missing privileges of <paramref name="coverage"/> that some requirement the filter matches is missing,
@@ -101,20 +101,14 @@ internal sealed class ReportFilter(
     {
         if (IsEmpty) return (coverage.Missing, coverage.MissingGlobal);
 
-        var sections = manifest.EntryPoints.Select(e => (e.Requirements, e.GlobalRequirements, Coverage: coverage.For(e)))
-            .Concat(manifest.Unreached.Select(m => (m.Requirements, m.GlobalRequirements, Coverage: coverage.For(m))))
-            .ToList();
-        var tablePrivileges = sections
-            .SelectMany(s => s.Requirements.Where(r => Matches(r) && s.Coverage.For(r).Status == CoverageStatus.Missing))
-            .Select(r => (r.Table, r.Privilege, RunsAs: r.RunsAs with { Assumed = false }))
-            .ToHashSet();
-        var globalPrivileges = sections
-            .SelectMany(s => s.GlobalRequirements.Where(r => Matches(r) && s.Coverage.For(r).Status == CoverageStatus.Missing))
-            .Select(r => (r.Privilege, RunsAs: r.RunsAs with { Assumed = false }))
+        var missing = manifest.Sections
+            .SelectMany(s => PrivilegeNeed.Of(s, coverage.For(s), this))
+            .Where(n => n.Coverage!.Status == CoverageStatus.Missing)
+            .Select(n => (n.Name, n.TablePrivilege, RunsAs: n.RunsAs with { Assumed = false }))
             .ToHashSet();
         return (
-            coverage.Missing.Where(m => tablePrivileges.Contains((m.Table, m.Privilege, m.RunsAs))).ToList(),
-            coverage.MissingGlobal.Where(m => globalPrivileges.Contains((m.Privilege, m.RunsAs))).ToList());
+            coverage.Missing.Where(m => missing.Contains((m.Table, m.Privilege, m.RunsAs))).ToList(),
+            coverage.MissingGlobal.Where(m => missing.Contains((m.Privilege, null, m.RunsAs))).ToList());
     }
 
     /// <summary>

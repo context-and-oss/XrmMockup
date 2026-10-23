@@ -12,29 +12,19 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// </summary>
 internal static class RoleChanges
 {
-    /// <summary>
-    /// The privilege of a privilege not tied to a table, whose name is in the table column.
-    /// </summary>
-    public const string GlobalPrivilege = "global";
-
     public static IReadOnlyList<RoleChange> Of(Manifest manifest, CoverageReport? coverage, ReportFilter filter)
     {
         var blocks = new Dictionary<(BlockKind Kind, string Key), Block>();
-        var sections = manifest.EntryPoints.Select(e => (e.Id, e.Requirements, e.GlobalRequirements, Coverage: coverage?.For(e)))
-            .Concat(manifest.Unreached.Select(m => (m.Id, m.Requirements, m.GlobalRequirements, Coverage: coverage?.For(m))))
-            .ToList();
         // Entry points before unreached methods, each in manifest order
-        var position = sections.Select((s, i) => (s.Id, i)).ToDictionary(s => s.Id, s => s.i, StringComparer.Ordinal);
-        foreach (var section in sections)
+        var position = manifest.Sections.Select((s, i) => (s.Id, i)).ToDictionary(s => s.Id, s => s.i, StringComparer.Ordinal);
+        foreach (var section in manifest.Sections)
         {
-            var needs = section.Requirements.Where(filter.Matches)
-                .Select(r => (r.RunsAs, Need: new Need(r.Table, r.Privilege.ToString(), (int)r.Privilege), Result: section.Coverage?.For(r)))
-                .Concat(section.GlobalRequirements.Where(filter.Matches)
-                    .Select(r => (r.RunsAs, Need: new Need(r.Privilege, GlobalPrivilege, int.MaxValue), Result: section.Coverage?.For(r))));
-            foreach (var (runsAs, need, result) in needs)
+            var sectionCoverage = coverage?.For(section);
+            foreach (var privilegeNeed in PrivilegeNeed.Of(section, sectionCoverage, filter))
             {
-                var identity = runsAs with { Assumed = false };
-                if (BlockOf(identity, result, section.Coverage) is not { } key) continue;
+                var identity = privilegeNeed.RunsAs with { Assumed = false };
+                if (BlockOf(identity, privilegeNeed.Coverage, sectionCoverage) is not { } key) continue;
+                var need = new Need(privilegeNeed.Name, privilegeNeed.TablePrivilege);
                 if (!blocks.TryGetValue(key, out var block)) blocks.Add(key, block = new Block());
                 block.Identities.Add(identity);
                 block.Needs.Add(need);
@@ -56,7 +46,7 @@ internal static class RoleChanges
             };
             // Sections that need exactly the same privileges are one group, placed where its first section is
             var groups = block.Sections
-                .GroupBy(s => string.Join("\n", s.Value.Select(n => $"{n.Name} {n.Privilege}").Order(StringComparer.Ordinal)), StringComparer.Ordinal)
+                .GroupBy(s => string.Join("\n", s.Value.Select(n => $"{n.Name} {n.Privilege?.ToString() ?? ""}").Order(StringComparer.Ordinal)), StringComparer.Ordinal)
                 .Select(g => new EntryPointChange(g.Select(s => s.Key).OrderBy(id => position[id]).ToList(), Tables(g.First().Value)))
                 .OrderBy(g => position[g.Ids[0]])
                 .ToList();
@@ -70,10 +60,9 @@ internal static class RoleChanges
     /// </summary>
     private static IReadOnlyList<TableChange> Tables(IEnumerable<Need> needs) => needs
         .GroupBy(n => n.Name, StringComparer.Ordinal)
-        .Select(t => (Table: t.Key, Global: t.Any(n => n.Privilege == GlobalPrivilege), Privileges: t.OrderBy(n => n.Order).Select(n => n.Privilege).Distinct().ToList()))
-        .OrderBy(t => t.Global)
+        .Select(t => new TableChange(t.Key, t.Where(n => n.Privilege is not null).Select(n => n.Privilege!.Value).Distinct().Order().Select(p => p.ToString()).ToList(), t.Any(n => n.Privilege is null)))
+        .OrderBy(t => t.IsGlobal)
         .ThenBy(t => t.Table, StringComparer.Ordinal)
-        .Select(t => new TableChange(t.Table, t.Privileges))
         .ToList();
 
     /// <summary>
@@ -116,10 +105,9 @@ internal static class RoleChanges
     }
 
     /// <summary>
-    /// A privilege on a table, or a privilege not tied to a table with <see cref="GlobalPrivilege"/> as privilege;
-    /// <paramref name="Order"/> sorts the privileges of a table.
+    /// A privilege on a table, or a privilege not tied to a table by its name, with no <paramref name="Privilege"/>.
     /// </summary>
-    private sealed record Need(string Name, string Privilege, int Order);
+    private sealed record Need(string Name, Privilege? Privilege);
 }
 
 /// <param name="Heading">What the block is, such as <c>Missing from Salesperson (--role), for Caller</c>.</param>
@@ -129,8 +117,9 @@ internal static class RoleChanges
 internal sealed record RoleChange(string Heading, bool Missing, IReadOnlyList<TableChange> Tables, IReadOnlyList<EntryPointChange> EntryPoints);
 
 /// <param name="Table">The table, or the name of a privilege not tied to a table.</param>
-/// <param name="Privileges">In role editor order, or <see cref="RoleChanges.GlobalPrivilege"/>.</param>
-internal sealed record TableChange(string Table, IReadOnlyList<string> Privileges);
+/// <param name="Privileges">In role editor order; empty for a privilege not tied to a table.</param>
+/// <param name="IsGlobal"><paramref name="Table"/> is a privilege not tied to a table.</param>
+internal sealed record TableChange(string Table, IReadOnlyList<string> Privileges, bool IsGlobal);
 
 /// <param name="Ids">Entry points and unreached methods that need exactly <paramref name="Tables"/>.</param>
 internal sealed record EntryPointChange(IReadOnlyList<string> Ids, IReadOnlyList<TableChange> Tables);

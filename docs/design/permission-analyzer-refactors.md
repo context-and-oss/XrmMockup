@@ -17,14 +17,13 @@ The simple fixes from that review are already in. Paths are relative to
    possibly set, which the shared code now does explicitly. A rule without a check on a member now fires
    its steps on its fixed table rather than the operation's table, and an access mask on any member is
    reported, not just on the primary one.
-
-## 3. A common type for entry points and unreached methods
-
-`EntryPoint` and `MethodManifest` have the same shape, so every writer and `CoverageEvaluator`
-rebuild the same 4-tuple from `EntryPoints.Concat(Unreached)` (about six places). An
-`IManifestSection` interface plus `Manifest.Sections` and a `RequirementSet` record would remove that.
-It pairs well with one projection for table and global requirements (`PrivilegeNeed` with
-`IsGlobal`), replacing the `"global"` placeholder privilege in `RoleChanges` and the Markdown writer.
+3. **A common type for entry points and unreached methods.** `EntryPoint` and `MethodManifest` implement
+   `Model/IManifestSection.cs`, `Manifest.Sections` lists both in report order, and `CoverageReport.For`
+   takes a section. In the tool, `Output/PrivilegeNeed.cs` projects a section's table and global
+   requirements, filtered and with their coverage, for the text, JSON, SARIF and role change reports;
+   the `"global"` placeholder privilege is gone from `RoleChanges` and Markdown (`TableChange.IsGlobal`),
+   and only the text report still shows `global` in its privilege column. No separate `RequirementSet`
+   was needed.
 
 ## 4. Message name handling
 

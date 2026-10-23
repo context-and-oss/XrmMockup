@@ -15,7 +15,7 @@ public sealed class EntryPoint(
     IReadOnlyList<UnresolvedOperation> unresolved,
     IReadOnlyList<Assumption> assumptions,
     IReadOnlyList<string>? triggers = null,
-    IReadOnlyList<GlobalRequirement>? globalRequirements = null)
+    IReadOnlyList<GlobalRequirement>? globalRequirements = null) : IManifestSection
 {
     /// <summary>
     /// A stable id such as <c>plugin:Contoso.AccountPostPlugin:Update:account:PostOperation</c>.

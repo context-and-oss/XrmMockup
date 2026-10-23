@@ -11,15 +11,13 @@ internal static class UnresolvedSites
     public static IReadOnlyList<UnresolvedSite> Of(Manifest manifest, ReportFilter filter)
     {
         var sites = new Dictionary<(SourceLocation Location, string Operation, string Privileges, RunsAs RunsAs, string Reason), (UnresolvedOperation Operation, List<Section> In)>();
-        var sections = manifest.EntryPoints.Select(e => (e.Id, e.Declaration, e.Unresolved))
-            .Concat(manifest.Unreached.Select(m => (m.Id, m.Declaration, m.Unresolved)));
-        foreach (var (id, declaration, unresolved) in sections)
+        foreach (var section in manifest.Sections)
         {
-            foreach (var operation in unresolved.Where(filter.Matches))
+            foreach (var operation in section.Unresolved.Where(filter.Matches))
             {
                 var key = (operation.Source.Location, operation.Operation, string.Join(", ", operation.Privileges), operation.RunsAs, operation.Reason);
                 if (!sites.TryGetValue(key, out var site)) sites.Add(key, site = (operation, []));
-                site.In.Add(new Section(id, declaration));
+                site.In.Add(new Section(section.Id, section.Declaration));
             }
         }
 

@@ -41,7 +41,7 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
     {
         (IReadOnlyList<MissingPrivilege> Missing, IReadOnlyList<MissingGlobalPrivilege> MissingGlobal)? missing = coverage is null ? null : _filter.Missing(manifest, coverage);
         var document = new ManifestDocument(
-            manifest.EntryPoints.Where(e => _filter.IsEmpty || _filter.Matches(e.Requirements, e.GlobalRequirements, e.Unresolved)).Select(e => new EntryPointDocument(
+            manifest.EntryPoints.Where(e => _filter.IsEmpty || _filter.Matches(e)).Select(e => new EntryPointDocument(
                 e.Id,
                 e.Kind,
                 e.Type,
@@ -49,16 +49,16 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
                 e.Trigger is { } trigger ? new TriggerDocument(trigger.Message, trigger.Table, trigger.Stage, trigger.Binding, trigger.FilteredAttributes) : null,
                 e.ImpersonatingUserId,
                 Declaration(e.Declaration),
-                Requirements(e.Requirements, e.GlobalRequirements, coverage?.For(e)),
+                Requirements(e, coverage?.For(e)),
                 Unresolved(e.Unresolved),
                 Assumptions(e.Assumptions),
                 e.Triggers.Count > 0 ? e.Triggers : null,
                 Roles(coverage?.For(e))))
                 .ToList(),
-            manifest.Unreached.Where(m => _filter.IsEmpty || _filter.Matches(m.Requirements, m.GlobalRequirements, m.Unresolved)).Select(m => new MethodDocument(
+            manifest.Unreached.Where(m => _filter.IsEmpty || _filter.Matches(m)).Select(m => new MethodDocument(
                 m.Id,
                 Declaration(m.Declaration),
-                Requirements(m.Requirements, m.GlobalRequirements, coverage?.For(m)),
+                Requirements(m, coverage?.For(m)),
                 Unresolved(m.Unresolved),
                 Assumptions(m.Assumptions),
                 Roles(coverage?.For(m))))
@@ -75,13 +75,8 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
         writer.Write('\n');
     }
 
-    private IReadOnlyList<RequirementDocument> Requirements(
-        IEnumerable<Requirement> requirements,
-        IEnumerable<GlobalRequirement> globalRequirements,
-        SectionCoverage? coverage) =>
-        requirements.Where(_filter.Matches).Select(r => Requirement(r.Table, r.Privilege.ToString(), r.RunsAs, r.Basis, r.Sources, coverage?.For(r)))
-            .Concat(globalRequirements.Where(_filter.Matches).Select(r => Requirement(null, r.Privilege, r.RunsAs, r.Basis, r.Sources, coverage?.For(r))))
-            .ToList();
+    private IReadOnlyList<RequirementDocument> Requirements(IManifestSection section, SectionCoverage? coverage) =>
+        PrivilegeNeed.Of(section, coverage, _filter).Select(n => Requirement(n.Table, n.PrivilegeName, n.RunsAs, n.Basis, n.Sources, n.Coverage)).ToList();
 
     private static RequirementDocument Requirement(string? table, string privilege, RunsAs runsAs, RequirementBasis basis, IReadOnlyList<RequirementSource> sources, RequirementCoverage? coverage) =>
         new(table, privilege, runsAs.Kind, runsAs.UserId, Assumed(runsAs), basis, sources.Select(Source).ToList(), Coverage(coverage));

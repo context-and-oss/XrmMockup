@@ -21,6 +21,11 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     /// </summary>
     private const int ShortSources = 3;
 
+    /// <summary>
+    /// The privilege column of a privilege not tied to a table, whose name is in the table column.
+    /// </summary>
+    private const string GlobalColumn = "global";
+
     public void Write(Manifest manifest, CoverageReport? coverage, TextWriter writer)
     {
         var filter = _options.Filter;
@@ -37,16 +42,15 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
             return shown;
         }
 
-        SectionView View(string header, IReadOnlyList<string> triggers, IReadOnlyList<Requirement> sectionRequirements, IReadOnlyList<GlobalRequirement> sectionGlobalRequirements,
-            IReadOnlyList<UnresolvedOperation> unresolved, IReadOnlyList<Assumption> assumptions, SectionCoverage? sectionCoverage)
+        SectionView View(string header, IReadOnlyList<string> triggers, IManifestSection section)
         {
-            var rows = sectionRequirements.Where(filter.Matches)
-                .Select(r => new RowView(r.Table, r.Privilege.ToString(), r.RunsAs, r.Basis, r.Sources, sectionCoverage?.For(r)))
-                .Concat(sectionGlobalRequirements.Where(filter.Matches)
-                    .Select(r => new RowView(r.Privilege, RoleChanges.GlobalPrivilege, r.RunsAs, r.Basis, r.Sources, sectionCoverage?.For(r))))
+            var sectionCoverage = coverage?.For(section);
+            var rows = PrivilegeNeed.Of(section, sectionCoverage, filter)
+                .Select(n => new RowView(n.Name, n.TablePrivilege?.ToString() ?? GlobalColumn, n.RunsAs, n.Basis, n.Sources, n.Coverage))
                 .Where(r => Shown(r.Coverage))
                 .ToList();
-            var shownUnresolved = unresolved.Where(filter.Matches).ToList();
+            var assumptions = section.Assumptions;
+            var shownUnresolved = section.Unresolved.Where(filter.Matches).ToList();
             var detailed = verbosity > Verbosity.Normal;
             // Every section is listed, as before, unless only what needs attention or matches a filter is shown
             var shown = (detailed && filter.IsEmpty) || rows.Count + shownUnresolved.Count > 0;
@@ -59,17 +63,17 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
         {
             var header = entryPoint.Declaration is { } declaration ? $"{entryPoint.Id}  {declaration}" : entryPoint.Id;
             if (entryPoint.ImpersonatingUserId is { } user) header += $"  (runs as user {user})";
-            return View(header, entryPoint.Triggers, entryPoint.Requirements, entryPoint.GlobalRequirements, entryPoint.Unresolved, entryPoint.Assumptions, coverage?.For(entryPoint));
+            return View(header, entryPoint.Triggers, entryPoint);
         }).Where(s => s.Shown).ToList();
         var unreached = manifest.Unreached.Select(method =>
         {
             var header = method.Declaration is { } declaration ? $"{method.Id}  {declaration}" : method.Id;
-            return View(header, [], method.Requirements, method.GlobalRequirements, method.Unresolved, method.Assumptions, coverage?.For(method));
+            return View(header, [], method);
         }).Where(s => s.Shown).ToList();
 
         var rows = entryPoints.Concat(unreached).SelectMany(s => s.Rows).ToList();
         var tableWidth = rows.Select(r => r.Table.Length).DefaultIfEmpty(0).Max();
-        var privilegeWidth = Enum.GetNames<Privilege>().Append(RoleChanges.GlobalPrivilege).Max(n => n.Length);
+        var privilegeWidth = Enum.GetNames<Privilege>().Append(GlobalColumn).Max(n => n.Length);
         var runsAsWidth = rows.Select(r => r.RunsAs.ToString().Length).DefaultIfEmpty(0).Max();
         var coverageWidth = rows.Select(r => r.Coverage is { } result ? Label(result).Length : 0).DefaultIfEmpty(0).Max();
 
@@ -239,7 +243,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
             var width = tables.Max(t => t.Table.Length);
             foreach (var table in tables)
             {
-                writer.Write($"{indent}{table.Table.PadRight(width)}  {string.Join(", ", table.Privileges)}\n");
+                writer.Write($"{indent}{table.Table.PadRight(width)}  {(table.IsGlobal ? GlobalColumn : string.Join(", ", table.Privileges))}\n");
             }
         }
     }
@@ -316,7 +320,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     {
         var rows = missing
             .Select(m => (Table: m.Table, Privilege: m.Privilege.ToString(), m.RunsAs, m.Roles, m.In))
-            .Concat(missingGlobal.Select(m => (Table: m.Privilege, Privilege: RoleChanges.GlobalPrivilege, m.RunsAs, m.Roles, m.In)))
+            .Concat(missingGlobal.Select(m => (Table: m.Privilege, Privilege: GlobalColumn, m.RunsAs, m.Roles, m.In)))
             .ToList();
         if (rows.Count == 0) return;
 

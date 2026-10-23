@@ -104,17 +104,14 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
         if (coverage is null) yield break;
 
         var findings = new Dictionary<(int Rule, SourceLocation Location, string Privilege, RunsAs RunsAs, string Roles, string? Suppressed), (string Message, Properties Properties, List<Section> In)>();
-        var sections = manifest.EntryPoints.Select(e => (Section: new Section(e.Id, e.Declaration), e.Requirements, e.GlobalRequirements, Coverage: coverage.For(e)))
-            .Concat(manifest.Unreached.Select(m => (Section: new Section(m.Id, m.Declaration), m.Requirements, m.GlobalRequirements, Coverage: coverage.For(m))));
-        foreach (var (section, requirements, globalRequirements, sectionCoverage) in sections)
+        foreach (var manifestSection in manifest.Sections)
         {
-            var needs = requirements.Where(_filter.Matches)
-                .Select(r => (Table: (string?)r.Table, Privilege: r.Privilege.ToString(), r.RunsAs, r.Sources, Result: sectionCoverage.For(r)))
-                .Concat(globalRequirements.Where(_filter.Matches)
-                    .Select(r => (Table: (string?)null, r.Privilege, r.RunsAs, r.Sources, Result: sectionCoverage.For(r))));
-            foreach (var (table, privilege, runsAs, sources, result) in needs)
+            var section = new Section(manifestSection.Id, manifestSection.Declaration);
+            var sectionCoverage = coverage.For(manifestSection);
+            foreach (var need in PrivilegeNeed.Of(manifestSection, sectionCoverage, _filter))
             {
-                var identity = runsAs with { Assumed = false };
+                var (table, privilege, result) = (need.Table, need.PrivilegeName, need.Coverage!);
+                var identity = need.RunsAs with { Assumed = false };
                 var roles = sectionCoverage.Identities.FirstOrDefault(i => i.RunsAs == identity);
                 var what = table is null ? privilege : $"{privilege} on {table}";
                 var (rule, message) = result.Status switch
@@ -128,7 +125,7 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
 
                 var suppressed = result.Status == CoverageStatus.Suppressed ? result.Reason ?? "" : null;
                 var rolesText = roles?.Roles?.ToString() ?? "";
-                foreach (var location in sources.Select(s => s.Location).Distinct())
+                foreach (var location in need.Sources.Select(s => s.Location).Distinct())
                 {
                     var key = (index, location, $"{table} {privilege}", identity, rolesText, suppressed);
                     if (!findings.TryGetValue(key, out var finding))
