@@ -373,4 +373,30 @@ public class CascadeTests
         Assert.StartsWith("custom-api:", Assert.Single(run.Triggers));
         Assert.Empty(run.Unresolved);
     }
+
+    [Fact]
+    public void CustomApiNamedWithRequestSuffixAndARuleRunsItsCode()
+    {
+        var manifest = Analyze.Code("""
+            namespace Contoso
+            {
+                public class Api : Plugin
+                {
+                    public Api() => RegisterCustomAPI("ctx_SubmitRequest", c => c.OrganizationService.Update(new Account()));
+                }
+
+                public class Importer
+                {
+                    public void Run(IOrganizationService service, Guid id) =>
+                        service.Execute(new OrganizationRequest("ctx_SubmitRequest") { ["Target"] = new EntityReference("contact", id) });
+                }
+            }
+            """,
+            setup: builder => builder.AddEntryMethods(["Contoso.Importer.Run"]),
+            rules: [new RequestRule("ctx_SubmitRequest") { Checks = [new RuleCheck([Privilege.Read]) { Member = "Target" }] }]);
+
+        var run = manifest.Entry("method:Contoso.Importer.Run(IOrganizationService, Guid)");
+        Assert.Equal(["account:Write", "contact:Read"], run.Requirements());
+        Assert.StartsWith("custom-api:", Assert.Single(run.Triggers));
+    }
 }

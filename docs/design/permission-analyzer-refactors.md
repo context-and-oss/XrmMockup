@@ -24,13 +24,12 @@ The simple fixes from that review are already in. Paths are relative to
    the `"global"` placeholder privilege is gone from `RoleChanges` and Markdown (`TableChange.IsGlobal`),
    and only the text report still shows `global` in its privilege column. No separate `RequirementSet`
    was needed.
-
-## 4. Message name handling
-
-The `Request` suffix is stripped at many layers (`MessageOf` is applied everywhere), so `FooRequest`
-and `Foo` collide, and a configured rule named `contoso_ApprovalRequest` fires as `contoso_Approval`.
-The runtime symptom is fixed; the root fix is to strip the suffix only when deriving a message from a
-request type name.
+4. **Message names.** The `Request` suffix is removed only from a request type's name
+   (`RequestRules.MessageOfType`). A message from code or a request name is matched exactly: to a rule named
+   as the message, or as its request type, configured rules first. A name a person writes in `As` or
+   `--operation` (`MessageNamed`) falls back to the message of a request type, so `CreateRequest` is still
+   `Create`. Steps fire on the message as called, so a custom API named `ctx_SubmitRequest` with a rule
+   runs its code.
 
 ## 5. Speed
 

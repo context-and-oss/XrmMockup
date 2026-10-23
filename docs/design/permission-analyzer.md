@@ -226,7 +226,8 @@ privileges it needs. Phase 3.5 builds them.
 
 **Rule table.** The rules are data (a table in `RequestRules`), not code, so they can be extended and
 overridden in `XrmMockup:Permissions:Rules` (§6.3). A rule names the message (`Assign` or the
-request type `AssignRequest`; matched without the `Request` suffix, ignoring case), the member
+request type `AssignRequest`; a message is matched to a rule by its own name first, ignoring case, so a
+custom API named `ctx_ApproveRequest` isn't read by the rule for `ctx_Approve`), the member
 that holds the target, and the privileges. Further checks can name another member or a fixed
 table, and apply only when a boolean member is set (`when`). A rule can also expand into other
 requests, the way XrmMockup's handlers call each other, or hold nested requests (`requests`). A

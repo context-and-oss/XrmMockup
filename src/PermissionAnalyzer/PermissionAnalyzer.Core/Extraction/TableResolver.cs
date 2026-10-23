@@ -350,7 +350,7 @@ internal sealed class TableResolver(
 
         if (!SymbolEqualityComparer.Default.Equals(creation.Type?.OriginalDefinition, symbols.OrganizationRequest))
         {
-            return Apply(RequestRules.MessageOf(creation.Type!.Name), Members, shape);
+            return Apply(RequestRules.MessageOfType(creation.Type!.Name), Members, shape);
         }
 
         var names = Members("RequestName");

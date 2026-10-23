@@ -4,7 +4,8 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 
 /// <summary>
 /// The rules for the requests passed to <c>Execute</c>: the built-in ones, which follow Dataverse, replaced or
-/// extended by configured ones. Messages are matched without their <c>Request</c> suffix, ignoring case.
+/// extended by configured ones. A rule names its message as is or as its request type, such as <c>AssignRequest</c>;
+/// a message is matched to a rule by its name first, ignoring case.
 /// </summary>
 internal sealed class RequestRules
 {
@@ -91,33 +92,58 @@ internal sealed class RequestRules
         new("RetrievePrincipalAccess"),
     ];
 
-    private readonly Dictionary<string, RequestRule> _rules = new(StringComparer.OrdinalIgnoreCase);
+    private const string RequestSuffix = "Request";
+
+    private readonly Dictionary<string, RequestRule> _builtIn = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RequestRule> _configured = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExpandedRule> _expanded = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="rules">Rules that replace the built-in rule for their message, or add one.</param>
     public RequestRules(IEnumerable<RequestRule>? rules = null)
     {
-        foreach (var rule in BuiltIn.Concat(rules ?? [])) _rules[MessageOf(rule.Message)] = rule;
+        foreach (var rule in BuiltIn) _builtIn[rule.Message] = rule;
+        foreach (var rule in rules ?? []) _configured[rule.Message] = rule;
     }
 
     /// <summary>
-    /// The message of a request type or name: <c>AssignRequest</c> and <c>Assign</c> are both <c>Assign</c>.
+    /// The message of a request type: <c>AssignRequest</c> is <c>Assign</c>. Only a type name has the suffix to
+    /// remove; a message such as <c>contoso_ApprovalRequest</c> is called by its name.
     /// </summary>
-    public static string MessageOf(string name) =>
-        name.Length > RequestSuffix.Length && name.EndsWith(RequestSuffix, StringComparison.Ordinal) ? name.Substring(0, name.Length - RequestSuffix.Length) : name;
+    public static string MessageOfType(string typeName) =>
+        typeName.Length > RequestSuffix.Length && typeName.EndsWith(RequestSuffix, StringComparison.Ordinal)
+            ? typeName.Substring(0, typeName.Length - RequestSuffix.Length)
+            : typeName;
 
-    private const string RequestSuffix = "Request";
+    /// <summary>
+    /// The message a person names in a rule's <see cref="RequestRule.As"/> or with <c>--operation</c>: the name, or
+    /// when only the request type has a rule, its message, so <c>CreateRequest</c> is <c>Create</c>.
+    /// </summary>
+    public string MessageNamed(string name) =>
+        RuleOf(name) is null && MessageOfType(name) is var message && message != name && RuleOf(message) is not null ? message : name;
 
     /// <summary>
     /// The checks of <paramref name="message"/> with those of its <see cref="RequestRule.As"/> messages, or
     /// <c>null</c> when there is no rule for it.
     /// </summary>
-    public ExpandedRule? Find(string message) => Expand(MessageOf(message), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    public ExpandedRule? Find(string message) => Expand(message, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The rule for <paramref name="message"/>, named as the message or its request type; a configured rule goes
+    /// before the built-in one.
+    /// </summary>
+    private RequestRule? RuleOf(string message)
+    {
+        foreach (var rules in new[] { _configured, _builtIn })
+        {
+            if (rules.TryGetValue(message, out var rule) || rules.TryGetValue(message + RequestSuffix, out rule)) return rule;
+        }
+        return null;
+    }
 
     private ExpandedRule? Expand(string message, HashSet<string> visiting)
     {
         if (_expanded.TryGetValue(message, out var known)) return known;
-        if (!_rules.TryGetValue(message, out var rule)) return null;
+        if (RuleOf(message) is not { } rule) return null;
 
         // A rule that is, through others, its own as-rule adds nothing more
         if (!visiting.Add(message)) return new ExpandedRule([], [], [], [], [], []);
@@ -128,9 +154,9 @@ internal sealed class RequestRules
         if (rule.Assumption is { } assumption) assumptions.Add(assumption);
         var requests = new List<string>();
         var missing = new List<string>();
-        var messages = new List<string> { MessageOf(rule.Message) };
+        var messages = new List<string> { message };
         if (rule.Requests is { } nested) requests.Add(nested);
-        foreach (var other in rule.As.Select(MessageOf))
+        foreach (var other in rule.As.Select(MessageNamed))
         {
             if (Expand(other, visiting) is not { } expanded)
             {

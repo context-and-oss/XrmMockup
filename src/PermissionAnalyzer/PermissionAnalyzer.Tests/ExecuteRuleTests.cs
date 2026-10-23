@@ -320,6 +320,33 @@ public class ExecuteRuleTests
     }
 
     [Fact]
+    public void MessageEndingInRequestIsMatchedByItsName()
+    {
+        var manifest = Analyze.Code(
+            """
+            class C
+            {
+                void M(IOrganizationService service, Guid id)
+                {
+                    service.Execute(new OrganizationRequest("ctx_ApproveRequest") { ["Target"] = new EntityReference("account", id) });
+                    service.Execute(new OrganizationRequest("ctx_Close") { ["Target"] = new EntityReference("contact", id) });
+                    service.Execute(new OrganizationRequest("ctx_Save") { ["Target"] = new Entity("lead") });
+                }
+            }
+            """,
+            rules:
+            [
+                new RequestRule("ctx_Approve") { Checks = [new RuleCheck([Privilege.Write]) { Member = "Target" }] },
+                new RequestRule("ctx_CloseRequest") { Checks = [new RuleCheck([Privilege.Write]) { Member = "Target" }] },
+                new RequestRule("ctx_Save") { As = ["CreateRequest"] },
+            ]);
+
+        var method = Assert.Single(manifest.Unreached);
+        Assert.Equal(["contact:Write", "lead:Create"], method.Requirements());
+        Assert.StartsWith("custom API 'ctx_ApproveRequest' is called", Assert.Single(method.Unresolved).Reason);
+    }
+
+    [Fact]
     public void NullRequestNeedsNothing()
     {
         var method = Analyze.Method("""

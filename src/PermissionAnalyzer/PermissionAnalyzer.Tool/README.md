@@ -538,7 +538,8 @@ command-line options override everything.
 ### Request rules
 
 Each rule names the `Message` (`ctx_Approve`, or a request type such as `AssignRequest`) and what it
-needs:
+needs. A message is matched to a rule by its own name first, ignoring case, so a custom API named
+`ctx_ApproveRequest` doesn't use the rule for `ctx_Approve`:
 
 ```json
 "Rules": [

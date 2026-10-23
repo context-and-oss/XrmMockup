@@ -131,7 +131,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .Distinct(StringComparer.Ordinal)
             .OrderBy(c => c, StringComparer.Ordinal)
             .ToList();
-        var operation = new UserOperation(RequestRules.MessageOf(message.Trim()), table.Trim().ToLowerInvariant(), set is { Count: > 0 } ? set : null);
+        var operation = new UserOperation(_rules.MessageNamed(message.Trim()), table.Trim().ToLowerInvariant(), set is { Count: > 0 } ? set : null);
         var id = $"operation:{operation.Display}" + (operation.Columns is { } known ? $"({string.Join(",", known)})" : "");
         _operations[id] = operation;
     }
