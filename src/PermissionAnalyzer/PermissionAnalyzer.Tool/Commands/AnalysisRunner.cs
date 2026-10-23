@@ -106,7 +106,13 @@ internal static class AnalysisRunner
             }
 
             var report = request.Report ?? ReportOptions.Default;
-            IManifestWriter writer = request.Format == "json" ? new JsonManifestWriter(report.Filters) : new TextManifestWriter(report);
+            IManifestWriter writer = request.Format switch
+            {
+                "json" => new JsonManifestWriter(report.Filters),
+                "markdown" => new MarkdownManifestWriter(report.Filters),
+                "sarif" => new SarifManifestWriter(report.Filters, SarifManifestWriter.RepositoryPath(root), version),
+                _ => new TextManifestWriter(report),
+            };
             if (request.Output is null)
             {
                 writer.Write(manifest, coverage, Console.Out);

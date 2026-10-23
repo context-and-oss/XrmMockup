@@ -43,8 +43,8 @@ internal static class CliOptions
     {
         public const string Primary = "--format";
         public const string Alias = "-f";
-        public const string Description = "Output format: text (default) or json";
-        public static readonly string[] AllowedValues = ["text", "json"];
+        public const string Description = "Output format: text (default), json, markdown (for a pull request comment or job summary) or sarif (for code scanning)";
+        public static readonly string[] AllowedValues = ["text", "json", "markdown", "sarif"];
     }
 
     internal static class Output

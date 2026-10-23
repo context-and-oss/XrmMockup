@@ -94,7 +94,7 @@ Lists the table privileges each entry point needs.
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
 | `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
 | `--config` | `-c` | Path to `appsettings.json` (default: the current directory) |
-| `--format` | `-f` | `text` (default) or `json` |
+| `--format` | `-f` | `text` (default), `json`, `markdown` or `sarif` (see [Output](#output)) |
 | `--output` | `-o` | Write to a file instead of standard output |
 | `--verbosity` | `-v` | How much of the text report to show: `minimal` (default), `compact`, `normal`, `detailed` or `full` (see [Verbosity and filters](#verbosity-and-filters)) |
 | `--table` | | Only report requirements on these tables. Comma-separated or repeatable |
@@ -679,6 +679,50 @@ has a `result` with the counts, `unresolvedNoRule` and `unresolvedCustomApi` (th
 that are requests without a rule and custom API calls) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
 with `table` (left out for a privilege not tied to a table), `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
 it). Without roles, none of these are written.
+
+### Markdown
+
+`--format markdown` writes the report as GitHub-flavored Markdown, for a pull request comment or a
+job summary: a heading with the result (`✘ 28 missing privileges`), the `Result` line and the
+`Not checked` line as a warning, then a table per set of roles with what it lacks, as in `minimal`.
+The entry points that need each block's privileges, as in `compact`, and the unresolved operations
+are folded away in `<details>`. It ends with the counts. Markdown ignores `--verbosity`; filters
+narrow it like the text. Role names, reasons and ids are escaped, so they show as written.
+
+```yaml
+- run: xrmmockup-permissions check --format markdown --output permissions.md
+- run: cat permissions.md >> "$GITHUB_STEP_SUMMARY"
+  if: always()
+```
+
+### SARIF
+
+`--format sarif` writes the findings as [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html),
+for GitHub code scanning and editors that show SARIF, so they appear on the line that needs the
+privilege. Each call site is a result, merged over the entry points that reach it, which are its
+related locations:
+
+| Rule | Level | Result |
+|------|-------|--------|
+| `missing-privilege` | error | A privilege the roles lack. A suppressed one has a `suppressions` entry with the reason, so code scanning shows it as dismissed |
+| `unresolved-operation` | warning | An operation whose table or request isn't known, except as SYSTEM, which needs no role |
+| `not-checked` | note | A privilege of an identity without roles |
+| `unverifiable` | note | A privilege not tied to a table that the role metadata predates |
+
+Without roles, only unresolved operations are results. Filters narrow it; `--verbosity` doesn't
+apply. Each result has `properties` with the `table`, `privilege`, `runsAs`, `roles` and
+`entryPoints`. Locations are relative to `%SRCROOT%`, the root of the git repository the solution
+is in, so code scanning finds the files; outside a repository they are relative to the solution.
+
+```yaml
+- run: xrmmockup-permissions check --format sarif --output permissions.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: permissions.sarif
+```
+
+### Determinism
 
 Output is deterministic: entry points, methods, tables and source locations are sorted ordinally, paths are
 relative to the analyzed solution with forward slashes, and line endings are always `\n`. Running

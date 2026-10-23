@@ -515,7 +515,7 @@ Shared options:
 | `--solution <path>` | Solution (`.sln`/`.slnx`) or project (`.csproj`, with the projects it references) to analyze (default: the single `.sln`/`.slnx` in the current directory) |
 | `--metadata <dir>` | XrmMockup `Metadata/` folder (security roles, plugin steps, entity metadata). Default: `XrmMockup:Metadata:OutputDirectory` from `appsettings.json` |
 | `--config <file>` / `-c` | Path to `appsettings.json`, same as `xrmmockup-metadata` (§6.3) |
-| `--format text\|json\|markdown\|sarif` | Output format (default `text`; `sarif` for GitHub code scanning) |
+| `--format text\|json\|markdown\|sarif` | Output format (default `text`; `markdown` for pull request comments and job summaries, `sarif` for GitHub code scanning; phase 6, §10) |
 | `--output <file>` | Write report to file |
 | `--include-system` | Also list operations that run as SYSTEM |
 | `--verbosity minimal\|compact\|normal\|detailed\|full` / `-v` | How much of the text report to show (phase 5.5, §10): `minimal` (default) shows only the privileges to change per set of roles, `compact` adds the entry points that need them, `normal` shows what needs attention with its sources, `detailed` adds what is granted, `full` adds every source and call path |
@@ -738,8 +738,9 @@ Command-line options override the matching setting, as in the metadata tool. For
 }
 ```
 
-The same model drives text, Markdown, JSON and SARIF output. SARIF results point at the source
-location of each missing privilege.
+The same model drives text, Markdown, JSON and SARIF output. The text report below `normal` and
+Markdown share the grouping of the privileges to change per set of roles (`RoleChanges`). SARIF
+results point at the source location of each missing privilege; see phase 6 in §10.
 
 ## 8. Limitations
 
@@ -781,7 +782,7 @@ location of each missing privilege.
 | 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope, plugin code loaded from other solutions (§5.6)) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
 | 5.5 | Output clean-up (below, done): filtering, and verbosity levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
-| 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
+| 6 | SARIF/Markdown output (below, done), docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
 | Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
 
 **Output clean-up (phase 5.5, done).** On a real solution the output is long, and most of it is
@@ -827,6 +828,32 @@ what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
 - Without roles (`required` without `--role`), nothing is granted, so `normal` shows every
   requirement and the privileges per table, and differs from `full` only in the sources and in
   leaving out assumptions and fired steps.
+
+**Output formats (phase 6, done).** Two more formats, for CI rather than a terminal. Both ignore
+the verbosity, take the filters, and keep the output deterministic.
+
+- **Markdown** (`--format markdown`) is for a pull request comment or a job summary: a heading
+  with the result, `Result` and `Not checked` (as a warning callout), then the `minimal` blocks as
+  `| Table | Privileges |` tables, with the `compact` entry point groups and the unresolved
+  operations in `<details>`, so the comment stays short. It ends with the counts. Free text is
+  escaped and ids are code spans, with `|` escaped so they don't break a table.
+- **SARIF** (`--format sarif`, 2.1.0) is for GitHub code scanning. The rules are
+  `missing-privilege` (error), `unresolved-operation` (warning, not for SYSTEM), `not-checked`
+  and `unverifiable` (notes). A result is a call site with one privilege, identity and role
+  set, merged over the entry points and methods that reach it: the message names up to three,
+  `relatedLocations` are all their declarations, and `properties.entryPoints` their ids. A
+  suppressed privilege is a `missing-privilege` result with an `external` suppression whose
+  justification is the reason, so code scanning shows it as dismissed rather than hiding the
+  configuration. Without roles, only unresolved operations are results: every requirement as a
+  finding would say nothing actionable. A location outside the code (`--operation`) uses the
+  entry point's declaration, or has none.
+- **SARIF paths.** Source locations are relative to the analysis root, with `../` for plugin
+  code next to it, but code scanning resolves URIs against the repository root. The runner walks
+  up from the analysis root to the nearest `.git` folder or file (a worktree has a file), and
+  the writer prefixes each path with the root's place in the repository and resolves the `../`
+  segments, with `uriBaseId` `%SRCROOT%`. No absolute path is written, so the output is the same
+  on every machine; outside a repository the paths stay relative to the analysis root. The
+  driver version is the tool's informational version.
 
 **Idea: minimum required depth.** A `--min-depth` option (or per-table setting) that only
 counts a privilege as covered at or above a given depth, so CI could, for example, require

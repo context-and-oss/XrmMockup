@@ -9,8 +9,8 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// granted (✔) or missing (✘), with the roles each identity was checked against. Below <see cref="Verbosity.Full"/>,
 /// sources are shown without their call paths; at <see cref="Verbosity.Normal"/> only what needs attention is shown,
 /// and a last line says what was left out. <see cref="Verbosity.Minimal"/> and <see cref="Verbosity.Compact"/> replace
-/// the sections with the privileges to change, grouped (<see cref="Needs"/>). A filter narrows the sections, the privileges per table and the missing
-/// privileges; the counts and the result stay those of the whole analysis.
+/// the sections with the privileges to change (<see cref="RoleChanges"/>). A filter narrows the sections, the
+/// privileges per table and the missing privileges; the counts and the result stay those of the whole analysis.
 /// </summary>
 internal sealed class TextManifestWriter(ReportOptions? options = null) : IManifestWriter
 {
@@ -43,7 +43,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
             var rows = sectionRequirements.Where(filter.Matches)
                 .Select(r => new RowView(r.Table, r.Privilege.ToString(), r.RunsAs, r.Basis, r.Sources, sectionCoverage?.For(r)))
                 .Concat(sectionGlobalRequirements.Where(filter.Matches)
-                    .Select(r => new RowView(r.Privilege, GlobalColumn, r.RunsAs, r.Basis, r.Sources, sectionCoverage?.For(r))))
+                    .Select(r => new RowView(r.Privilege, RoleChanges.GlobalPrivilege, r.RunsAs, r.Basis, r.Sources, sectionCoverage?.For(r))))
                 .Where(r => Shown(r.Coverage))
                 .ToList();
             var shownUnresolved = unresolved.Where(filter.Matches).ToList();
@@ -69,7 +69,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
 
         var rows = entryPoints.Concat(unreached).SelectMany(s => s.Rows).ToList();
         var tableWidth = rows.Select(r => r.Table.Length).DefaultIfEmpty(0).Max();
-        var privilegeWidth = Enum.GetNames<Privilege>().Append(GlobalColumn).Max(n => n.Length);
+        var privilegeWidth = Enum.GetNames<Privilege>().Append(RoleChanges.GlobalPrivilege).Max(n => n.Length);
         var runsAsWidth = rows.Select(r => r.RunsAs.ToString().Length).DefaultIfEmpty(0).Max();
         var coverageWidth = rows.Select(r => r.Coverage is { } result ? Label(result).Length : 0).DefaultIfEmpty(0).Max();
 
@@ -181,25 +181,11 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
             writer.Write($"Not in any security role, so XrmMockup allows every operation: {string.Join(", ", notGoverned)}\n\n");
         }
 
-        // A requirement is counted once per entry point or method that needs it; the tables merge them. The counts
-        // are of the whole analysis, whatever is shown
-        var requirements = manifest.AllRequirements.ToList();
-        var globalRequirements = manifest.AllGlobalRequirements.ToList();
-        var unresolvedCount = manifest.EntryPoints.Sum(e => e.Unresolved.Count) + manifest.Unreached.Sum(m => m.Unresolved.Count);
-        var tables = requirements.Select(r => r.Table).Distinct(StringComparer.Ordinal).Count();
-        var tablePrivileges = requirements.Select(r => (r.Table, r.Privilege)).Distinct().Count();
-        var globalPrivileges = globalRequirements.Select(r => r.Privilege).Distinct(StringComparer.Ordinal).Count();
-        writer.Write(
-            $"{Count(manifest.EntryPoints.Count, "entry point")}, {Count(manifest.Unreached.Count, "unreached method")}, " +
-            $"{Count(tables, "table")}, {Count(tablePrivileges, "table privilege")} " +
-            $"({Count(requirements.Count, "requirement")} counted per entry point and method), " +
-            (globalPrivileges > 0 ? $"{Count(globalPrivileges, "privilege")} not tied to a table, " : "") +
-            $"{unresolvedCount} unresolved\n");
+        writer.Write(Totals(manifest) + "\n");
 
         if (!filter.IsEmpty)
         {
-            var matching = requirements.Count(filter.Matches) + globalRequirements.Count(filter.Matches);
-            writer.Write($"Filtered by {filter}: {matching} of {Count(requirements.Count + globalRequirements.Count, "requirement")} match\n");
+            writer.Write(Filtered(manifest, filter) + "\n");
         }
 
         if (coverage is not null)
@@ -224,123 +210,70 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     }
 
     /// <summary>
-    /// The privileges to change, in a block per role set: what the roles lack, merged over every entry point and
-    /// identity they serve, a line per table. Requirements that can't be
-    /// checked get a block per identity, and without roles, a block is every requirement of an identity that needs a
-    /// role. At <see cref="Verbosity.Compact"/>, each block is followed by the entry points and methods that need
-    /// its privileges, those that need the same ones listed together.
+    /// The <see cref="RoleChanges"/>, each followed at <see cref="Verbosity.Compact"/> by the entry points that need
+    /// its privileges.
     /// </summary>
     private static void Needs(Manifest manifest, CoverageReport? coverage, ReportFilter filter, bool byEntryPoint, TextWriter writer)
     {
-        var blocks = new Dictionary<(int Order, string Key), Block>();
-        var sections = manifest.EntryPoints.Select(e => (e.Id, e.Requirements, e.GlobalRequirements, Coverage: coverage?.For(e)))
-            .Concat(manifest.Unreached.Select(m => (m.Id, m.Requirements, m.GlobalRequirements, Coverage: coverage?.For(m))))
-            .ToList();
-        // Entry points before unreached methods, each in manifest order
-        var position = sections.Select((s, i) => (s.Id, i)).ToDictionary(s => s.Id, s => s.i, StringComparer.Ordinal);
-        foreach (var section in sections)
+        foreach (var block in RoleChanges.Of(manifest, coverage, filter))
         {
-            var needs = section.Requirements.Where(filter.Matches)
-                .Select(r => (r.RunsAs, Need: new Need(r.Table, r.Privilege.ToString(), (int)r.Privilege), Result: section.Coverage?.For(r)))
-                .Concat(section.GlobalRequirements.Where(filter.Matches)
-                    .Select(r => (r.RunsAs, Need: new Need(r.Privilege, GlobalColumn, int.MaxValue), Result: section.Coverage?.For(r))));
-            foreach (var (runsAs, need, result) in needs)
-            {
-                var identity = runsAs with { Assumed = false };
-                if (BlockOf(identity, result, section.Coverage) is not { } key) continue;
-                if (!blocks.TryGetValue(key, out var block)) blocks.Add(key, block = new Block());
-                block.Identities.Add(identity);
-                block.Needs.Add(need);
-                if (!block.Sections.TryGetValue(section.Id, out var sectionNeeds)) block.Sections.Add(section.Id, sectionNeeds = []);
-                sectionNeeds.Add(need);
-            }
-        }
-
-        foreach (var ((order, key), block) in blocks.OrderBy(b => b.Key.Order).ThenBy(b => b.Key.Key, StringComparer.Ordinal))
-        {
-            var identities = string.Join(", ", block.Identities.Order());
-            writer.Write(order switch
-            {
-                0 when coverage is null => $"{key} needs:\n",
-                0 => $"Missing from {key}, for {identities}:\n",
-                1 => $"{key}:\n",
-                _ => $"Can't be checked against {key}, for {identities} (the role metadata predates privileges not tied to a table; regenerate it):\n",
-            });
-            Lines(block.Needs, "  ");
+            writer.Write($"{block.Heading}:\n");
+            Tables(block.Tables, "  ");
             if (byEntryPoint)
             {
-                // Sections that need exactly the same privileges are one group, placed where its first section is
-                var groups = block.Sections
-                    .GroupBy(s => string.Join("\n", s.Value.Select(n => $"{n.Name} {n.Privilege}").Order(StringComparer.Ordinal)), StringComparer.Ordinal)
-                    .Select(g => (Ids: g.Select(s => s.Key).OrderBy(id => position[id]).ToList(), Needs: g.First().Value))
-                    .OrderBy(g => position[g.Ids[0]]);
                 writer.Write("\n  By entry point:\n");
-                foreach (var group in groups)
+                foreach (var group in block.EntryPoints)
                 {
                     writer.Write('\n');
                     foreach (var id in group.Ids)
                     {
                         writer.Write($"    {id}\n");
                     }
-                    Lines(group.Needs, "      ");
+                    Tables(group.Tables, "      ");
                 }
             }
             writer.Write('\n');
         }
 
-        // A line per table, so a role can be changed one table at a time, with the privileges in the order the role
-        // editor has them; privileges not tied to a table come last
-        void Lines(IEnumerable<Need> needs, string indent)
+        void Tables(IReadOnlyList<TableChange> tables, string indent)
         {
-            var lines = needs
-                .GroupBy(n => n.Name, StringComparer.Ordinal)
-                .Select(t => (Table: t.Key, Global: t.Any(n => n.Privilege == GlobalColumn), Privileges: string.Join(", ", t.OrderBy(n => n.Order).Select(n => n.Privilege).Distinct())))
-                .OrderBy(t => t.Global)
-                .ThenBy(t => t.Table, StringComparer.Ordinal)
-                .ToList();
-            var width = lines.Max(l => l.Table.Length);
-            foreach (var line in lines)
+            var width = tables.Max(t => t.Table.Length);
+            foreach (var table in tables)
             {
-                writer.Write($"{indent}{line.Table.PadRight(width)}  {line.Privileges}\n");
+                writer.Write($"{indent}{table.Table.PadRight(width)}  {string.Join(", ", table.Privileges)}\n");
             }
         }
     }
 
     /// <summary>
-    /// The block a requirement goes in at <see cref="Verbosity.Minimal"/> and <see cref="Verbosity.Compact"/>, by
-    /// order and key: missing from a role set, or without roles needed by an identity (0), not checked for an
-    /// identity (1), or unverifiable against a role set (2); <c>null</c> when it needs no change.
+    /// What was analyzed. A requirement is counted once per entry point or method that needs it; the tables merge
+    /// them. The counts are of the whole analysis, whatever is shown.
     /// </summary>
-    private static (int Order, string Key)? BlockOf(RunsAs identity, RequirementCoverage? result, SectionCoverage? coverage)
+    internal static string Totals(Manifest manifest)
     {
-        var roles = coverage?.Identities.FirstOrDefault(i => i.RunsAs == identity);
-        return result?.Status switch
-        {
-            null => identity.Kind == RunsAsKind.System ? null : (0, identity.ToString()),
-            CoverageStatus.Missing => (0, roles!.Roles!.ToString()),
-            CoverageStatus.NotChecked => (1, $"{identity} needs ({roles?.Note ?? "not checked"})"),
-            CoverageStatus.Unverifiable => (2, roles!.Roles!.ToString()),
-            _ => null,
-        };
+        var requirements = manifest.AllRequirements.ToList();
+        var globalRequirements = manifest.AllGlobalRequirements.ToList();
+        var unresolvedCount = manifest.EntryPoints.Sum(e => e.Unresolved.Count) + manifest.Unreached.Sum(m => m.Unresolved.Count);
+        var tables = requirements.Select(r => r.Table).Distinct(StringComparer.Ordinal).Count();
+        var tablePrivileges = requirements.Select(r => (r.Table, r.Privilege)).Distinct().Count();
+        var globalPrivileges = globalRequirements.Select(r => r.Privilege).Distinct(StringComparer.Ordinal).Count();
+        return
+            $"{Count(manifest.EntryPoints.Count, "entry point")}, {Count(manifest.Unreached.Count, "unreached method")}, " +
+            $"{Count(tables, "table")}, {Count(tablePrivileges, "table privilege")} " +
+            $"({Count(requirements.Count, "requirement")} counted per entry point and method), " +
+            (globalPrivileges > 0 ? $"{Count(globalPrivileges, "privilege")} not tied to a table, " : "") +
+            $"{unresolvedCount} unresolved";
     }
 
     /// <summary>
-    /// What one block of <see cref="Needs"/> lacks: in all, and per entry point or unreached method.
+    /// What the filter matches, of every requirement.
     /// </summary>
-    private sealed class Block
+    internal static string Filtered(Manifest manifest, ReportFilter filter)
     {
-        public HashSet<RunsAs> Identities { get; } = [];
-
-        public HashSet<Need> Needs { get; } = [];
-
-        public Dictionary<string, HashSet<Need>> Sections { get; } = new(StringComparer.Ordinal);
+        var all = manifest.AllRequirements.Count() + manifest.AllGlobalRequirements.Count();
+        var matching = manifest.AllRequirements.Count(filter.Matches) + manifest.AllGlobalRequirements.Count(filter.Matches);
+        return $"Filtered by {filter}: {matching} of {Count(all, "requirement")} match";
     }
-
-    /// <summary>
-    /// A privilege on a table, or a privilege not tied to a table with <see cref="GlobalColumn"/> as privilege;
-    /// <paramref name="Order"/> sorts the privileges of a table.
-    /// </summary>
-    private sealed record Need(string Name, string Privilege, int Order);
 
     private static string Name(Verbosity verbosity) => verbosity.ToString().ToLowerInvariant();
 
@@ -384,7 +317,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     {
         var rows = missing
             .Select(m => (Table: m.Table, Privilege: m.Privilege.ToString(), m.RunsAs, m.Roles, m.In))
-            .Concat(missingGlobal.Select(m => (Table: m.Privilege, Privilege: GlobalColumn, m.RunsAs, m.Roles, m.In)))
+            .Concat(missingGlobal.Select(m => (Table: m.Privilege, Privilege: RoleChanges.GlobalPrivilege, m.RunsAs, m.Roles, m.In)))
             .ToList();
         if (rows.Count == 0) return;
 
@@ -405,7 +338,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     /// <summary>
     /// What became of each requirement.
     /// </summary>
-    private static string Result(CoverageSummary summary)
+    internal static string Result(CoverageSummary summary)
     {
         var parts = new List<string> { $"{summary.Granted} granted", $"{summary.Missing} missing" };
         void Add(int count, string text)
@@ -422,7 +355,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     /// What the result doesn't cover, so a pass isn't read as proof that the roles are enough; <c>null</c> when
     /// everything was checked.
     /// </summary>
-    private static string? NotChecked(CoverageSummary summary)
+    internal static string? NotChecked(CoverageSummary summary)
     {
         var parts = new List<string>();
         if (summary.NotChecked > 0) parts.Add($"{Count(summary.NotChecked, "requirement")} without roles");
@@ -470,10 +403,5 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     private static string Source(RequirementSource source) =>
         source.Path.Count > 1 ? $"{source.Location} ({string.Join(" → ", source.Path)})" : source.Location.ToString();
 
-    /// <summary>
-    /// The privilege column of a privilege not tied to a table, whose name is in the table column.
-    /// </summary>
-    private const string GlobalColumn = "global";
-
-    private static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
+    internal static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 }
