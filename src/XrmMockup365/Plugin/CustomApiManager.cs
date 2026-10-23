@@ -160,8 +160,8 @@ namespace DG.Tools.XrmMockup
 
                 var requestParameters = new HashSet<string>(
                     registration.RequestParameters?.Select(r => r.UniqueName) ?? Enumerable.Empty<string>());
-                // Bound APIs receive the bound record(s) as an implicit Target parameter
-                if (registration.BindingType == BindingType.Entity || registration.BindingType == BindingType.EntityCollection)
+                // Entity-bound APIs receive the bound record as an implicit Target parameter
+                if (registration.BindingType == BindingType.Entity)
                 {
                     requestParameters.Add("Target");
                 }
