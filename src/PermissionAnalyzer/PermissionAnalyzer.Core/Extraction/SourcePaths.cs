@@ -27,6 +27,12 @@ internal sealed class SourcePaths
     }
 
     /// <summary>
+    /// Where a symbol is declared in source; <c>null</c> for a symbol from a referenced assembly.
+    /// </summary>
+    public SourceLocation? Declaration(ISymbol symbol) =>
+        symbol.Locations.FirstOrDefault(l => l.IsInSource) is { } location ? Of(location) : null;
+
+    /// <summary>
     /// The path relative to the root, with <c>../</c> for a file outside it, such as plugin code in a solution next to
     /// the analyzed one. A file on another drive keeps its full path.
     /// </summary>

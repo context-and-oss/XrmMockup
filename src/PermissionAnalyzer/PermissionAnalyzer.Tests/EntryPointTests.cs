@@ -143,6 +143,28 @@ public class EntryPointTests
     }
 
     [Fact]
+    public void ServiceAssignedByDeconstructionIsAssumed()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, Execute);
+
+                private void Execute(LocalPluginContext context)
+                {
+                    IOrganizationService service;
+                    int retries;
+                    (service, retries) = (context.OrganizationService, 3);
+                    service.Create(new Contact());
+                }
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Equal("local 'service' is assigned by deconstruction", Assert.Single(entry.Assumptions).Reason);
+    }
+
+    [Fact]
     public void ServiceAssignedWithCoalesceIsFollowed()
     {
         var manifest = Analyze.Code("""

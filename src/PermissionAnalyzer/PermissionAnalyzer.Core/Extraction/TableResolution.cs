@@ -316,6 +316,12 @@ internal static class RequestShapes
     };
 
     public static bool IsRequest(TableShape shape) => shape >= TableShape.RequestCreate;
+
+    /// <summary>
+    /// A reason that is reported under <see cref="TableShape.RequestOther"/> only, as it applies to no privilege.
+    /// </summary>
+    public static TableResolution Other(TableShape shape, string reason) =>
+        shape == TableShape.RequestOther ? TableResolution.Unresolved(reason) : TableResolution.Empty;
 }
 
 /// <summary>

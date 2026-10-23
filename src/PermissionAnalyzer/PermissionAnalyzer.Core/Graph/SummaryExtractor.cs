@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using XrmMockup.PermissionAnalyzer.Core.Extraction;
 using XrmMockup.PermissionAnalyzer.Core.Model;
+using static XrmMockup.PermissionAnalyzer.Core.Extraction.Operations;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 
@@ -344,7 +345,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// </summary>
     private CallFact? Call(IMethodSymbol target, IOperation? instance, bool isVirtual, IReadOnlyList<IArgumentOperation> arguments, Location location, IMethodSymbol root)
     {
-        if (!IsInSource(target) && (!isVirtual || IsFramework(target.ContainingType))) return null;
+        if (!IsInSource(target) && (!isVirtual || IsFrameworkType(target.ContainingType))) return null;
 
         var created = Creation(instance);
         var unwrapped = Unwrap(instance);
@@ -664,24 +665,6 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     }
 
     /// <summary>
-    /// A user id written in code: <c>new Guid("…")</c> or <c>Guid.Parse("…")</c>.
-    /// </summary>
-    internal static string? GuidConstant(IOperation operation)
-    {
-        var arguments = operation switch
-        {
-            IObjectCreationOperation creation when creation.Type?.ToDisplayString() == "System.Guid" => creation.Arguments,
-            IInvocationOperation { TargetMethod.Name: "Parse" } invocation when invocation.TargetMethod.ContainingType.ToDisplayString() == "System.Guid" => invocation.Arguments,
-            _ => default,
-        };
-        return !arguments.IsDefaultOrEmpty
-            && arguments[0].Value.ConstantValue is { HasValue: true, Value: string text }
-            && Guid.TryParse(text, out var id)
-            ? id.ToString("D")
-            : null;
-    }
-
-    /// <summary>
     /// The value of a readonly or constant field set by its declaration, such as a user id.
     /// </summary>
     private IOperation? FieldInitializer(IFieldSymbol field)
@@ -868,14 +851,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             Nodes.Display(symbol),
             member.ContainingType is { } type ? Nodes.TypeId(type) : null,
             symbol.MethodKind == MethodKind.Constructor,
-            Declaration(symbol),
-            Declaration(member));
+            paths.Declaration(symbol),
+            paths.Declaration(member));
         _graph.Nodes.Add(id, node);
         return node;
     }
-
-    private SourceLocation? Declaration(ISymbol symbol) =>
-        symbol.Locations.FirstOrDefault(l => l.IsInSource) is { } location ? paths.Of(location) : null;
 
     /// <summary>
     /// The node an operation belongs to: the innermost lambda or local function around it, or the member.
@@ -909,33 +889,11 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// </summary>
     private static List<IOperation> LocalValues(ILocalSymbol local, IOperation root, out string? failure)
     {
-        failure = null;
-        var values = new List<IOperation>();
-        foreach (var node in root.DescendantsAndSelf())
-        {
-            switch (node)
-            {
-                case IVariableDeclaratorOperation declarator when SymbolEqualityComparer.Default.Equals(declarator.Symbol, local):
-                    if (declarator.GetVariableInitializer() is { } initializer) values.Add(initializer.Value);
-                    break;
-                case ISimpleAssignmentOperation assignment when IsLocal(assignment.Target, local):
-                    values.Add(assignment.Value);
-                    break;
-                case ICoalesceAssignmentOperation assignment when IsLocal(assignment.Target, local):
-                    values.Add(assignment.Value);
-                    break;
-                case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument when IsLocal(argument.Value, local):
-                    failure = $"local '{local.Name}' is passed by ref or out";
-                    break;
-                case IForEachLoopOperation loop when loop.Locals.Contains(local, SymbolEqualityComparer.Default):
-                    failure = $"local '{local.Name}' is a loop variable";
-                    break;
-                case IDeclarationPatternOperation pattern when SymbolEqualityComparer.Default.Equals(pattern.DeclaredSymbol, local):
-                    failure = $"local '{local.Name}' is declared by a pattern";
-                    break;
-            }
-        }
-        return values;
+        string? failed = null;
+        var values = Operations.LocalValues(local, root, reason => failed = reason);
+        if (values.Any(v => v.IsLoopCollection)) failed = LoopVariable(local);
+        failure = failed;
+        return values.Where(v => !v.IsLoopCollection).Select(v => v.Operation).ToList();
     }
 
     /// <summary>
@@ -958,11 +916,6 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     private static bool IsThis(IOperation? instance) =>
         instance is null || Unwrap(instance) is IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ContainingTypeInstance };
 
-    private static bool IsLocal(IOperation? operation, ILocalSymbol local) =>
-        Unwrap(operation) is ILocalReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Local, local);
-
-    private static bool IsInSource(ISymbol? symbol) => symbol?.Locations.Any(l => l.IsInSource) == true;
-
     private static bool IsPrimaryConstructor(IMethodSymbol constructor) =>
         constructor.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is TypeDeclarationSyntax);
 
@@ -977,37 +930,6 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             AccessorList: var accessors,
         } && (accessors is null || accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null)))
         && !property.IsAbstract;
-
-    private static bool IsFramework(INamedTypeSymbol? type)
-    {
-        var root = type?.ContainingNamespace;
-        while (root is { ContainingNamespace.IsGlobalNamespace: false }) root = root.ContainingNamespace;
-        return root?.Name is "System" or "Microsoft";
-    }
-
-    private static IOperation? Argument(IInvocationOperation invocation, int ordinal) =>
-        invocation.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == ordinal);
-
-    private static IOperation Root(IOperation operation)
-    {
-        while (operation.Parent is not null) operation = operation.Parent;
-        return operation;
-    }
-
-    private static IOperation? Unwrap(IOperation? operation)
-    {
-        while (true)
-        {
-            switch (operation)
-            {
-                case IConversionOperation conversion: operation = conversion.Operand; break;
-                case IArgumentOperation argument: operation = argument.Value; break;
-                case IParenthesizedOperation parenthesized: operation = parenthesized.Operand; break;
-                case IDeclarationExpressionOperation declaration: operation = declaration.Expression; break;
-                default: return operation;
-            }
-        }
-    }
 
     private static Location NameLocation(SyntaxNode syntax) => syntax switch
     {

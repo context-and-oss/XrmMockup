@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.Operations;
 using XrmMockup.PermissionAnalyzer.Core.Extraction;
 using XrmMockup.PermissionAnalyzer.Core.Graph;
 using XrmMockup.PermissionAnalyzer.Core.Model;
+using static XrmMockup.PermissionAnalyzer.Core.Extraction.Operations;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Discovery;
 
@@ -92,10 +93,10 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         Entries.AddRange(steps);
         var execute = symbols.Plugin?.GetMembers("Execute").OfType<IMethodSymbol>().FirstOrDefault() is { } member
             && type.FindImplementationForInterfaceMember(member) is IMethodSymbol implementation
-            && implementation.Locations.Any(l => l.IsInSource)
+            && IsInSource(implementation)
                 ? Nodes.Id(implementation)
                 : null;
-        Plugins.Add(new PluginClass(name, compilation.AssemblyName, Declaration(type), typeId, execute, steps.Count > 0));
+        Plugins.Add(new PluginClass(name, compilation.AssemblyName, paths.Declaration(type), typeId, execute, steps.Count > 0));
     }
 
     /// <summary>
@@ -177,7 +178,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
     private static string? UserContext(IInvocationOperation registration) =>
         Configuration(registration)
             .Where(c => c.TargetMethod.Name == "SetUserContext" && c.Arguments.Length > 0)
-            .Select(c => SummaryExtractor.GuidConstant(c.Arguments[0].Value))
+            .Select(c => GuidConstant(c.Arguments[0].Value))
             .FirstOrDefault();
 
     /// <summary>
@@ -290,7 +291,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         for (var current = type; current is not null; current = current.BaseType)
         {
             var execute = current.GetMembers("Execute").OfType<IMethodSymbol>()
-                .FirstOrDefault(m => m.IsOverride && m.Parameters.Length == 1 && m.Locations.Any(l => l.IsInSource));
+                .FirstOrDefault(m => m.IsOverride && m.Parameters.Length == 1 && IsInSource(m));
             if (execute is null) continue;
 
             var name = ReflectionName(type);
@@ -301,7 +302,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
                 compilation.AssemblyName,
                 null,
                 null,
-                Declaration(type),
+                paths.Declaration(type),
                 [new Handler(Nodes.Id(execute), Nodes.TypeId(type))]));
             return;
         }
@@ -325,7 +326,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
             compilation.AssemblyName,
             new Trigger(Binding: binding),
             null,
-            Declaration(method),
+            paths.Declaration(method),
             [new Handler(Nodes.Id(method), method.IsStatic ? null : Nodes.TypeId(method.ContainingType))]));
     }
 
@@ -341,20 +342,6 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         return null;
     }
 
-    private static IOperation? Unwrap(IOperation? operation)
-    {
-        while (operation is IConversionOperation or IArgumentOperation or IParenthesizedOperation)
-        {
-            operation = operation switch
-            {
-                IConversionOperation conversion => conversion.Operand,
-                IArgumentOperation argument => argument.Value,
-                _ => ((IParenthesizedOperation)operation).Operand,
-            };
-        }
-        return operation;
-    }
-
     /// <summary>
     /// The name a type has at runtime, such as <c>Contoso.Plugins.Outer+Inner</c>, which plugin metadata uses.
     /// </summary>
@@ -368,9 +355,6 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         var ns = type.ContainingNamespace;
         return ns is null || ns.IsGlobalNamespace ? name : ns.ToDisplayString() + "." + name;
     }
-
-    private SourceLocation? Declaration(ISymbol symbol) =>
-        symbol.Locations.FirstOrDefault(l => l.IsInSource) is { } location ? paths.Of(location) : null;
 
     /// <summary>
     /// A partial class is looked at once, from its first declaration.

@@ -109,6 +109,23 @@ public class OperationTests
     }
 
     [Fact]
+    public void ChecksThatDependOnTheUsersChoicesApply()
+    {
+        var operation = Run("QualifyLead", "lead");
+
+        Assert.Equal(["account:Create", "contact:Create", "lead:Write", "opportunity:Create"], operation.Requirements());
+    }
+
+    [Fact]
+    public void AccessRightsTheUserGrantsAreUnresolved()
+    {
+        var operation = Run("GrantAccess", "ctx_order");
+
+        Assert.Equal(["ctx_order:Share"], operation.Requirements());
+        Assert.Equal("the rights granted in PrincipalAccess.AccessMask aren't known", Assert.Single(operation.Unresolved).Reason);
+    }
+
+    [Fact]
     public void MessageWithoutARuleIsUnresolved()
     {
         var operation = Run("ctx_Recalculate", "ctx_order");

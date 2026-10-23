@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using XrmMockup.PermissionAnalyzer.Core.Graph;
 using XrmMockup.PermissionAnalyzer.Core.Model;
+using static XrmMockup.PermissionAnalyzer.Core.Extraction.Operations;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 
@@ -122,7 +123,7 @@ internal sealed class TableResolver(
 
             // The record Retrieve returns is of the table it is asked for
             case IInvocationOperation retrieve when symbols.ServiceOperation(retrieve.TargetMethod) == "Retrieve":
-                return Name(retrieve.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == 0)?.Value);
+                return Name(Argument(retrieve, 0));
 
             case IPropertyReferenceOperation { Property.IsIndexer: false } property when LookupTargets(property) is { Count: > 0 } targets:
                 return Unknown(op, "entity", TableShape.Entity).WithinTargets(targets);
@@ -289,7 +290,7 @@ internal sealed class TableResolver(
         switch (op)
         {
             case null:
-                return Other(shape, "request argument is missing");
+                return RequestShapes.Other(shape, "request argument is missing");
 
             // Executing null throws, so such a branch, usually one the caller guards against, needs nothing
             case { ConstantValue: { HasValue: true, Value: null } }:
@@ -327,7 +328,7 @@ internal sealed class TableResolver(
             case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
                 return Requests(source, shape);
 
-            case IInvocationOperation invocation when IsFramework(invocation):
+            case IInvocationOperation invocation when IsSystemCall(invocation):
                 return Passthrough(invocation, t => IsRequestLike(t), value => Requests(value, shape), value => Requests(value, shape)) ?? UnknownRequest(op, shape);
 
             case { } when Branches(op) is { } branches:
@@ -354,108 +355,60 @@ internal sealed class TableResolver(
 
         var names = Members("RequestName");
         if (FirstStringArgument(creation) is { } nameArgument) names.Add(nameArgument.Value);
-        if (names.Count == 0) return Other(shape, "request has no name");
+        if (names.Count == 0) return RequestShapes.Other(shape, "request has no name");
 
         var result = TableResolution.Empty;
         foreach (var name in names)
         {
             result.Add(Unwrap(name)?.ConstantValue is { HasValue: true, Value: string { Length: > 0 } message }
                 ? Apply(message, Members, shape)
-                : Other(shape, "request name is computed at runtime"));
+                : RequestShapes.Other(shape, "request name is computed at runtime"));
         }
         return result;
     }
 
     /// <summary>
-    /// The tables <paramref name="message"/> needs the privilege of <paramref name="shape"/> on, with the values of
-    /// the request's members from <paramref name="members"/>. The privileges a request needs by name, its
-    /// assumptions and the steps it fires go with <see cref="TableShape.RequestOther"/>, so they are added once.
+    /// The tables <paramref name="message"/> needs the privilege of <paramref name="shape"/> on, by its rule, with the
+    /// values of the request's members from <paramref name="members"/>.
     /// </summary>
     private TableResolution Apply(string message, Func<string, List<IOperation>> members, TableShape shape)
     {
+        var request = new CodeMembers(this, members);
         if (_rules.Find(message) is not { } rule)
         {
             // Steps registered on a message without a rule, such as a custom action, fire on no table
-            var unknown = Other(shape, RequestReasons.NoRule(message));
+            var unknown = RequestShapes.Other(shape, RequestReasons.NoRule(message));
             if (shape != TableShape.RequestOther) return unknown;
-            var bypassed = Bypass(message, members, out var unknownBypass);
+            var bypassed = request.Bypass(message, out var unknownBypass);
             return unknown.Add(bypassed).Add(TableResolution.Fires(message, TableResolution.Empty, bypass: unknownBypass));
         }
-
-        var result = TableResolution.Empty;
-        foreach (var missing in rule.Missing) result.Add(Other(shape, RequestReasons.NoRule(missing)));
-        foreach (var nested in rule.Requests)
-        {
-            foreach (var value in members(nested)) result.Add(Requests(value, shape));
-        }
-        if (shape == TableShape.RequestOther)
-        {
-            foreach (var global in rule.GlobalPrivileges) result.Add(TableResolution.Global(global, message));
-            foreach (var assumption in rule.Assumptions) result.Add(TableResolution.Assumed(assumption));
-            result.Add(Bypass(message, members, out var bypass));
-            result.Add(Fired(message, rule, members, bypass));
-        }
-
-        var privilege = RequestShapes.PrivilegeOf(shape);
-        foreach (var check in rule.Checks)
-        {
-            if (check.When is { } when && !members(when).Any(MayBeTrue)) continue;
-
-            var needed = privilege is { } p && check.Privileges.Contains(p);
-            if (check.AccessMask is { } mask)
-            {
-                var rights = Rights(mask, members, out var reasons);
-                if (shape == TableShape.RequestOther) result.Add(reasons);
-                needed |= privilege is { } granted && rights.Contains(granted);
-            }
-            // A request that writes an entity, such as Create or Update, sets its lookups too
-            if (shape is TableShape.RequestAppend or TableShape.RequestAppendTo && check.Member is { } written
-                && (check.Privileges.Contains(Privilege.Create) || check.Privileges.Contains(Privilege.Write)))
-            {
-                var lookupShape = shape == TableShape.RequestAppend ? TableShape.LookupHolder : TableShape.LookupTarget;
-                foreach (var value in members(written)) result.Add(Lookups(value, lookupShape));
-            }
-
-            if (!needed) continue;
-
-            if (check.Table is { } table)
-            {
-                result.Add(TableResolution.Table(table));
-            }
-            else if (check.Member is { } member)
-            {
-                result.Add(MemberTables(message, member, members(member)));
-            }
-        }
-        return result;
+        return RuleApplication.Apply(message, rule, request, shape);
     }
 
     /// <summary>
-    /// The plugin steps a request fires: those of each of its messages, on the table of its first check, usually
-    /// <c>Target</c>. A request whose checks name no table fires on no table.
+    /// The members of a request created in code, read from the values they are set to.
     /// </summary>
-    private TableResolution Fired(string message, ExpandedRule rule, Func<string, List<IOperation>> members, PluginBypass bypass)
+    private sealed class CodeMembers(TableResolver resolver, Func<string, List<IOperation>> values) : IRequestMembers
     {
-        var primary = rule.Checks.FirstOrDefault(c => c.Member is not null) ?? rule.Checks.FirstOrDefault(c => c.Table is not null);
-        var tables = TableResolution.Empty;
-        TableResolution? columns = null;
-        if (primary?.Member is { } member)
-        {
-            var values = members(member);
-            tables.Add(MemberTables(message, member, values));
+        public TableResolution Tables(string message, string member) => resolver.MemberTables(message, member, values(member));
 
-            // The columns of an entity the request writes, such as the Target of an UpdateRequest
-            if (values.Count > 0 && values.All(v => IsEntityLike(Unwrap(v)?.Type) && !symbols.Is(Unwrap(v)?.Type, symbols.EntityReference)))
-            {
-                columns = Union(values, Columns);
-            }
-        }
-        else if (primary?.Table is { } table)
+        public TableResolution? Columns(string member)
         {
-            tables.Add(TableResolution.Table(table));
+            var written = values(member);
+            return written.Count > 0 && written.All(resolver.IsEntity)
+                ? Union(written, resolver.Columns)
+                : null;
         }
 
-        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables, columns, bypass)));
+        public bool MayBeSet(string member) => values(member).Any(MayBeTrue);
+
+        public IReadOnlyList<Privilege> Rights(string path, out TableResolution reasons) => resolver.Rights(path, values, out reasons);
+
+        public TableResolution Lookups(string member, TableShape shape) => Union(values(member), value => resolver.Lookups(value, shape));
+
+        public TableResolution Requests(string member, TableShape shape) => Union(values(member), value => resolver.Requests(value, shape));
+
+        public TableResolution Bypass(string message, out PluginBypass bypass) => TableResolver.Bypass(message, values, out bypass);
     }
 
     /// <summary>
@@ -591,7 +544,7 @@ internal sealed class TableResolver(
     private List<IOperation> ObjectMemberValues(IOperation value, string member) => Unwrap(value) switch
     {
         IObjectCreationOperation creation => MemberValues(creation, null, member),
-        ILocalReferenceOperation local => LocalValues(local.Local, Root(local), TableResolution.Empty)
+        ILocalReferenceOperation local => LocalValues(local.Local, Root(local), null)
             .Where(v => !v.IsLoopCollection)
             .SelectMany(v => Unwrap(v.Operation) is IObjectCreationOperation creation ? MemberValues(creation, null, member) : [])
             .Concat(Root(local).DescendantsAndSelf().SelectMany(node => SetMember(node, instance => IsLocal(instance, local.Local), member)))
@@ -678,7 +631,7 @@ internal sealed class TableResolver(
                 return TableResolution.Unresolved("records argument is missing");
 
             case IInvocationOperation invocation when symbols.ServiceOperation(invocation.TargetMethod) == "RetrieveMultiple":
-                return Query(invocation.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == 0), includeLinks: false).OrUnresolved("query has no table name");
+                return Query(Argument(invocation, 0), includeLinks: false).OrUnresolved("query has no table name");
 
             case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
                 return Records(records);
@@ -713,7 +666,7 @@ internal sealed class TableResolver(
             case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
                 return Records(source);
 
-            case IInvocationOperation invocation when IsFramework(invocation):
+            case IInvocationOperation invocation when IsSystemCall(invocation):
                 return Passthrough(invocation, t => IsRecordsLike(t) || IsEntityLike(t), Records, EntityOrRecords) ?? Unknown(op, "records", TableShape.Records);
 
             case { } when Branches(op) is { } branches:
@@ -797,7 +750,7 @@ internal sealed class TableResolver(
                     : result;
             }
 
-            case IInvocationOperation invocation when IsFramework(invocation):
+            case IInvocationOperation invocation when IsSystemCall(invocation):
                 return Passthrough(invocation, t => IsEntityLike(t) || IsRecordsLike(t), value => Lookups(value, shape), value => Lookups(value, shape)) ?? TableResolution.Empty;
 
             case { } when Branches(op) is { } branches:
@@ -861,7 +814,7 @@ internal sealed class TableResolver(
         }
         // Only whether the method is in the solution, as building its call would resolve its arguments in turn
         if (node is IInvocationOperation invocation && !ReferenceEquals(invocation, call) && calls is not null
-            && invocation.TargetMethod.Locations.Any(l => l.IsInSource) && invocation.Arguments.Any(a => isObject(Unwrap(a.Value))))
+            && IsInSource(invocation.TargetMethod) && invocation.Arguments.Any(a => isObject(Unwrap(a.Value))))
         {
             return TableResolution.Unresolved($"entity is passed to '{invocation.TargetMethod.Name}', which can set more columns");
         }
@@ -1010,7 +963,7 @@ internal sealed class TableResolver(
 
         var lambda = parameter.Parent;
         while (lambda is not null && !(lambda is IAnonymousFunctionOperation function && SymbolEqualityComparer.Default.Equals(function.Symbol, lambdaSymbol))) lambda = lambda.Parent;
-        if (lambda?.Parent is not IDelegateCreationOperation { Parent: IArgumentOperation { Parent: IInvocationOperation invocation } argument } || !IsFramework(invocation)) return null;
+        if (lambda?.Parent is not IDelegateCreationOperation { Parent: IArgumentOperation { Parent: IInvocationOperation invocation } argument } || !IsSystemCall(invocation)) return null;
 
         return invocation.Instance ?? invocation.Arguments.FirstOrDefault(a => a != argument && a.Parameter?.Ordinal == 0)?.Value;
     }
@@ -1090,9 +1043,9 @@ internal sealed class TableResolver(
                 try
                 {
                     var templates = new List<string>();
-                    foreach (var value in LocalValues(local.Local, Root(local), failures))
+                    foreach (var value in LocalValues(local.Local, Root(local), Failed(failures)))
                     {
-                        if (value.IsLoopCollection) failures.Add(TableResolution.Unresolved($"local '{local.Local.Name}' is a loop variable"));
+                        if (value.IsLoopCollection) failures.Add(TableResolution.Unresolved(LoopVariable(local.Local)));
                         else templates.AddRange(Templates(value.Operation, topLevel, failures, includeLinks));
                     }
                     return templates.Distinct(StringComparer.Ordinal).ToList();
@@ -1156,7 +1109,7 @@ internal sealed class TableResolver(
         {
             var root = Root(reference);
             var result = TableResolution.Empty;
-            foreach (var value in LocalValues(local, root, silent ? TableResolution.Empty : result))
+            foreach (var value in LocalValues(local, root, silent ? null : Failed(result)))
             {
                 if (!value.IsLoopCollection)
                 {
@@ -1166,7 +1119,7 @@ internal sealed class TableResolver(
                 {
                     result.Add(resolveElements is not null
                         ? resolveElements(value.Operation)
-                        : TableResolution.Unresolved($"local '{local.Name}' is a loop variable"));
+                        : TableResolution.Unresolved(LoopVariable(local)));
                 }
             }
 
@@ -1183,53 +1136,6 @@ internal sealed class TableResolver(
         {
             _visiting.Remove(local);
         }
-    }
-
-    /// <summary>
-    /// Every value assigned to <paramref name="local"/>. For a <c>foreach</c> variable that's the collection it
-    /// iterates. Assignments the analysis can't follow are added to <paramref name="failures"/>.
-    /// </summary>
-    private static List<LocalValue> LocalValues(ILocalSymbol local, IOperation root, TableResolution failures)
-    {
-        var values = new List<LocalValue>();
-        foreach (var node in root.DescendantsAndSelf())
-        {
-            switch (node)
-            {
-                case IVariableDeclaratorOperation declarator when SymbolEqualityComparer.Default.Equals(declarator.Symbol, local):
-                    if (declarator.GetVariableInitializer() is { } initializer) values.Add(new LocalValue(initializer.Value, false));
-                    break;
-
-                case ISimpleAssignmentOperation assignment when IsLocal(assignment.Target, local):
-                    values.Add(new LocalValue(assignment.Value, false));
-                    break;
-
-                case ICoalesceAssignmentOperation coalesce when IsLocal(coalesce.Target, local):
-                    values.Add(new LocalValue(coalesce.Value, false));
-                    break;
-
-                case ICompoundAssignmentOperation compound when IsLocal(compound.Target, local):
-                    failures.Add(TableResolution.Unresolved($"local '{local.Name}' is changed by a compound assignment"));
-                    break;
-
-                case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument when IsLocal(argument.Value, local):
-                    failures.Add(TableResolution.Unresolved($"local '{local.Name}' is passed by ref or out"));
-                    break;
-
-                case IForEachLoopOperation loop when loop.Locals.Contains(local, SymbolEqualityComparer.Default):
-                    values.Add(new LocalValue(loop.Collection, true));
-                    break;
-
-                case IDeclarationPatternOperation pattern when SymbolEqualityComparer.Default.Equals(pattern.DeclaredSymbol, local):
-                    failures.Add(TableResolution.Unresolved($"local '{local.Name}' is declared by a pattern"));
-                    break;
-
-                case IDeconstructionAssignmentOperation deconstruction when deconstruction.Target.DescendantsAndSelf().Any(t => IsLocal(t, local)):
-                    failures.Add(TableResolution.Unresolved($"local '{local.Name}' is assigned by deconstruction"));
-                    break;
-            }
-        }
-        return values;
     }
 
     /// <summary>
@@ -1269,6 +1175,11 @@ internal sealed class TableResolver(
         return arguments.FirstOrDefault(a => a.Parameter is { Ordinal: 0, Type.SpecialType: SpecialType.System_String });
     }
 
+    /// <summary>
+    /// An entity, not a reference to one, so its columns can be set.
+    /// </summary>
+    private bool IsEntity(IOperation value) => IsEntityLike(Unwrap(value)?.Type) && !symbols.Is(Unwrap(value)?.Type, symbols.EntityReference);
+
     private bool IsEntityOrReference(ITypeSymbol? type) =>
         symbols.Is(type, symbols.Entity) || symbols.Is(type, symbols.EntityReference);
 
@@ -1307,22 +1218,8 @@ internal sealed class TableResolver(
         _ => type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)?.TypeArguments[0],
     };
 
-    /// <summary>
-    /// A call into the .NET libraries, such as LINQ, whose results come from its arguments.
-    /// </summary>
-    private static bool IsFramework(IInvocationOperation invocation) =>
-        !invocation.TargetMethod.Locations.Any(l => l.IsInSource)
-        && invocation.TargetMethod.ContainingNamespace?.ToDisplayString() is { } name
-        && (name == "System" || name.StartsWith("System.", StringComparison.Ordinal));
-
     private bool IsTableQuery(ITypeSymbol? type) =>
         symbols.Is(type, symbols.QueryExpression) || symbols.Is(type, symbols.QueryByAttribute);
-
-    private static bool IsLocal(IOperation? operation, ILocalSymbol local) =>
-        Unwrap(operation) is ILocalReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Local, local);
-
-    private static bool IsParameter(IOperation? operation, IParameterSymbol parameter) =>
-        Unwrap(operation) is IParameterReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Parameter, parameter);
 
     /// <summary>
     /// The values a conditional or coalesce can take; <c>null</c> for any other value.
@@ -1337,26 +1234,7 @@ internal sealed class TableResolver(
     private static TableResolution Union(IEnumerable<IOperation> values, Func<IOperation, TableResolution> resolve) =>
         values.Aggregate(TableResolution.Empty, (result, value) => result.Add(resolve(value)));
 
-    private static IOperation Root(IOperation operation)
-    {
-        while (operation.Parent is not null) operation = operation.Parent;
-        return operation;
-    }
-
-    private static IOperation? Unwrap(IOperation? operation)
-    {
-        while (UnwrapOnce(operation) is { } inner) operation = inner;
-        return operation;
-    }
-
-    private static IOperation? UnwrapOnce(IOperation? operation) => operation switch
-    {
-        IConversionOperation conversion => conversion.Operand,
-        IArgumentOperation argument => argument.Value,
-        IParenthesizedOperation parenthesized => parenthesized.Operand,
-        IDeclarationExpressionOperation declaration => declaration.Expression,
-        _ => null,
-    };
+    private static Action<string> Failed(TableResolution failures) => reason => failures.Add(TableResolution.Unresolved(reason));
 
     private static string Indexer(IPropertyReferenceOperation indexer)
     {
@@ -1371,8 +1249,6 @@ internal sealed class TableResolver(
         var arguments = indexer.Arguments.Select(a => Key(a.Value) is { } key ? $"\"{key}\"" : "…");
         return $"{target}[{string.Join(", ", arguments)}]";
     }
-
-    private readonly record struct LocalValue(IOperation Operation, bool IsLoopCollection);
 
     /// <summary>
     /// A value the resolver can't follow here. A method parameter becomes a slot for the call graph to fill in, and
@@ -1397,12 +1273,6 @@ internal sealed class TableResolver(
 
     private TableResolution UnknownRequest(IOperation? operation, TableShape shape) =>
         Unknown(operation, "request", shape, silent: shape != TableShape.RequestOther);
-
-    /// <summary>
-    /// A reason that is reported under <see cref="TableShape.RequestOther"/> only, as it applies to no privilege.
-    /// </summary>
-    private static TableResolution Other(TableShape shape, string reason) =>
-        shape == TableShape.RequestOther ? TableResolution.Unresolved(reason) : TableResolution.Empty;
 
     /// <summary>
     /// A type parameter of a generic method becomes a slot for the type argument at each call site, and one of the

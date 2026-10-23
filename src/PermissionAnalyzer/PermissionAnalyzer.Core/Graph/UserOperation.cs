@@ -23,72 +23,75 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
     public NodeSummary Node(string id, RequestRules rules, LookupColumns lookups)
     {
         var node = new NodeSummary(id, id, Display, null, false, null, null);
-        var table = TableResolution.Table(Table);
-        var columns = Columns?.Aggregate(TableResolution.Empty, (result, column) => result.Add(TableResolution.Table(column)));
-
         if (rules.Find(Message) is not { } rule)
         {
             // A message without a rule, such as a custom API, may fire steps on the table
-            node.Accesses.Add(Access(TableResolution.Unresolved(RequestReasons.NoRule(Message)).Add(TableResolution.Fires(Message, table, columns))));
+            node.Accesses.Add(Access(TableResolution.Unresolved(RequestReasons.NoRule(Message)).Add(TableResolution.Fires(Message, TableResolution.Table(Table), ColumnSet()))));
             return node;
         }
 
-        var fired = TableResolution.Empty;
-        foreach (var message in rule.Messages) fired.Add(TableResolution.Fires(message, table, columns));
-        foreach (var global in rule.GlobalPrivileges) fired.Add(TableResolution.Global(global, Message));
-        foreach (var assumption in rule.Assumptions) fired.Add(TableResolution.Assumed(assumption));
-        node.Accesses.Add(Access(fired));
-
-        foreach (var missing in rule.Missing) node.Accesses.Add(Access(TableResolution.Unresolved(RequestReasons.NoRule(missing))));
-        foreach (var nested in rule.Requests)
+        var members = new OperationMembers(this, RuleApplication.PrimaryMember(rule), lookups);
+        foreach (var shape in RequestShapes.All)
         {
-            node.Accesses.Add(Access(TableResolution.Unresolved($"the requests in {nested} of the {Message} request aren't known")));
-        }
-
-        // The table is the value of the member the steps fire on, usually Target; checks on other members aren't known
-        var primary = rule.Checks.FirstOrDefault(c => c.Member is not null)?.Member;
-        foreach (var check in rule.Checks)
-        {
-            var privileges = check.Privileges.ToArray();
-            if (check.Table is { } fixedTable)
-            {
-                node.Accesses.Add(Access(TableResolution.Table(fixedTable), privileges));
-            }
-            else if (check.Member == primary)
-            {
-                node.Accesses.Add(Access(TableResolution.Table(Table), privileges));
-                if (check.AccessMask is { } mask) node.Accesses.Add(Access(TableResolution.Unresolved($"the rights granted in {mask} aren't known")));
-                if (Columns is not null && (privileges.Contains(Privilege.Create) || privileges.Contains(Privilege.Write))) node.Accesses.AddRange(Lookups(lookups));
-            }
-            else
-            {
-                node.Accesses.Add(Access(TableResolution.Unresolved($"{check.Member} of the {Message} request isn't known"), privileges));
-            }
+            var tables = RuleApplication.Apply(Message, rule, members, shape);
+            node.Accesses.Add(RequestShapes.PrivilegeOf(shape) is { } privilege ? Access(tables, privilege) : Access(tables));
         }
         return node;
     }
 
-    /// <summary>
-    /// Append on the table when a column set is a lookup, and AppendTo on the tables the lookups refer to: the
-    /// table when there's one, every target as a lookup target when there are several.
-    /// </summary>
-    private IEnumerable<AccessFact> Lookups(LookupColumns lookups)
-    {
-        var targets = Columns!.Select(c => lookups.TargetsOf(Table, c)).Where(t => t.Count > 0).ToList();
-        if (targets.Count == 0) yield break;
+    private TableResolution? ColumnSet() => Columns?.Aggregate(TableResolution.Empty, (result, column) => result.Add(TableResolution.Table(column)));
 
-        yield return Access(TableResolution.Table(Table), Privilege.Append);
-        var referred = TableResolution.Empty;
-        foreach (var target in targets)
-        {
-            foreach (var name in target) referred.Add(target.Count == 1 ? TableResolution.Table(name) : TableResolution.LookupTarget(name));
-        }
-        yield return Access(referred, "lookup value: ", Privilege.AppendTo);
-    }
-
-    private AccessFact Access(TableResolution tables, params Privilege[] privileges) => Access(tables, "", privileges);
-
-    private AccessFact Access(TableResolution tables, string reasonPrefix, params Privilege[] privileges) => new(Message, Location, privileges, tables, reasonPrefix, Service);
+    private AccessFact Access(TableResolution tables, params Privilege[] privileges) => new(Message, Location, privileges, tables, "", Service);
 
     private static IReadOnlyList<ServiceOrigin> Service { get; } = [new FixedOrigin(RunsAs.Caller)];
+
+    /// <summary>
+    /// The members of a user operation. Its table and columns are those of the member its steps fire on, usually
+    /// <c>Target</c>; the values of the other members aren't known.
+    /// </summary>
+    private sealed class OperationMembers(UserOperation operation, string? primary, LookupColumns lookups) : IRequestMembers
+    {
+        public TableResolution Tables(string message, string member) =>
+            member == primary ? TableResolution.Table(operation.Table) : TableResolution.Unresolved($"{member} of the {message} request isn't known");
+
+        public TableResolution? Columns(string member) => member == primary ? operation.ColumnSet() : null;
+
+        // The choices a user makes, such as whether qualifying a lead creates an account, aren't known, so each applies
+        public bool MayBeSet(string member) => true;
+
+        public IReadOnlyList<Privilege> Rights(string path, out TableResolution reasons)
+        {
+            reasons = TableResolution.Unresolved($"the rights granted in {path} aren't known");
+            return [];
+        }
+
+        /// <summary>
+        /// The table when a column set is a lookup, and the tables the lookups refer to: the table when there's
+        /// one, every target as a lookup target when there are several.
+        /// </summary>
+        public TableResolution Lookups(string member, TableShape shape)
+        {
+            var result = TableResolution.Empty;
+            if (member != primary || operation.Columns is null) return result;
+
+            var targets = operation.Columns.Select(c => lookups.TargetsOf(operation.Table, c)).Where(t => t.Count > 0).ToList();
+            if (targets.Count == 0) return result;
+            if (shape == TableShape.LookupHolder) return TableResolution.Table(operation.Table);
+
+            foreach (var target in targets)
+            {
+                foreach (var name in target) result.Add(target.Count == 1 ? TableResolution.Table(name) : TableResolution.LookupTarget(name));
+            }
+            return result;
+        }
+
+        public TableResolution Requests(string member, TableShape shape) =>
+            RequestShapes.Other(shape, $"the requests in {member} of the {operation.Message} request aren't known");
+
+        public TableResolution Bypass(string message, out PluginBypass bypass)
+        {
+            bypass = PluginBypass.None;
+            return TableResolution.Empty;
+        }
+    }
 }
