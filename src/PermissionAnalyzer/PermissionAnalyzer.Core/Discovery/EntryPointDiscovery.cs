@@ -114,7 +114,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         if (!isStep)
         {
             var api = arguments.FirstOrDefault()?.Value.ConstantValue is { HasValue: true, Value: string apiName } ? apiName : "?";
-            return new EntryCandidate($"custom-api:{api}", EntryPointKind.CustomApi, name, compilation.AssemblyName, new Trigger(Message: api), null, declaration, handlers);
+            return new EntryCandidate($"custom-api:{api}", EntryPointKind.CustomApi, name, compilation.AssemblyName, new Trigger(Message: api), null, declaration, handlers, ExecutePrivilegeOf(invocation));
         }
 
         var message = Name(arguments.ElementAtOrDefault(0)?.Value) ?? "?";
@@ -128,7 +128,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
             EntryPointKind.PluginStep,
             name,
             compilation.AssemblyName,
-            new Trigger(message, table, stage, FilteredAttributes: filter),
+            new Trigger(message, table, stage, FilteredAttributes: filter, Asynchronous: IsAsynchronous(invocation)),
             impersonation,
             declaration,
             handlers);
@@ -181,6 +181,41 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
             .FirstOrDefault();
 
     /// <summary>
+    /// <c>.WithExecutePrivilegeName("prvReadctx_Order")</c>, <c>.WithExecutePrivilege&lt;T&gt;(Privilege.Read)</c> or
+    /// <c>.WithExecutePrivilege("ctx_Order", Privilege.Read)</c> on the custom API configuration; the last one wins.
+    /// The last two give the table privilege directly: a schema name is the logical name with another casing.
+    /// </summary>
+    private ExecutePrivilege? ExecutePrivilegeOf(IInvocationOperation registration)
+    {
+        ExecutePrivilege? found = null;
+        foreach (var call in Configuration(registration))
+        {
+            var arguments = call.Arguments.Where(a => a.Parameter is not null).OrderBy(a => a.Parameter!.Ordinal).Select(a => Unwrap(a.Value)).ToList();
+            switch (call.TargetMethod.Name)
+            {
+                case "WithExecutePrivilegeName" when arguments.Count == 1:
+                    found = new ExecutePrivilege(arguments[0]?.ConstantValue is { HasValue: true, Value: string { Length: > 0 } privilege } ? privilege : null);
+                    break;
+
+                case "WithExecutePrivilege" when call.TargetMethod.TypeArguments.Length == 1 && arguments.Count == 1:
+                    found = TablePrivilege(symbols.LogicalNameOf(call.TargetMethod.TypeArguments[0]), arguments[0]);
+                    break;
+
+                case "WithExecutePrivilege" when arguments.Count == 2:
+                    var table = arguments[0]?.ConstantValue is { HasValue: true, Value: string { Length: > 0 } schemaName } ? schemaName.ToLowerInvariant() : null;
+                    found = TablePrivilege(table, arguments[1]);
+                    break;
+            }
+        }
+        return found;
+    }
+
+    private static ExecutePrivilege TablePrivilege(string? table, IOperation? privilege) =>
+        table is not null && Name(privilege) is { } name && Enum.TryParse<Privilege>(name, out var parsed) && Enum.IsDefined(typeof(Privilege), parsed)
+            ? new ExecutePrivilege(null, table, parsed)
+            : new ExecutePrivilege(null);
+
+    /// <summary>
     /// <c>.AddFilteredAttributes(x => x.Name, …)</c> or <c>.AddFilteredAttributes("name", …)</c> on the step
     /// configuration, lowercased and sorted. <c>null</c> when there are none, or when one can't be read, so the step
     /// is treated as running on every update.
@@ -202,6 +237,17 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         }
         return columns.Count > 0 ? columns.ToList() : null;
     }
+
+    /// <summary>
+    /// <c>.SetExecutionMode(ExecutionMode.Asynchronous)</c> on the step configuration. A mode set at runtime is taken
+    /// as synchronous, the default.
+    /// </summary>
+    private static bool IsAsynchronous(IInvocationOperation registration) =>
+        Configuration(registration)
+            .Where(c => c.TargetMethod.Name == "SetExecutionMode" && c.Arguments.Length > 0)
+            .Any(c => Unwrap(c.Arguments[0].Value) is var mode
+                && (mode is IFieldReferenceOperation { Field: { Name: "Asynchronous", ContainingType.TypeKind: TypeKind.Enum } }
+                    || mode?.ConstantValue is { HasValue: true, Value: 1 }));
 
     /// <summary>
     /// The column a filtered attribute names: a constant, or the early-bound property a lambda selects.

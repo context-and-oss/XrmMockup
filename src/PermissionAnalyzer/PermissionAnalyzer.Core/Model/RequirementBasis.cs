@@ -11,6 +11,11 @@ public enum RequirementBasis
     Direct,
 
     /// <summary>
+    /// The execute privilege of a custom API, which calling it needs.
+    /// </summary>
+    ExecutePrivilege,
+
+    /// <summary>
     /// Reached through an interface or abstract call that no dependency injection registration resolves, so
     /// every implementation in the solution is included.
     /// </summary>

@@ -14,7 +14,8 @@ public sealed class EntryPoint(
     IReadOnlyList<Requirement> requirements,
     IReadOnlyList<UnresolvedOperation> unresolved,
     IReadOnlyList<Assumption> assumptions,
-    IReadOnlyList<string>? triggers = null)
+    IReadOnlyList<string>? triggers = null,
+    IReadOnlyList<GlobalRequirement>? globalRequirements = null)
 {
     /// <summary>
     /// A stable id such as <c>plugin:Contoso.AccountPostPlugin:Update:account:PostOperation</c>.
@@ -49,6 +50,11 @@ public sealed class EntryPoint(
     /// Requirements sorted by table, privilege, identity and basis.
     /// </summary>
     public IReadOnlyList<Requirement> Requirements { get; } = requirements;
+
+    /// <summary>
+    /// Privileges not tied to a table, sorted by name, identity and basis.
+    /// </summary>
+    public IReadOnlyList<GlobalRequirement> GlobalRequirements { get; } = globalRequirements ?? [];
 
     public IReadOnlyList<UnresolvedOperation> Unresolved { get; } = unresolved;
 

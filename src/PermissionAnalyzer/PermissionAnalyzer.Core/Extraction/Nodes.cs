@@ -77,6 +77,22 @@ internal static class Nodes
     public static string TypeId(ITypeSymbol type) => type.OriginalDefinition.ToDisplayString(TypeFormat);
 
     /// <summary>
+    /// The type parameters of <paramref name="type"/> as declared, after those of the types it is nested in.
+    /// </summary>
+    public static List<ITypeParameterSymbol> TypeParameters(INamedTypeSymbol type) =>
+        TypeArguments(type.OriginalDefinition).Cast<ITypeParameterSymbol>().ToList();
+
+    /// <summary>
+    /// The type arguments of <paramref name="type"/>, in the order of <see cref="TypeParameters"/>.
+    /// </summary>
+    public static List<ITypeSymbol> TypeArguments(INamedTypeSymbol type)
+    {
+        var result = type.ContainingType is { } outer ? TypeArguments(outer) : [];
+        result.AddRange(type.TypeArguments);
+        return result;
+    }
+
+    /// <summary>
     /// The symbol as declared: generic methods and members of generic types are not constructed, an extension
     /// method is not reduced and a partial method is its definition.
     /// </summary>

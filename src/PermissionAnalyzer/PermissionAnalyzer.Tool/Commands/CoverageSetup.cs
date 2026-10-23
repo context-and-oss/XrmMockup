@@ -76,10 +76,18 @@ internal static class CoverageSetup
         return RoleSet.Combine(found, origin);
     }
 
-    private static Suppression Suppression(SuppressionConfiguration suppression, int index)
+    internal static Suppression Suppression(SuppressionConfiguration suppression, int index)
     {
         var setting = $"XrmMockup:Permissions:Suppress:{index}";
-        if (string.IsNullOrWhiteSpace(suppression.Table)) throw new ToolException($"{setting} has no Table");
+        if (string.IsNullOrWhiteSpace(suppression.Table))
+        {
+            // A privilege not tied to a table is suppressed by its name, such as prvActOnBehalfOfAnotherUser
+            if (suppression.Privilege is { } name && !string.IsNullOrWhiteSpace(name) && !Enum.TryParse<Privilege>(name, ignoreCase: true, out _))
+            {
+                return new Suppression("", null, suppression.Reason, name.Trim());
+            }
+            throw new ToolException($"{setting} has no Table. Leave it out only to suppress a privilege not tied to a table by its name, such as prvActOnBehalfOfAnotherUser");
+        }
 
         Privilege? privilege = null;
         if (suppression.Privilege is { } text)

@@ -36,6 +36,12 @@ public enum CoverageStatus
     /// Runs as SYSTEM, which needs no role.
     /// </summary>
     System,
+
+    /// <summary>
+    /// A privilege not tied to a table, which the role metadata doesn't have: it was generated before those privileges
+    /// were downloaded.
+    /// </summary>
+    Unverifiable,
 }
 
 /// <param name="Status">Whether the requirement is covered.</param>
@@ -52,22 +58,12 @@ public sealed record RequirementCoverage(CoverageStatus Status, PrivilegeDepth? 
 public sealed record IdentityRoles(RunsAs RunsAs, RoleSet? Roles, string? Note = null);
 
 /// <summary>
-/// A privilege that can't be checked against the metadata: impersonating a user by setting <c>CallerId</c> needs
-/// <see cref="Privilege"/> on the identity that sets it, and the role metadata has no global privileges yet.
-/// </summary>
-/// <param name="RunsAs">The identity that sets <c>CallerId</c>.</param>
-public sealed record ImpersonationCheck(RunsAs RunsAs)
-{
-    public const string Privilege = "prvActOnBehalfOfAnotherUser";
-}
-
-/// <summary>
 /// Role coverage for the requirements of one entry point or unreached method.
 /// </summary>
 public sealed class SectionCoverage(
     IReadOnlyDictionary<Requirement, RequirementCoverage> requirements,
+    IReadOnlyDictionary<GlobalRequirement, RequirementCoverage> globalRequirements,
     IReadOnlyList<IdentityRoles> identities,
-    ImpersonationCheck? impersonation,
     int unresolved,
     int unresolvedNoRule,
     int unresolvedCustomApi)
@@ -76,8 +72,6 @@ public sealed class SectionCoverage(
     /// The identities of the section's requirements, with their roles, sorted by identity.
     /// </summary>
     public IReadOnlyList<IdentityRoles> Identities { get; } = identities;
-
-    public ImpersonationCheck? Impersonation { get; } = impersonation;
 
     /// <summary>
     /// Unresolved operations that would need a role, so not those running as SYSTEM.
@@ -90,17 +84,19 @@ public sealed class SectionCoverage(
     public int UnresolvedNoRule { get; } = unresolvedNoRule;
 
     /// <summary>
-    /// The part of <see cref="Unresolved"/> that are custom API calls, whose privileges aren't analyzed yet.
+    /// The part of <see cref="Unresolved"/> that are custom API calls, whose code or execute privilege isn't known.
     /// </summary>
     public int UnresolvedCustomApi { get; } = unresolvedCustomApi;
 
     public RequirementCoverage For(Requirement requirement) => requirements[requirement];
 
-    internal IEnumerable<RequirementCoverage> All => requirements.Values;
+    public RequirementCoverage For(GlobalRequirement requirement) => globalRequirements[requirement];
+
+    internal IEnumerable<RequirementCoverage> All => requirements.Values.Concat(globalRequirements.Values);
 }
 
 /// <summary>
-/// Counts over every requirement of a <see cref="CoverageReport"/>. <see cref="UnresolvedNoRule"/> and
+/// Counts over every requirement of a <see cref="CoverageReport"/>, including privileges not tied to a table. <see cref="UnresolvedNoRule"/> and
 /// <see cref="UnresolvedCustomApi"/> are the parts of <see cref="Unresolved"/> that are requests without a rule and
 /// custom API calls.
 /// </summary>
@@ -138,6 +134,16 @@ public sealed record CoverageSummary(
 public sealed record MissingPrivilege(string Table, Privilege Privilege, RunsAs RunsAs, RoleSet Roles, IReadOnlyList<string> In);
 
 /// <summary>
+/// A privilege not tied to a table that the roles of an identity don't grant, with every entry point and unreached
+/// method that needs it.
+/// </summary>
+/// <param name="Privilege">The privilege name, such as <c>prvActOnBehalfOfAnotherUser</c>.</param>
+/// <param name="RunsAs">The identity, without <see cref="RunsAs.Assumed"/>.</param>
+/// <param name="Roles">The roles that don't grant it.</param>
+/// <param name="In">Ids of the entry points and unreached methods that need it, sorted.</param>
+public sealed record MissingGlobalPrivilege(string Privilege, RunsAs RunsAs, RoleSet Roles, IReadOnlyList<string> In);
+
+/// <summary>
 /// Role coverage for a whole manifest.
 /// </summary>
 public sealed class CoverageReport(
@@ -145,6 +151,7 @@ public sealed class CoverageReport(
     IReadOnlyDictionary<string, SectionCoverage> unreached,
     CoverageSummary summary,
     IReadOnlyList<MissingPrivilege> missing,
+    IReadOnlyList<MissingGlobalPrivilege> missingGlobal,
     bool usesConfiguredRoles)
 {
     public CoverageSummary Summary { get; } = summary;
@@ -153,6 +160,11 @@ public sealed class CoverageReport(
     /// The missing requirements merged across entry points, sorted by table, privilege, identity and roles.
     /// </summary>
     public IReadOnlyList<MissingPrivilege> Missing { get; } = missing;
+
+    /// <summary>
+    /// The missing privileges not tied to a table merged across entry points, sorted by privilege, identity and roles.
+    /// </summary>
+    public IReadOnlyList<MissingGlobalPrivilege> MissingGlobal { get; } = missingGlobal;
 
     /// <summary>
     /// Some requirement was checked against roles from <c>Principals</c> or <c>Users</c>.

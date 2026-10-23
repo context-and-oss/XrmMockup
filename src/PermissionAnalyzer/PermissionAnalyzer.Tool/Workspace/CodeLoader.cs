@@ -7,7 +7,8 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 
 /// <summary>
 /// Loads a solution or project with MSBuild and adds every C# project to a <see cref="ManifestBuilder"/>, or with
-/// <c>pluginCode</c>, as plugin code from another solution (<see cref="ManifestBuilder.AddPluginCode"/>).
+/// <c>pluginCode</c>, as plugin code from another solution (<see cref="ManifestBuilder.AddPluginCode"/>). The projects
+/// that a single project references are added as referenced code (<see cref="ManifestBuilder.AddReferencedCode"/>).
 /// The projects must be restored, as for a build. Strong-name signing is turned off, because it only affects the
 /// output and its key file is often not on the machine.
 /// </summary>
@@ -33,6 +34,7 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
 
         logger.LogInformation("Loading {Path}", path);
         IEnumerable<Project> projects;
+        var referenced = new HashSet<ProjectId>();
         if (IsSolution(path))
         {
             projects = (await workspace.OpenSolutionAsync(path, cancellationToken: cancellationToken)).Projects;
@@ -42,11 +44,13 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
             await workspace.OpenProjectAsync(path, cancellationToken: cancellationToken);
             // A project with several target frameworks loads as one project per framework. The projects it
             // references are analyzed too, because entry points in this project call into them, such as
-            // function apps whose Dataverse calls are in a shared library
+            // function apps whose Dataverse calls are in a shared library. Code in them that the project doesn't
+            // reach isn't reported as unreached, since other apps that share the library may call it
             var fullPath = Path.GetFullPath(path);
             var solution = workspace.CurrentSolution;
-            var roots = solution.Projects.Where(p => string.Equals(p.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
-            projects = WithReferences(solution, roots);
+            var roots = solution.Projects.Where(p => string.Equals(p.FilePath, fullPath, StringComparison.OrdinalIgnoreCase)).ToList();
+            projects = WithReferences(solution, roots).ToList();
+            referenced.UnionWith(projects.Select(p => p.Id).Except(roots.Select(p => p.Id)));
         }
 
         var analyzed = 0;
@@ -97,7 +101,10 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
                 throw new ToolException($"Could not load {project.Name}: its references didn't resolve.{hint}{problems}");
             }
 
-            if (!(pluginCode ? builder.AddPluginCode(compilation, cancellationToken) : builder.Add(compilation, cancellationToken)))
+            var added = pluginCode ? builder.AddPluginCode(compilation, cancellationToken)
+                : referenced.Contains(project.Id) ? builder.AddReferencedCode(compilation, cancellationToken)
+                : builder.Add(compilation, cancellationToken);
+            if (!added)
             {
                 if (problems.Length == 0)
                 {

@@ -6,13 +6,20 @@ namespace XrmMockup.PermissionAnalyzer.Core.Coverage;
 /// <summary>
 /// A missing privilege that is accepted, from <c>XrmMockup:Permissions:Suppress</c>.
 /// </summary>
-/// <param name="Table">Table logical name.</param>
+/// <param name="Table">Table logical name, or empty for a privilege not tied to a table.</param>
 /// <param name="Privilege">The privilege, or <c>null</c> for every privilege on the table.</param>
 /// <param name="Reason">Why it is accepted, shown in the output.</param>
-public sealed record Suppression(string Table, Privilege? Privilege, string? Reason)
+/// <param name="GlobalPrivilege">
+/// The name of a privilege not tied to a table, such as <c>prvActOnBehalfOfAnotherUser</c>, when
+/// <paramref name="Table"/> is empty.
+/// </param>
+public sealed record Suppression(string Table, Privilege? Privilege, string? Reason, string? GlobalPrivilege = null)
 {
     public bool Matches(Requirement requirement) =>
-        string.Equals(Table, requirement.Table, StringComparison.OrdinalIgnoreCase) && (Privilege is null || Privilege == requirement.Privilege);
+        Table.Length > 0 && string.Equals(Table, requirement.Table, StringComparison.OrdinalIgnoreCase) && (Privilege is null || Privilege == requirement.Privilege);
+
+    public bool Matches(GlobalRequirement requirement) =>
+        string.Equals(GlobalPrivilege, requirement.Privilege, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -63,22 +70,35 @@ public static class CoverageEvaluator
         var usesConfiguredRoles = false;
         var sections = new List<SectionCoverage>();
         var missing = new SortedDictionary<(string Table, Privilege Privilege, RunsAs RunsAs, string Roles), (RoleSet Roles, SortedSet<string> In)>(MissingOrder);
+        var missingGlobal = new SortedDictionary<(string Privilege, RunsAs RunsAs, string Roles), (RoleSet Roles, SortedSet<string> In)>(MissingGlobalOrder);
 
-        SectionCoverage Section(string id, EntryPoint? entryPoint, IReadOnlyList<Requirement> requirements, IReadOnlyList<UnresolvedOperation> unresolved)
+        SectionCoverage Section(
+            string id,
+            EntryPoint? entryPoint,
+            IReadOnlyList<Requirement> requirements,
+            IReadOnlyList<GlobalRequirement> globalRequirements,
+            IReadOnlyList<UnresolvedOperation> unresolved)
         {
             var applicationUser = ApplicationUserRoles(entryPoint, options, principals);
             var identities = new SortedDictionary<RunsAs, IdentityRoles>();
             var coverage = new Dictionary<Requirement, RequirementCoverage>();
+            var globalCoverage = new Dictionary<GlobalRequirement, RequirementCoverage>();
 
-            foreach (var requirement in requirements)
+            IdentityRoles IdentityOf(RunsAs identity)
             {
-                var identity = requirement.RunsAs with { Assumed = false };
                 if (!identities.TryGetValue(identity, out var roles))
                 {
                     roles = Roles(identity, entryPoint, options, applicationUser, users);
                     if (roles.Roles is { } set && set != options.Roles && set != options.CallerRoles) usesConfiguredRoles = true;
                     identities.Add(identity, roles);
                 }
+                return roles;
+            }
+
+            foreach (var requirement in requirements)
+            {
+                var identity = requirement.RunsAs with { Assumed = false };
+                var roles = IdentityOf(identity);
                 var result = Check(requirement, roles, notGoverned, options.Suppress);
                 coverage.Add(requirement, result);
                 if (result.Status == CoverageStatus.Missing)
@@ -93,12 +113,29 @@ public static class CoverageEvaluator
                 }
             }
 
-            var impersonation = requirements.Any(r => r.RunsAs.Kind == RunsAsKind.ImpersonatedCaller) ? new ImpersonationCheck(Impersonator(entryPoint)) : null;
+            foreach (var requirement in globalRequirements)
+            {
+                var identity = requirement.RunsAs with { Assumed = false };
+                var roles = IdentityOf(identity);
+                var result = Check(requirement, roles, options.Suppress);
+                globalCoverage.Add(requirement, result);
+                if (result.Status == CoverageStatus.Missing)
+                {
+                    var key = (requirement.Privilege, identity, roles.Roles!.ToString());
+                    if (!missingGlobal.TryGetValue(key, out var found))
+                    {
+                        found = (roles.Roles, new SortedSet<string>(StringComparer.Ordinal));
+                        missingGlobal.Add(key, found);
+                    }
+                    found.In.Add(id);
+                }
+            }
+
             var needsRole = unresolved.Where(u => u.RunsAs.Kind != RunsAsKind.System).ToList();
             var section = new SectionCoverage(
                 coverage,
+                globalCoverage,
                 identities.Values.Where(i => i.RunsAs.Kind != RunsAsKind.System).ToList(),
-                impersonation,
                 needsRole.Count,
                 needsRole.Count(u => RequestReasons.NoRuleMessage(u.Reason) is not null),
                 needsRole.Count(u => RequestReasons.IsCustomApi(u.Reason)));
@@ -109,13 +146,13 @@ public static class CoverageEvaluator
         var entryPoints = new Dictionary<string, SectionCoverage>(StringComparer.Ordinal);
         foreach (var entryPoint in manifest.EntryPoints)
         {
-            entryPoints[entryPoint.Id] = Section(entryPoint.Id, entryPoint, entryPoint.Requirements, entryPoint.Unresolved);
+            entryPoints[entryPoint.Id] = Section(entryPoint.Id, entryPoint, entryPoint.Requirements, entryPoint.GlobalRequirements, entryPoint.Unresolved);
         }
 
         var unreached = new Dictionary<string, SectionCoverage>(StringComparer.Ordinal);
         foreach (var method in manifest.Unreached)
         {
-            unreached[method.Id] = Section(method.Id, null, method.Requirements, method.Unresolved);
+            unreached[method.Id] = Section(method.Id, null, method.Requirements, method.GlobalRequirements, method.Unresolved);
         }
 
         var all = sections.SelectMany(s => s.All).ToList();
@@ -130,10 +167,11 @@ public static class CoverageEvaluator
             sections.Sum(s => s.Unresolved),
             sections.Sum(s => s.UnresolvedNoRule),
             sections.Sum(s => s.UnresolvedCustomApi),
-            sections.Count(s => s.Impersonation is not null));
+            Count(CoverageStatus.Unverifiable));
 
         var missingPrivileges = missing.Select(m => new MissingPrivilege(m.Key.Table, m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();
-        return new CoverageReport(entryPoints, unreached, summary, missingPrivileges, usesConfiguredRoles);
+        var missingGlobalPrivileges = missingGlobal.Select(m => new MissingGlobalPrivilege(m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();
+        return new CoverageReport(entryPoints, unreached, summary, missingPrivileges, missingGlobalPrivileges, usesConfiguredRoles);
     }
 
     private static readonly IComparer<(string Table, Privilege Privilege, RunsAs RunsAs, string Roles)> MissingOrder =
@@ -145,12 +183,32 @@ public static class CoverageEvaluator
             return result != 0 ? result : string.CompareOrdinal(x.Roles, y.Roles);
         });
 
+    private static readonly IComparer<(string Privilege, RunsAs RunsAs, string Roles)> MissingGlobalOrder =
+        Comparer<(string Privilege, RunsAs RunsAs, string Roles)>.Create((x, y) =>
+        {
+            var result = string.CompareOrdinal(x.Privilege, y.Privilege);
+            if (result == 0) result = x.RunsAs.CompareTo(y.RunsAs);
+            return result != 0 ? result : string.CompareOrdinal(x.Roles, y.Roles);
+        });
+
     private static RequirementCoverage Check(Requirement requirement, IdentityRoles identity, HashSet<string> notGoverned, IReadOnlyList<Suppression> suppress)
     {
         if (requirement.RunsAs.Kind == RunsAsKind.System) return new RequirementCoverage(CoverageStatus.System);
         if (identity.Roles is not { } roles) return new RequirementCoverage(CoverageStatus.NotChecked);
         if (roles.Depth(requirement.Table, requirement.Privilege) is { } depth) return new RequirementCoverage(CoverageStatus.Granted, depth);
         if (notGoverned.Contains(requirement.Table)) return new RequirementCoverage(CoverageStatus.NotGoverned);
+
+        return suppress.FirstOrDefault(s => s.Matches(requirement)) is { } suppression
+            ? new RequirementCoverage(CoverageStatus.Suppressed, Reason: suppression.Reason)
+            : new RequirementCoverage(CoverageStatus.Missing);
+    }
+
+    private static RequirementCoverage Check(GlobalRequirement requirement, IdentityRoles identity, IReadOnlyList<Suppression> suppress)
+    {
+        if (requirement.RunsAs.Kind == RunsAsKind.System) return new RequirementCoverage(CoverageStatus.System);
+        if (identity.Roles is not { } roles) return new RequirementCoverage(CoverageStatus.NotChecked);
+        if (!roles.KnowsGlobalPrivileges) return new RequirementCoverage(CoverageStatus.Unverifiable);
+        if (roles.GlobalDepth(requirement.Privilege) is { } depth) return new RequirementCoverage(CoverageStatus.Granted, depth);
 
         return suppress.FirstOrDefault(s => s.Matches(requirement)) is { } suppression
             ? new RequirementCoverage(CoverageStatus.Suppressed, Reason: suppression.Reason)
@@ -191,15 +249,4 @@ public static class CoverageEvaluator
         }
         return principals.TryGetValue(assembly, out var app) ? app : null;
     }
-
-    /// <summary>
-    /// Who sets <c>CallerId</c>: the application user of app code, else the caller.
-    /// </summary>
-    private static RunsAs Impersonator(EntryPoint? entryPoint) =>
-        entryPoint?.Kind switch
-        {
-            EntryPointKind.Function => RunsAs.ApplicationUser,
-            EntryPointKind.Method or null => RunsAs.ApplicationUser with { Assumed = true },
-            _ => RunsAs.Caller,
-        };
 }

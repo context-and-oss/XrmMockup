@@ -152,14 +152,14 @@ public class CoverageTests
     }
 
     [Fact]
-    public void ImpersonatedCallsUseCallerRolesAndNeedAnUnverifiablePrivilege()
+    public void ImpersonatedCallsUseCallerRolesAndNeedActOnBehalfOfAnotherUser()
     {
         var manifest = Analyze.Code(FunctionSource, Governed);
         var withoutCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
         var actForUser = manifest.Entry("function:ActForUser");
 
         Assert.Equal(["contact:Delete as ImpersonatedCaller: NotChecked"], Results(withoutCallerRoles, actForUser));
-        Assert.StartsWith("not checked: acts for the user in CallerId", Assert.Single(withoutCallerRoles.For(actForUser).Identities).Note);
+        Assert.StartsWith("not checked: acts for the user in CallerId", withoutCallerRoles.For(actForUser).Identities.Single(i => i.RunsAs.Kind == RunsAsKind.ImpersonatedCaller).Note);
 
         // The application user's roles don't count: the call runs with the impersonated user's privileges
         var withCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
@@ -169,10 +169,60 @@ public class CoverageTests
         });
         Assert.Equal(["contact:Delete as ImpersonatedCaller: Missing"], Results(withCallerRoles, actForUser));
 
-        var impersonation = withCallerRoles.For(actForUser).Impersonation;
-        Assert.Equal(RunsAs.ApplicationUser, impersonation?.RunsAs);
-        Assert.Null(withCallerRoles.For(manifest.Entry("function:ProcessOrder")).Impersonation);
+        // The roles come from metadata without global privileges, so the privilege to impersonate can't be checked
+        Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Unverifiable"], GlobalResults(withCallerRoles, actForUser));
+        Assert.Empty(manifest.Entry("function:ProcessOrder").GlobalRequirements);
         Assert.Equal(1, withCallerRoles.Summary.Unverifiable);
+    }
+
+    [Fact]
+    public void ImpersonationIsCheckedAgainstGlobalPrivileges()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var actForUser = manifest.Entry("function:ActForUser");
+
+        var missing = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([WithGlobal(Integration)], "--role") });
+        Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Missing"], GlobalResults(missing, actForUser));
+        var global = Assert.Single(missing.MissingGlobal);
+        Assert.Equal((GlobalRequirement.ActOnBehalfOfAnotherUser, RunsAs.ApplicationUser), (global.Privilege, global.RunsAs));
+        Assert.Equal(["function:ActForUser"], global.In);
+        Assert.Equal(0, missing.Summary.Unverifiable);
+        Assert.False(missing.Summary.Passed(strict: false));
+
+        var granted = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Roles = RoleSet.Combine([WithGlobal(Integration, ("prvactonbehalfofanotheruser", PrivilegeDepth.Organization))], "--role"),
+        });
+        Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Granted Organization"], GlobalResults(granted, actForUser));
+    }
+
+    [Fact]
+    public void GlobalPrivilegeCanBeSuppressedByName()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Roles = RoleSet.Combine([WithGlobal(Integration)], "--role"),
+            Suppress = [CoverageSetup.Suppression(new SuppressionConfiguration { Privilege = "prvActOnBehalfOfAnotherUser", Reason = "set up by hand" }, 0)],
+        });
+
+        Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Suppressed"], GlobalResults(report, manifest.Entry("function:ActForUser")));
+        Assert.Empty(report.MissingGlobal);
+    }
+
+    [Fact]
+    public void SuppressionWithoutTableNeedsAGlobalPrivilegeName()
+    {
+        var exception = Assert.Throws<ToolException>(() => CoverageSetup.Suppression(new SuppressionConfiguration { Privilege = "Create" }, 2));
+
+        Assert.StartsWith("XrmMockup:Permissions:Suppress:2 has no Table", exception.Message);
+    }
+
+    [Fact]
+    public void RolesFromOlderMetadataDontKnowGlobalPrivileges()
+    {
+        Assert.False(RoleSet.Combine([Integration, WithGlobal(Salesperson)], "--role").KnowsGlobalPrivileges);
+        Assert.True(RoleSet.Combine([WithGlobal(Integration), WithGlobal(Salesperson)], "--role").KnowsGlobalPrivileges);
     }
 
     [Fact]
@@ -379,7 +429,7 @@ public class CoverageTests
         new TextManifestWriter().Write(manifest, report, output);
         var line = Assert.Single(output.ToString().Split('\n'), l => l.StartsWith("Not checked: ", StringComparison.Ordinal));
 
-        Assert.EndsWith("prvActOnBehalfOfAnotherUser for 1 entry point", line);
+        Assert.EndsWith("1 privilege not tied to a table (the role metadata predates them; regenerate it)", line);
     }
 
     [Fact]
@@ -413,8 +463,10 @@ public class CoverageTests
         new TextManifestWriter().Write(manifest, report, output);
         var text = output.ToString();
 
-        Assert.Contains("  ! prvActOnBehalfOfAnotherUser as ApplicationUser: unverifiable", text);
+        Assert.Matches(@"\n  · prvActOnBehalfOfAnotherUser +global +ApplicationUser +unverifiable +", text);
         Assert.Contains("  roles for ImpersonatedCaller: not checked: acts for the user in CallerId", text);
+        Assert.Contains("Privileges not tied to a table: prvActOnBehalfOfAnotherUser\n", text);
+        Assert.Contains("1 privilege not tied to a table (the role metadata predates them; regenerate it)", text);
     }
 
     [Fact]
@@ -443,6 +495,21 @@ public class CoverageTests
         Assert.Contains("\"incomplete\": false", json);
     }
 
+    [Fact]
+    public void JsonOutputWritesGlobalRequirementsWithoutATable()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([WithGlobal(Integration)], "--role") });
+        using var output = new StringWriter();
+        new JsonManifestWriter().Write(manifest, report, output);
+        var json = output.ToString();
+
+        Assert.Contains("\"privilege\": \"prvActOnBehalfOfAnotherUser\",\n          \"runsAs\": \"ApplicationUser\"", json);
+        Assert.Contains("\"privilege\": \"Delete\"", json);
+        Assert.DoesNotContain("impersonation", json);
+        Assert.Contains("\"missing\": [\n    {\n      \"privilege\": \"prvActOnBehalfOfAnotherUser\"", json);
+    }
+
     private static IReadOnlyList<string> Results(CoverageReport report, EntryPoint entryPoint) =>
         entryPoint.Requirements.Select(r =>
         {
@@ -450,6 +517,20 @@ public class CoverageTests
             var depth = coverage.Depth is { } d ? $" {d}" : "";
             return $"{r.Table}:{r.Privilege} as {r.RunsAs}: {coverage.Status}{depth}";
         }).ToList();
+
+    private static IReadOnlyList<string> GlobalResults(CoverageReport report, EntryPoint entryPoint) =>
+        entryPoint.GlobalRequirements.Select(r =>
+        {
+            var coverage = report.For(entryPoint).For(r);
+            var depth = coverage.Depth is { } d ? $" {d}" : "";
+            return $"{r.Privilege} as {r.RunsAs}: {coverage.Status}{depth}";
+        }).ToList();
+
+    /// <summary>
+    /// The role as downloaded by a metadata generator that has global privileges.
+    /// </summary>
+    private static RoleDefinition WithGlobal(RoleDefinition role, params (string Name, PrivilegeDepth Depth)[] globalPrivileges) =>
+        new(role.Name, role.Privileges, globalPrivileges.ToDictionary(p => p.Name, p => p.Depth, StringComparer.OrdinalIgnoreCase));
 
     private static RoleDefinition Role(string name, params (string Table, Privilege Privilege, PrivilegeDepth Depth)[] privileges) =>
         new(name, privileges

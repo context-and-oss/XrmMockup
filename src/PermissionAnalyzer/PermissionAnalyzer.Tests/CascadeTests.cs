@@ -346,5 +346,6 @@ public class CascadeTests
         Assert.Equal(["account:Write"], run.Requirements());
         Assert.Single(run.Triggers);
         Assert.StartsWith("custom-api:", run.Triggers[0]);
+        Assert.Empty(run.Unresolved);
     }
 }

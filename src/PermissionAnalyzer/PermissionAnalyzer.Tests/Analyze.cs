@@ -51,6 +51,8 @@ internal static class Analyze
         {
             public enum EventOperation { Create, Update, Delete, Retrieve }
             public enum ExecutionStage { PreValidation = 10, PreOperation = 20, PostOperation = 40 }
+            public enum Privilege { Create, Read, Write, Delete, Append, AppendTo, Assign, Share }
+            public enum ExecutionMode { Synchronous, Asynchronous }
         }
 
         namespace XrmPluginCore.Plugins
@@ -59,8 +61,16 @@ internal static class Analyze
             {
                 public PluginStepConfigBuilder<T> SetUserContext(Guid userId) => this;
                 public PluginStepConfigBuilder<T> SetName(string name) => this;
+                public PluginStepConfigBuilder<T> SetExecutionMode(XrmPluginCore.Enums.ExecutionMode mode) => this;
                 public PluginStepConfigBuilder<T> AddFilteredAttributes(params System.Linq.Expressions.Expression<Func<T, object>>[] lambdas) => this;
                 public PluginStepConfigBuilder<T> AddFilteredAttributes(params string[] attributes) => this;
+            }
+
+            public class CustomApiConfigBuilder
+            {
+                public CustomApiConfigBuilder WithExecutePrivilegeName(string name) => this;
+                public CustomApiConfigBuilder WithExecutePrivilege<T>(XrmPluginCore.Enums.Privilege privilege) where T : Entity => this;
+                public CustomApiConfigBuilder WithExecutePrivilege(string schemaName, XrmPluginCore.Enums.Privilege privilege) => this;
             }
         }
 
@@ -88,8 +98,8 @@ internal static class Analyze
                 protected PluginStepConfigBuilder<TEntity> RegisterStep<TEntity, TService>(EventOperation operation, ExecutionStage stage, Action<TService> action) where TEntity : Entity => new();
                 protected PluginStepConfigBuilder<TEntity> RegisterStep<TEntity, TService>(EventOperation operation, ExecutionStage stage, string handlerMethod) where TEntity : Entity => new();
                 protected PluginStepConfigBuilder<T> RegisterStep<T>(EventOperation operation, ExecutionStage stage, Action<IExtendedServiceProvider> action) where T : Entity => new();
-                protected void RegisterCustomAPI(string name, Action<LocalPluginContext> action) { }
-                protected void RegisterAPI<TService>(string name, Action<TService> action) { }
+                protected CustomApiConfigBuilder RegisterCustomAPI(string name, Action<LocalPluginContext> action) => new();
+                protected CustomApiConfigBuilder RegisterAPI<TService>(string name, Action<TService> action) => new();
             }
         }
 

@@ -1,8 +1,9 @@
 namespace XrmMockup.PermissionAnalyzer.Core.Model;
 
 /// <summary>
-/// The table privileges executing a request needs, such as Assign and Write on the <c>Target</c> of
-/// <c>AssignRequest</c>. A rule with no checks, as, or requests marks a request that needs no table privilege.
+/// The privileges executing a request needs, such as Assign and Write on the <c>Target</c> of <c>AssignRequest</c>,
+/// or prvBulkDelete for <c>BulkDeleteRequest</c>. A rule with no checks, global privileges, as, or requests marks a
+/// request that needs no privilege.
 /// </summary>
 /// <param name="Message">
 /// The message, such as <c>Assign</c>. The request type name (<c>AssignRequest</c>) is accepted too.
@@ -10,6 +11,18 @@ namespace XrmMockup.PermissionAnalyzer.Core.Model;
 public sealed record RequestRule(string Message)
 {
     public IReadOnlyList<RuleCheck> Checks { get; init; } = [];
+
+    /// <summary>
+    /// Privileges the request needs by name, such as <c>prvBulkDelete</c>. Each is looked up in the privilege
+    /// catalog, where it is a privilege not tied to a table or one on the tables it applies to.
+    /// </summary>
+    public IReadOnlyList<string> GlobalPrivileges { get; init; } = [];
+
+    /// <summary>
+    /// What the analysis assumes about the request, such as that an email is sent as its sender, when what it needs
+    /// depends on data only known at runtime.
+    /// </summary>
+    public string? Assumption { get; init; }
 
     /// <summary>
     /// Messages whose checks this request makes as well, such as <c>Create</c> and <c>Update</c> for <c>Upsert</c>.

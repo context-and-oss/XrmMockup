@@ -56,6 +56,16 @@ internal static class AnalysisRunner
                 var steps = PluginStepLoader.Load(metadataDirectory);
                 logger.LogInformation("Loaded {Count} plugin steps from {Directory}", steps.Count, metadataDirectory);
                 builder.AddPluginSteps(steps);
+
+                if (PrivilegeCatalogLoader.Load(metadataDirectory) is var (privileges, customApis))
+                {
+                    logger.LogInformation("Loaded {Count} privileges and {CustomApis} custom APIs from {File}", privileges.Count, customApis.Count, PrivilegeCatalogLoader.FileName);
+                    builder.AddPrivilegeCatalog(privileges, customApis);
+                }
+                else
+                {
+                    logger.LogWarning("No {File} in {Directory}, so execute privileges set by name can't be looked up. Regenerate the metadata to add it", PrivilegeCatalogLoader.FileName, metadataDirectory);
+                }
             }
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);

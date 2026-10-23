@@ -48,10 +48,18 @@ internal static class RoleLoader
             }
             privileges[table] = granted;
         }
-        return new RoleDefinition(role.Name, privileges);
+
+        // Metadata from before global privileges were downloaded has none, which is not the same as granting none
+        SortedDictionary<string, PrivilegeDepth>? globalPrivileges = null;
+        if (role.GlobalPrivileges is { } globals)
+        {
+            globalPrivileges = new SortedDictionary<string, PrivilegeDepth>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, privilege) in globals) globalPrivileges[name] = ToDepth(privilege.PrivilegeDepth);
+        }
+        return new RoleDefinition(role.Name, privileges, globalPrivileges);
     }
 
-    private static Privilege? ToPrivilege(AccessRights right) => right switch
+    internal static Privilege? ToPrivilege(AccessRights right) => right switch
     {
         AccessRights.CreateAccess => Privilege.Create,
         AccessRights.ReadAccess => Privilege.Read,

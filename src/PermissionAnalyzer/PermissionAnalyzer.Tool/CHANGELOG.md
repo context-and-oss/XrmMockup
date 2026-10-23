@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: The identity each requirement runs as (`Caller`, `User`, `ApplicationUser`, `ImpersonatedCaller`, `System`), including impersonation from `SetUserContext` and plugin step metadata, with assumptions listed when it can't be determined
 * Add: `--plugin`, `--custom-api`, `--function` and `--entry` to analyze one entry point, and the `EntryPoints` setting for extra entry methods
 * Add: Methods with service calls that no entry point reaches are listed separately
-* Change: `--project` also analyzes the projects it references, so entry points reach code in shared libraries
+* Change: `--project` also analyzes the projects it references, so entry points reach code in shared libraries. Methods in those libraries that the project doesn't reach aren't listed as unreached
 * Change: A missing metadata folder is a warning, because security roles and plugin steps are then not used
 * Add: `check` command, which checks the requirements against security roles from the metadata, per identity: `--role` for the caller and the application user, `--caller-role` for users acted for through `CallerId`, and the `Principals` and `Users` settings. Exits with `1` when a privilege is missing; `--strict` also fails on unresolved operations, unchecked identities and unverifiable privileges
 * Add: `--role` and `--caller-role` on `required`, which mark each requirement as granted or missing without changing the exit code
@@ -44,3 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: .NET Framework projects load outside Windows, with the reference assemblies from the `Microsoft.NETFramework.ReferenceAssemblies.net*` packages in the NuGet cache, and strong-name signing is ignored so a missing key file doesn't stop compilation
 * Change: The warning for a project that doesn't compile shows its first errors
 * Add: Table resolution through the record `Retrieve` returns, early-bound lookup properties (from the lookup's targets in the metadata) and `PrimaryEntityName` in plugin steps
+* Add: `OrganizationServiceContext` calls, including generated contexts: `CreateQuery`, query properties such as `AccountSet`, LINQ joins, `AddObject`, `UpdateObject`, `DeleteObject`, `AddLink`, `DeleteLink`, `AddRelatedObject`, `LoadProperty` (unresolved) and `Execute`. A context runs as the service it's created with
+* Add: Table resolution through type arguments of generic types, such as `Repository<Contact>`, including subclasses, overrides and calls through generic interfaces
+* Add: Custom API execute privileges, from `WithExecutePrivilege<T>`, `WithExecutePrivilege(schemaName, privilege)` and `WithExecutePrivilegeName` on the registration, or from `PrivilegeCatalog.xml` for custom APIs whose code isn't analyzed. Calls need them with basis `execute-privilege`, and so does the custom API's own entry point. Names are looked up in the catalog; one that can't be is reported as unresolved
+* Add: Privileges not tied to a table, such as `prvActOnBehalfOfAnotherUser`, are listed per entry point and checked against the roles' global privileges from the metadata. They are `unverifiable` with roles from metadata that predates them
+* Change: `prvActOnBehalfOfAnotherUser` for setting `CallerId` is a requirement of the identity that sets it, instead of the `!` line and the JSON `impersonation` property
+* Add: `Suppress` accepts a privilege not tied to a table by name, without `Table`
+* Add: Requests that need a privilege not tied to a table: `BulkDelete`, `ImportSolution`, `ExportSolution`, `PublishXml`, `PublishAllXml`, `ExecuteWorkflow`, `DeleteRecordChangeHistory`, `DeleteAuditData`, the audit history requests, and `prvMerge` for `Merge`. The privileges are looked up in the privilege catalog
+* Add: `GlobalPrivileges` and `Assumption` on configured request rules
+* Add: The bypass parameters `BypassCustomPluginExecution`, `BypassBusinessLogicExecution` and `BypassBusinessLogicExecutionStepIds` need `prvBypassCustomPlugins` or `prvBypassCustomBusinessLogic`, and the plugin steps they bypass don't run in the cascade. A step's mode is read from `SetExecutionMode` and the metadata
+* Add: Setting `overriddencreatedon` on a created record needs `prvOverrideCreatedOnCreatedBy`
+* Add: `SendEmail` lists the assumption that the email is sent as the caller, since sending as another user needs `prvSendAsUser`

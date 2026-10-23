@@ -11,6 +11,7 @@ namespace XrmMockup.PermissionAnalyzer.Core.Model;
 /// <param name="Stage">Pipeline stage: 10, 20, 30 or 40.</param>
 /// <param name="ImpersonatingUserId">The user the step runs as, when it doesn't run as the caller.</param>
 /// <param name="FilteredAttributes">The columns an Update step is filtered on; <c>null</c> for none.</param>
+/// <param name="Asynchronous">Whether the step runs asynchronously.</param>
 public sealed record PluginStepRegistration(
     string TypeName,
     string? AssemblyName,
@@ -18,4 +19,5 @@ public sealed record PluginStepRegistration(
     string? Table,
     int Stage,
     string? ImpersonatingUserId,
-    IReadOnlyList<string>? FilteredAttributes = null);
+    IReadOnlyList<string>? FilteredAttributes = null,
+    bool Asynchronous = false);

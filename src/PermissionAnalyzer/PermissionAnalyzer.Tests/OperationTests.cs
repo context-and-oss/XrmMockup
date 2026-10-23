@@ -114,7 +114,7 @@ public class OperationTests
         var operation = Run("ctx_Recalculate", "ctx_order");
 
         Assert.Empty(operation.Requirements);
-        Assert.Equal("custom API 'ctx_Recalculate' is called; its privileges are not analyzed yet", Assert.Single(operation.Unresolved).Reason);
+        Assert.Equal("custom API 'ctx_Recalculate' is called; its code and execute privilege are unknown", Assert.Single(operation.Unresolved).Reason);
     }
 
     [Fact]

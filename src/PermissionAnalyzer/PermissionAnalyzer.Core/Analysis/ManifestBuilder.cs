@@ -37,12 +37,24 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     private readonly HashSet<string> _cascadeOnlyPlugins = new(StringComparer.Ordinal);
     private readonly HashSet<string> _reportedNodes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _customApis = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, EntryCandidate> _customApiCode = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CustomApiDefinition> _catalogCustomApis = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, PrivilegeDefinition>? _privilegeCatalog;
 
     /// <summary>
     /// Adds the code in <paramref name="compilation"/>. Returns <c>false</c> when the compilation doesn't
     /// reference the Dataverse SDK, so it can't contain any operations.
     /// </summary>
-    public bool Add(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, cascadesOnly: false, cancellationToken);
+    public bool Add(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, AddedCode.Analyzed, cancellationToken);
+
+    /// <summary>
+    /// Adds the code of a library the analyzed code references, such as a data access library that several apps share.
+    /// Its entry points are reported and what the analyzed code calls in it is analyzed, but its methods that no entry
+    /// point reaches aren't reported as unreached: other apps may call them. Code that
+    /// <see cref="Add(Compilation, CancellationToken)"/> adds as well is reported. Returns <c>false</c> when the
+    /// compilation doesn't reference the Dataverse SDK.
+    /// </summary>
+    public bool AddReferencedCode(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, AddedCode.Referenced, cancellationToken);
 
     /// <summary>
     /// Adds plugin code from outside the analyzed solution, such as the plugins of the environment an Azure Function
@@ -50,14 +62,17 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// methods aren't reported, unless a scope selects them. Code that <see cref="Add(Compilation, CancellationToken)"/>
     /// adds as well is reported. Returns <c>false</c> when the compilation doesn't reference the Dataverse SDK.
     /// </summary>
-    public bool AddPluginCode(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, cascadesOnly: true, cancellationToken);
+    public bool AddPluginCode(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, AddedCode.PluginCode, cancellationToken);
 
-    private bool Add(Compilation compilation, bool cascadesOnly, CancellationToken cancellationToken)
+    private enum AddedCode { Analyzed, Referenced, PluginCode }
+
+    private bool Add(Compilation compilation, AddedCode added, CancellationToken cancellationToken)
     {
+        var cascadesOnly = added == AddedCode.PluginCode;
         if (XrmSymbols.Create(compilation) is not { } symbols) return false;
 
         var summaries = new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups).Extract(cancellationToken);
-        if (!cascadesOnly) _reportedNodes.UnionWith(summaries.Nodes.Keys);
+        if (added == AddedCode.Analyzed) _reportedNodes.UnionWith(summaries.Nodes.Keys);
         _graph.Merge(summaries);
 
         var discovery = new EntryPointDiscovery(compilation, symbols, _paths).Discover(cancellationToken);
@@ -83,6 +98,18 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// Adds the plugin steps registered in the environment, from the XrmMockup metadata.
     /// </summary>
     public void AddPluginSteps(IEnumerable<PluginStepRegistration> steps) => _steps.AddRange(steps);
+
+    /// <summary>
+    /// Adds the privilege catalog from the metadata: the tables and table privilege of each privilege, by name, and
+    /// the execute privileges of the custom APIs in the environment. Without it, an execute privilege set by name
+    /// can't be looked up and is reported as unresolved.
+    /// </summary>
+    public void AddPrivilegeCatalog(IEnumerable<PrivilegeDefinition> privileges, IEnumerable<CustomApiDefinition> customApis)
+    {
+        _privilegeCatalog ??= new Dictionary<string, PrivilegeDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var privilege in privileges) _privilegeCatalog[privilege.Name] = privilege;
+        foreach (var api in customApis) _catalogCustomApis[api.UniqueName] = api;
+    }
 
     /// <summary>
     /// Adds methods to analyze as entry points, such as <c>Contoso.Sync.Importer.Run</c>, which matches every
@@ -130,6 +157,11 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         // Messages the solution implements or registers steps on, which no rule knows, are its custom APIs
         _customApis.Clear();
         _customApis.UnionWith(candidates.Values.Where(c => c.Kind != EntryPointKind.Operation).Select(c => c.Trigger?.Message).Concat(_steps.Select(s => s.Message)).OfType<string>());
+        _customApiCode.Clear();
+        foreach (var api in candidates.Values.Where(c => c.Kind == EntryPointKind.CustomApi).OrderBy(c => c.Id, StringComparer.Ordinal))
+        {
+            if (api.Trigger?.Message is { } message && !_customApiCode.ContainsKey(message)) _customApiCode[message] = api;
+        }
 
         var entryPoints = new List<EntryPoint>();
         var reached = new HashSet<string>(StringComparer.Ordinal);
@@ -172,6 +204,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         unprefixed.Requirements.AddRange(result.Requirements.Select(h => h with { Source = h.Source with { Path = [] } }));
         unprefixed.Unresolved.AddRange(result.Unresolved.Select(h => h with { Source = h.Source with { Path = [] } }));
         unprefixed.Assumptions.AddRange(result.Assumptions.Select(h => h with { Source = h.Source with { Path = [] } }));
+        unprefixed.Globals.AddRange(result.Globals.Select(h => h with { Source = h.Source with { Path = [] } }));
         unprefixed.Triggers.AddRange(result.Triggers.Select(h => h with { Source = h.Source with { Path = [] } }));
         return unprefixed;
     }
@@ -221,7 +254,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             {
                 var table = string.IsNullOrEmpty(step.Table) ? null : step.Table!.ToLowerInvariant();
                 var id = EntryPointDiscovery.StepId(step.TypeName, step.Message, table, EntryPointDiscovery.StageName(step.Stage));
-                codeless.Add(new CascadeStep(id, step.Message, table, step.ImpersonatingUserId?.ToLowerInvariant(), Filter(step), null));
+                codeless.Add(new CascadeStep(id, step.Message, table, step.ImpersonatingUserId?.ToLowerInvariant(), Filter(step), null, step.Asynchronous));
             }
             foreach (var match in matches)
             {
@@ -272,17 +305,17 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
 
                 if (code is not null)
                 {
-                    candidates[code.Id] = Registered(code, user, filter);
+                    candidates[code.Id] = Registered(code, user, filter, step.Asynchronous);
                     continue;
                 }
 
                 var id = EntryPointDiscovery.StepId(plugin.Type, step.Message, table, stage);
                 if (candidates.TryGetValue(id, out var existing))
                 {
-                    candidates[id] = Registered(existing, user, filter);
+                    candidates[id] = Registered(existing, user, filter, step.Asynchronous);
                     continue;
                 }
-                candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage, FilteredAttributes: filter), user, plugin.Declaration, handlers));
+                candidates.Add(id, new EntryCandidate(id, EntryPointKind.PluginStep, plugin.Type, plugin.Assembly, new Trigger(step.Message, table, stage, FilteredAttributes: filter, Asynchronous: step.Asynchronous), user, plugin.Declaration, handlers));
                 if (IsCascadeOnly(plugin)) cascadeOnly.Add(id);
             }
         }
@@ -298,13 +331,14 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         step.Message.Equals("Update", StringComparison.OrdinalIgnoreCase) ? step.FilteredAttributes : null;
 
     /// <summary>
-    /// <paramref name="candidate"/> with the user and filtered attributes of its registration in the metadata, where
-    /// the code doesn't set them.
+    /// <paramref name="candidate"/> with the user, filtered attributes and mode of its registration in the metadata,
+    /// where the code doesn't set them.
     /// </summary>
-    private static EntryCandidate Registered(EntryCandidate candidate, string? user, IReadOnlyList<string>? filter)
+    private static EntryCandidate Registered(EntryCandidate candidate, string? user, IReadOnlyList<string>? filter, bool asynchronous)
     {
         if (user is not null && candidate.ImpersonatingUserId is null) candidate = candidate with { ImpersonatingUserId = user };
         if (filter is not null && candidate.Trigger is { FilteredAttributes: null } trigger) candidate = candidate with { Trigger = trigger with { FilteredAttributes = filter } };
+        if (asynchronous && candidate.Trigger is { Asynchronous: false } synchronous) candidate = candidate with { Trigger = synchronous with { Asynchronous = true } };
         return candidate;
     }
 
@@ -314,7 +348,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     private static IEnumerable<CascadeStep> CascadeSteps(IEnumerable<EntryCandidate> candidates, IEnumerable<CascadeStep> codeless) =>
         candidates
             .Where(c => c.Kind is EntryPointKind.PluginStep or EntryPointKind.CustomApi && c.Trigger?.Message is not null)
-            .Select(c => new CascadeStep(c.Id, c.Trigger!.Message!, c.Trigger.Table, c.ImpersonatingUserId, c.Trigger.FilteredAttributes, c))
+            .Select(c => new CascadeStep(c.Id, c.Trigger!.Message!, c.Trigger.Table, c.ImpersonatingUserId, c.Trigger.FilteredAttributes, c, c.Trigger.Asynchronous, c.Kind == EntryPointKind.CustomApi))
             .Concat(codeless.GroupBy(s => s.Id, StringComparer.Ordinal).Select(g => g.First()));
 
     private void AddMethodEntries(Dictionary<string, EntryCandidate> candidates)
@@ -367,8 +401,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         new(caller, new Identity(caller with { Assumed = true }, InjectedAssumption), primaryTable);
 
     /// <summary>
-    /// Methods with operations that no entry point reaches, each analyzed on its own. Plugin code from other solutions
-    /// is left out.
+    /// Methods with operations that no entry point reaches, each analyzed on its own. Referenced libraries and plugin code
+    /// from other solutions are left out.
     /// </summary>
     private List<MethodManifest> Unreached(HashSet<string> reached)
     {
@@ -382,16 +416,16 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 var results = g.OrderBy(n => n.Id, StringComparer.Ordinal).Select(n => evaluator.EvaluateAlone(n, n.Display)).ToList();
                 var member = _graph.Nodes.TryGetValue(g.Key, out var memberNode) ? memberNode : null;
                 var declaration = member?.Declaration ?? g.Select(n => n.MemberDeclaration).Where(d => d is not null).Min();
-                var (requirements, unresolved, assumptions) = Aggregate(results);
-                return new MethodManifest(g.Key, declaration, requirements, unresolved, assumptions);
+                var (requirements, unresolved, assumptions, globalRequirements) = Aggregate(results, RunsAs.ApplicationUser with { Assumed = true });
+                return new MethodManifest(g.Key, declaration, requirements, unresolved, assumptions, globalRequirements);
             })
             .ToList();
     }
 
     private EntryPoint Describe(EntryCandidate candidate, CascadeResult cascade)
     {
-        var (requirements, unresolved, assumptions) = Aggregate([cascade.Result]);
-        return Describe(candidate, requirements, unresolved, assumptions, cascade.Fired);
+        var (requirements, unresolved, assumptions, globalRequirements) = Aggregate([cascade.Result], Context(candidate).Caller, candidate.Kind == EntryPointKind.CustomApi ? candidate : null);
+        return Describe(candidate, requirements, unresolved, assumptions, cascade.Fired, globalRequirements);
     }
 
     /// <summary>
@@ -408,7 +442,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         IReadOnlyList<Requirement> requirements,
         IReadOnlyList<UnresolvedOperation> unresolved,
         IReadOnlyList<Assumption> assumptions,
-        IReadOnlyList<string>? triggers = null) =>
+        IReadOnlyList<string>? triggers = null,
+        IReadOnlyList<GlobalRequirement>? globalRequirements = null) =>
         new(
             candidate.Id,
             candidate.Kind,
@@ -420,20 +455,57 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             requirements,
             unresolved,
             assumptions,
-            triggers);
+            triggers,
+            globalRequirements);
 
     /// <summary>
-    /// Merges the hits of an evaluation: one requirement per table, privilege and identity, with the strongest
-    /// basis and one source per location (the shortest call path), and one unresolved operation per location,
-    /// reason and identity, with the privileges of each. All sorted.
+    /// Merges the hits of an evaluation: one requirement per table (or privilege not tied to a table), privilege and
+    /// identity, with the strongest basis and one source per location (the shortest call path), and one unresolved
+    /// operation per location, reason and identity, with the privileges of each. All sorted. A call to a custom API
+    /// that the code or the privilege catalog has needs its execute privilege; operations that act for the user in
+    /// <c>CallerId</c> need <see cref="GlobalRequirement.ActOnBehalfOfAnotherUser"/> on <paramref name="impersonator"/>,
+    /// the identity that sets it. Pass the entry point of a custom API as <paramref name="customApi"/> to add its own
+    /// execute privilege, which its caller needs.
     /// </summary>
-    private (IReadOnlyList<Requirement>, IReadOnlyList<UnresolvedOperation>, IReadOnlyList<Assumption>) Aggregate(IEnumerable<EvaluationResult> results)
+    private (IReadOnlyList<Requirement>, IReadOnlyList<UnresolvedOperation>, IReadOnlyList<Assumption>, IReadOnlyList<GlobalRequirement>) Aggregate(
+        IEnumerable<EvaluationResult> results,
+        RunsAs impersonator,
+        EntryCandidate? customApi = null)
     {
         var list = results.ToList();
         var truncated = list.Any(r => r.Truncated);
 
-        var requirements = list
-            .SelectMany(r => r.Requirements)
+        var requirementHits = list.SelectMany(r => r.Requirements).ToList();
+        var unresolvedHits = new List<UnresolvedHit>();
+        var globalHits = new List<GlobalHit>();
+        foreach (var hit in list.SelectMany(r => r.Unresolved))
+        {
+            if (RequestReasons.NoRuleMessage(hit.Reason) is { } message && IsKnownCustomApi(message))
+            {
+                ExecutePrivilegeHits(message, ExecutePrivilegeOf(message), hit.RunsAs, hit.Source, requirementHits, unresolvedHits, globalHits);
+
+                // The code of a custom API runs as a cascade, so only a custom API without code stays unresolved
+                if (!_customApiCode.ContainsKey(message)) unresolvedHits.Add(hit with { Reason = RequestReasons.CustomApiCode(message) });
+                continue;
+            }
+            unresolvedHits.Add(hit with { Reason = CustomApi(hit.Reason) });
+        }
+        foreach (var hit in list.SelectMany(r => r.Globals))
+        {
+            NamedPrivilegeHits(hit.Operation, hit.Privilege, hit.RunsAs, hit.Basis, hit.Source, requirementHits, unresolvedHits, globalHits);
+        }
+        if (customApi is { Trigger.Message: { } apiMessage, Declaration: { } declaration })
+        {
+            ExecutePrivilegeHits(apiMessage, ExecutePrivilegeOf(apiMessage), RunsAs.Caller, new RequirementSource(declaration, []), requirementHits, unresolvedHits, globalHits);
+        }
+        globalHits.AddRange(requirementHits
+            .Where(h => h.RunsAs.Kind == RunsAsKind.ImpersonatedCaller)
+            .Select(h => new GlobalHit(GlobalRequirement.ActOnBehalfOfAnotherUser, impersonator, h.Basis, h.Source)));
+        globalHits.AddRange(unresolvedHits
+            .Where(h => h.RunsAs.Kind == RunsAsKind.ImpersonatedCaller)
+            .Select(h => new GlobalHit(GlobalRequirement.ActOnBehalfOfAnotherUser, impersonator, RequirementBasis.Direct, h.Source)));
+
+        var requirements = requirementHits
             .GroupBy(h => (h.Table, h.Privilege, h.RunsAs))
             .Select(g => new Requirement(
                 g.Key.Table,
@@ -447,10 +519,17 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .ThenBy(r => r.Basis)
             .ToList();
 
-        var unresolved = list
-            .SelectMany(r => r.Unresolved)
-            .GroupBy(h => (h.Source.Location, h.Operation, Reason: CustomApi(h.Reason), h.RunsAs))
-            .Select(g => g.First() with { Reason = g.Key.Reason, Privileges = g.SelectMany(h => h.Privileges).Distinct().OrderBy(p => p).ToList() })
+        var globalRequirements = globalHits
+            .GroupBy(h => (h.Privilege, h.RunsAs))
+            .Select(g => new GlobalRequirement(g.Key.Privilege, g.Key.RunsAs, g.Min(h => h.Basis), FirstPerLocation(g.Select(h => h.Source))))
+            .OrderBy(r => r.Privilege, StringComparer.Ordinal)
+            .ThenBy(r => r.RunsAs)
+            .ThenBy(r => r.Basis)
+            .ToList();
+
+        var unresolved = unresolvedHits
+            .GroupBy(h => (h.Source.Location, h.Operation, h.Reason, h.RunsAs))
+            .Select(g => g.First() with { Privileges = g.SelectMany(h => h.Privileges).Distinct().OrderBy(p => p).ToList() })
             .OrderBy(h => h.Source.Location)
             .ThenBy(h => h.Operation, StringComparer.Ordinal)
             .ThenBy(h => h.Reason, StringComparer.Ordinal)
@@ -477,7 +556,100 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             }
         }
 
-        return (requirements, unresolved, assumptions);
+        return (requirements, unresolved, assumptions, globalRequirements);
+    }
+
+    /// <summary>
+    /// A privilege not tied to a table that an operation needs.
+    /// </summary>
+    private sealed record GlobalHit(string Privilege, RunsAs RunsAs, RequirementBasis Basis, RequirementSource Source);
+
+    /// <summary>
+    /// The code or the privilege catalog has the custom API, so what calling it needs is known.
+    /// </summary>
+    private bool IsKnownCustomApi(string message) => _customApiCode.ContainsKey(message) || _catalogCustomApis.ContainsKey(message);
+
+    /// <summary>
+    /// The execute privilege of a custom API: from its registration in code, else from the privilege catalog.
+    /// <c>null</c> when it needs none.
+    /// </summary>
+    private ExecutePrivilege? ExecutePrivilegeOf(string message) =>
+        (_customApiCode.TryGetValue(message, out var code) ? code.ExecutePrivilege : null)
+        ?? (_catalogCustomApis.TryGetValue(message, out var api) && !string.IsNullOrEmpty(api.ExecutePrivilegeName) ? new ExecutePrivilege(api.ExecutePrivilegeName) : null);
+
+    /// <summary>
+    /// What calling the custom API <paramref name="message"/> needs for <paramref name="privilege"/>: table
+    /// privileges, a privilege not tied to a table, or an unresolved operation when the privilege can't be looked up.
+    /// A privilege name is only looked up in the privilege catalog, never derived from its spelling.
+    /// </summary>
+    private void ExecutePrivilegeHits(
+        string message,
+        ExecutePrivilege? privilege,
+        RunsAs runsAs,
+        RequirementSource source,
+        List<RequirementHit> requirements,
+        List<UnresolvedHit> unresolved,
+        List<GlobalHit> globals)
+    {
+        if (privilege is null) return;
+        if (privilege is { Table: { } table, Privilege: { } tablePrivilege })
+        {
+            requirements.Add(new RequirementHit(table, tablePrivilege, runsAs, RequirementBasis.ExecutePrivilege, source));
+            return;
+        }
+
+        void Unresolved(string reason) => unresolved.Add(new UnresolvedHit(message, [], reason, runsAs, source));
+        if (privilege.Name is not { } name) Unresolved(RequestReasons.ExecutePrivilegeComputed(message));
+        else if (_privilegeCatalog is null) Unresolved(RequestReasons.PrivilegeCatalogMissing(message, name));
+        else if (!_privilegeCatalog.TryGetValue(name, out var definition)) Unresolved(RequestReasons.PrivilegeNotInCatalog(message, name));
+        else if (!CatalogHits(definition, runsAs, RequirementBasis.ExecutePrivilege, source, requirements, globals)) Unresolved(RequestReasons.PrivilegeWithoutTablePrivilege(message, name));
+    }
+
+    /// <summary>
+    /// What <paramref name="operation"/> needs for <paramref name="privilege"/>, a privilege its request rule names.
+    /// Without a privilege catalog it is taken as a privilege not tied to a table; with one, it is looked up there,
+    /// as it may be tied to tables instead.
+    /// </summary>
+    private void NamedPrivilegeHits(
+        string operation,
+        string privilege,
+        RunsAs runsAs,
+        RequirementBasis basis,
+        RequirementSource source,
+        List<RequirementHit> requirements,
+        List<UnresolvedHit> unresolved,
+        List<GlobalHit> globals)
+    {
+        void Unresolved(string reason) => unresolved.Add(new UnresolvedHit(operation, [], reason, runsAs, source));
+        if (_privilegeCatalog is null) globals.Add(new GlobalHit(privilege, runsAs, basis, source));
+        else if (!_privilegeCatalog.TryGetValue(privilege, out var definition)) Unresolved(RequestReasons.NamedPrivilegeNotInCatalog(operation, privilege));
+        else if (!CatalogHits(definition, runsAs, basis, source, requirements, globals)) Unresolved(RequestReasons.NamedPrivilegeWithoutTablePrivilege(operation, privilege));
+    }
+
+    /// <summary>
+    /// Adds what <paramref name="definition"/> grants: a privilege not tied to a table, or its table privilege on each
+    /// of its tables. <c>false</c> when it is tied to tables but its access right isn't a table privilege, so no role
+    /// can be checked for it.
+    /// </summary>
+    private static bool CatalogHits(
+        PrivilegeDefinition definition,
+        RunsAs runsAs,
+        RequirementBasis basis,
+        RequirementSource source,
+        List<RequirementHit> requirements,
+        List<GlobalHit> globals)
+    {
+        if (definition.Tables.Count == 0)
+        {
+            globals.Add(new GlobalHit(definition.Name, runsAs, basis, source));
+            return true;
+        }
+        if (definition.Privilege is not { } granted) return false;
+        foreach (var table in definition.Tables)
+        {
+            requirements.Add(new RequirementHit(table.ToLowerInvariant(), granted, runsAs, basis, source));
+        }
+        return true;
     }
 
     /// <summary>

@@ -32,6 +32,12 @@ internal sealed record UnresolvedHit(string Operation, IReadOnlyList<Privilege> 
 internal sealed record AssumptionHit(string Reason, RequirementSource Source);
 
 /// <summary>
+/// A privilege not tied to a table, by name, that <see cref="Operation"/> needs, such as <c>prvBulkDelete</c> for
+/// <c>BulkDelete</c>.
+/// </summary>
+internal sealed record GlobalPrivilegeHit(string Operation, string Privilege, RunsAs RunsAs, RequirementBasis Basis, RequirementSource Source);
+
+/// <summary>
 /// An operation that fires the plugin steps of <see cref="Message"/> on <see cref="Table"/>: <c>null</c> for no
 /// table, <see cref="AnyTable"/> for a table that isn't known.
 /// </summary>
@@ -41,7 +47,8 @@ internal sealed record TriggerHit(
     RunsAs RunsAs,
     RequirementBasis Basis,
     RequirementSource Source,
-    IReadOnlyList<string>? Columns = null)
+    IReadOnlyList<string>? Columns = null,
+    PluginBypass Bypass = PluginBypass.None)
 {
     public const string AnyTable = "*";
 }
@@ -55,6 +62,7 @@ internal sealed class EvaluationResult
     public List<UnresolvedHit> Unresolved { get; } = [];
     public List<AssumptionHit> Assumptions { get; } = [];
     public List<TriggerHit> Triggers { get; } = [];
+    public List<GlobalPrivilegeHit> Globals { get; } = [];
 
     /// <summary>
     /// Every node the evaluation visited.
@@ -78,6 +86,9 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
     // How deep services are followed through returns and constructors
     private const int MaxDepth = 16;
+
+    // The column a record is created with to set its creation date, which needs GlobalRequirement.OverrideCreatedOnCreatedBy
+    private const string OverriddenCreatedOn = "overriddencreatedon";
 
     private static readonly IReadOnlyDictionary<(string, int), Binding> NoBindings = new Dictionary<(string, int), Binding>();
 
@@ -212,17 +223,30 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 result.Unresolved.Add(new UnresolvedHit(access.Operation, privileges, access.ReasonPrefix + reason, identity.RunsAs, source));
             }
 
+            foreach (var global in tables.Globals)
+            {
+                result.Globals.Add(new GlobalPrivilegeHit(global.Message, global.Privilege, identity.RunsAs, frame.Basis, source));
+            }
+            foreach (var assumed in tables.Assumptions) result.Assumptions.Add(new AssumptionHit(assumed, source));
+
             foreach (var fired in tables.Fired)
             {
                 // The columns set, when all of them are known
                 var columns = fired.Value.Columns is { Reasons.Count: 0 } set ? set.Tables.ToList() : null;
-                foreach (var table in fired.Value.Tables) result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, frame.Basis, source, columns));
+                var bypass = fired.Value.Bypass;
+                foreach (var table in fired.Value.Tables) result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, frame.Basis, source, columns, bypass));
                 foreach (var table in fired.Value.LookupTargets.Except(fired.Value.Tables, StringComparer.Ordinal))
                 {
-                    result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, RequirementBasis.AllLookupTargets, source, columns));
+                    result.Triggers.Add(new TriggerHit(fired.Key, table, identity.RunsAs, RequirementBasis.AllLookupTargets, source, columns, bypass));
                 }
-                if (fired.Value.Reasons.Count > 0) result.Triggers.Add(new TriggerHit(fired.Key, TriggerHit.AnyTable, identity.RunsAs, frame.Basis, source, columns));
-                if (fired.Value.Tables.Count == 0 && fired.Value.LookupTargets.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source, columns));
+                if (fired.Value.Reasons.Count > 0) result.Triggers.Add(new TriggerHit(fired.Key, TriggerHit.AnyTable, identity.RunsAs, frame.Basis, source, columns, bypass));
+                if (fired.Value.Tables.Count == 0 && fired.Value.LookupTargets.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source, columns, bypass));
+
+                // A record created with another creation date, whichever way the date is set
+                if (fired.Key.Equals("Create", StringComparison.OrdinalIgnoreCase) && fired.Value.Columns?.Tables.Contains(OverriddenCreatedOn) == true)
+                {
+                    result.Globals.Add(new GlobalPrivilegeHit(fired.Key, GlobalRequirement.OverrideCreatedOnCreatedBy, identity.RunsAs, frame.Basis, source));
+                }
             }
         }
     }
@@ -278,13 +302,14 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     private bool IsConstructor(string node) => graph.Nodes.TryGetValue(node, out var summary) && summary.IsConstructor;
 
     /// <summary>
-    /// What a call passes to <paramref name="callee"/>. A lambda or local function also sees the parameters of the
-    /// method around it.
+    /// What a call passes to <paramref name="callee"/>, including the type arguments of the callee's type. A lambda
+    /// or local function also sees the parameters of the method around it.
     /// </summary>
     private IReadOnlyDictionary<(string, int), Binding> Bind(CallFact call, Frame caller, NodeSummary callee, int depth = 0)
     {
         var inherit = graph.Nodes.TryGetValue(caller.Node, out var callerNode) && callee.Member == callerNode.Member;
-        if (call.Arguments.Count == 0)
+        var typeArguments = TypeArguments(call, callee);
+        if (call.Arguments.Count == 0 && typeArguments is null)
         {
             return inherit ? caller.Bindings : NoBindings;
         }
@@ -298,7 +323,37 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             var tables = argument.Value.Tables?.ToDictionary(t => t.Key, t => BindTables(t.Value, caller, depth));
             bindings[(callee.Id, argument.Key)] = new Binding(services, tables);
         }
+        for (var i = 0; i < (typeArguments?.Count ?? 0); i++)
+        {
+            if (typeArguments![i] is not { } typeArgument) continue;
+            var tables = new Dictionary<TableShape, TableResolution> { [TableShape.Entity] = BindTables(typeArgument, caller, depth) };
+            bindings[(callee.Id, TableSlot.TypeArgumentOrdinal(i))] = new Binding(null, tables);
+        }
         return bindings;
+    }
+
+    /// <summary>
+    /// The type arguments of the type that declares <paramref name="callee"/>: those of the call's receiver when it
+    /// is that type or derives from it, else those of an ancestor it was called on, such as an interface. One the
+    /// call doesn't provide is <c>null</c>, so its slot stays unresolved.
+    /// </summary>
+    private IReadOnlyList<TableResolution?>? TypeArguments(CallFact call, NodeSummary callee)
+    {
+        if (call.TypeArguments is not { } known || callee.Type is not { } type) return null;
+        if (known.TryGetValue(type, out var direct)) return direct;
+        if (!graph.Types.TryGetValue(type, out var summary) || summary.AncestorTypeArguments.Count == 0) return null;
+
+        var count = summary.AncestorTypeArguments.Values.SelectMany(p => p).DefaultIfEmpty(-1).Max() + 1;
+        var result = new TableResolution?[count];
+        foreach (var ancestor in summary.AncestorTypeArguments.OrderBy(a => a.Key, StringComparer.Ordinal))
+        {
+            if (!known.TryGetValue(ancestor.Key, out var arguments)) continue;
+            for (var i = 0; i < ancestor.Value.Count && i < arguments.Count; i++)
+            {
+                if (ancestor.Value[i] >= 0) result[ancestor.Value[i]] ??= arguments[i];
+            }
+        }
+        return result.Any(r => r is not null) ? result : null;
     }
 
     /// <summary>
@@ -313,6 +368,8 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         foreach (var table in tables.Tables) result.Add(TableResolution.Table(table));
         foreach (var reason in tables.Reasons) result.Add(TableResolution.Unresolved(reason));
         foreach (var target in tables.LookupTargets) result.Add(TableResolution.LookupTarget(target));
+        foreach (var global in tables.Globals) result.Add(TableResolution.Global(global.Privilege, global.Message));
+        foreach (var assumption in tables.Assumptions) result.Add(TableResolution.Assumed(assumption));
         foreach (var slot in tables.Slots)
         {
             if (slot.Method == TableSlot.PrimaryEntity) result.Add(entry.PrimaryTable is { } primary ? TableResolution.Table(primary) : TableResolution.Unresolved(slot.Reason));
@@ -323,7 +380,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         foreach (var fired in tables.Fired)
         {
             var columns = fired.Value.Columns is { } set ? BindTables(set, frame, depth) : null;
-            result.Add(TableResolution.Fires(fired.Key, BindTables(fired.Value, frame, depth), columns));
+            result.Add(TableResolution.Fires(fired.Key, BindTables(fired.Value, frame, depth), columns, fired.Value.Bypass));
         }
         return result;
     }

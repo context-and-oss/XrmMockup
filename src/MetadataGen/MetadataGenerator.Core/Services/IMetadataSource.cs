@@ -22,4 +22,9 @@ public interface IMetadataSource
     /// Gets security roles.
     /// </summary>
     Task<Dictionary<Guid, SecurityRole>> GetSecurityRolesAsync(Guid rootBusinessUnitId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets every privilege and the execute privileges of custom APIs.
+    /// </summary>
+    Task<PrivilegeCatalog> GetPrivilegeCatalogAsync(CancellationToken ct = default);
 }

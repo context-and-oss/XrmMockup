@@ -13,6 +13,9 @@ internal static class PluginStepLoader
 {
     public const string MetadataFile = "Metadata.xml";
 
+    // The mode of an sdkmessageprocessingstep: 0 is synchronous, 1 asynchronous
+    private const int AsynchronousMode = 1;
+
     private const string Namespace = "http://schemas.datacontract.org/2004/07/DG.Tools.XrmMockup";
 
     /// <summary>
@@ -42,7 +45,8 @@ internal static class PluginStepLoader
                 string.IsNullOrEmpty(p.PrimaryEntity) || p.PrimaryEntity == "none" ? null : p.PrimaryEntity,
                 p.Stage,
                 p.ImpersonatingUserId?.ToString(),
-                FilteredAttributes(p.FilteredAttributes)))
+                FilteredAttributes(p.FilteredAttributes),
+                p.Mode == AsynchronousMode))
             .OrderBy(s => s.TypeName, StringComparer.Ordinal)
             .ThenBy(s => s.Message, StringComparer.Ordinal)
             .ThenBy(s => s.Table, StringComparer.Ordinal)

@@ -79,12 +79,13 @@ public record UserConfiguration
 public record SuppressionConfiguration
 {
     /// <summary>
-    /// Table logical name.
+    /// Table logical name. Leave it out to suppress a privilege not tied to a table, named in <see cref="Privilege"/>.
     /// </summary>
     public string? Table { get; init; }
 
     /// <summary>
-    /// The privilege, such as <c>Create</c>. Every privilege on the table when not set.
+    /// The privilege, such as <c>Create</c>. Every privilege on the table when not set. Without a table, the name of
+    /// a privilege not tied to a table, such as <c>prvActOnBehalfOfAnotherUser</c>.
     /// </summary>
     public string? Privilege { get; init; }
 
@@ -128,6 +129,16 @@ public record RuleConfiguration
     /// The member that holds requests run as part of this one.
     /// </summary>
     public string? Requests { get; init; }
+
+    /// <summary>
+    /// Privileges the request needs by name, such as <c>prvBulkDelete</c>, looked up in the privilege catalog.
+    /// </summary>
+    public string[] GlobalPrivileges { get; init; } = [];
+
+    /// <summary>
+    /// What the analysis assumes about the request, reported with every call to it.
+    /// </summary>
+    public string? Assumption { get; init; }
 
     /// <summary>
     /// Whether XrmMockup makes the checks. <c>true</c> when not set.

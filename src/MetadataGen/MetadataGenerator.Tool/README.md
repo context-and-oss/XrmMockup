@@ -225,7 +225,8 @@ The tool generates the following files in the output directory:
 |------|----------|
 | `Metadata.xml` | Serialized MetadataSkeleton containing entity metadata, option sets, plugins, currencies, and organization settings |
 | `Workflows/` | Individual XML files for each workflow definition |
-| `SecurityRoles/` | Individual XML files for each security role with privilege definitions |
+| `SecurityRoles/` | Individual XML files for each security role with privilege definitions. Privileges that aren't tied to a table, such as `prvActOnBehalfOfAnotherUser`, are listed separately under `GlobalPrivileges` |
+| `PrivilegeCatalog.xml` | Every privilege in the environment with its access right and tables, and every custom API with its execute privilege, if any. XrmMockup doesn't read it; the permission analyzer (`xrmmockup-permissions`) uses it to look up privileges by name |
 | `TypeDeclarations.cs` | C# source file with security role GUIDs for use in tests |
 
 ## Using with XrmMockup

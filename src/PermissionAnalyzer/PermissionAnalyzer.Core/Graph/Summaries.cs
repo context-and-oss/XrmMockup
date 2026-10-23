@@ -78,6 +78,8 @@ internal enum ReceiverKind
 /// A call to a method that may be in the solution. <see cref="Virtual"/> is set when the method that runs depends
 /// on the receiver's runtime type. <see cref="Creation"/> is the constructor call that made the receiver, for
 /// <see cref="ReceiverKind.Created"/>; a constructor call is its own creation and leaves it <c>null</c>.
+/// <see cref="TypeArguments"/> holds, per generic type the receiver is or derives from, the tables of its type
+/// arguments, which the method that runs binds when it is declared in that type.
 /// </summary>
 internal sealed record CallFact(
     SourceLocation Source,
@@ -86,12 +88,20 @@ internal sealed record CallFact(
     ReceiverKind Receiver,
     string? ReceiverType,
     IReadOnlyDictionary<int, ArgumentFact> Arguments,
-    CallFact? Creation = null);
+    CallFact? Creation = null,
+    IReadOnlyDictionary<string, IReadOnlyList<TableResolution>>? TypeArguments = null);
 
 /// <summary>
 /// What an argument contributes to the callee: its service origins and its tables per shape.
 /// </summary>
-internal sealed record ArgumentFact(IReadOnlyList<ServiceOrigin>? Service, IReadOnlyDictionary<TableShape, TableResolution>? Tables);
+internal sealed record ArgumentFact(IReadOnlyList<ServiceOrigin>? Service, IReadOnlyDictionary<TableShape, TableResolution>? Tables)
+{
+    /// <summary>
+    /// The ordinal under which a call on an <c>OrganizationServiceContext</c> passes the service of the context, which
+    /// code in the context runs as.
+    /// </summary>
+    public const int ReceiverOrdinal = int.MinValue;
+}
 
 internal sealed record FieldWrite(string Field, IReadOnlyList<ServiceOrigin> Value);
 
@@ -193,6 +203,12 @@ internal sealed class TypeSummary(string id, bool isAbstract, bool isInterface, 
     public Dictionary<string, string> Implementations { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// For each generic ancestor, which of this type's type parameters (see <c>Nodes.TypeParameters</c>) each of
+    /// its type arguments is, or -1 when it is another type. A call on an ancestor binds them for this type.
+    /// </summary>
+    public Dictionary<string, IReadOnlyList<int>> AncestorTypeArguments { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Instance constructors in the solution.
     /// </summary>
     public SortedSet<string> Constructors { get; } = new(StringComparer.Ordinal);
@@ -215,7 +231,14 @@ internal sealed record Registration(string Service, string Implementation);
 internal sealed record Handler(string Target, string? ObjectType, string? ServiceType = null);
 
 /// <summary>
-/// An entry point found in code, before its requirements are worked out.
+/// The execute privilege a custom API's registration in code sets: a privilege name, or a table privilege. All
+/// <c>null</c> when it is set but can't be read.
+/// </summary>
+internal sealed record ExecutePrivilege(string? Name, string? Table = null, Privilege? Privilege = null);
+
+/// <summary>
+/// An entry point found in code, before its requirements are worked out. <see cref="ExecutePrivilege"/> is the
+/// privilege a custom API's registration sets, if any.
 /// </summary>
 internal sealed record EntryCandidate(
     string Id,
@@ -225,7 +248,8 @@ internal sealed record EntryCandidate(
     Trigger? Trigger,
     string? ImpersonatingUserId,
     SourceLocation? Declaration,
-    IReadOnlyList<Handler> Handlers);
+    IReadOnlyList<Handler> Handlers,
+    ExecutePrivilege? ExecutePrivilege = null);
 
 /// <summary>
 /// A class implementing <c>IPlugin</c>, for matching the steps in the plugin metadata.

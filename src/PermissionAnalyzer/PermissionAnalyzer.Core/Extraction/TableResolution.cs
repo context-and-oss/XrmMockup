@@ -23,7 +23,10 @@ internal sealed class TableResolution
     private readonly SortedSet<TableSlot> _slots = new();
     private readonly SortedSet<ReturnedTables> _returns = new();
     private readonly SortedDictionary<string, TableResolution> _fired = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SortedSet<GlobalNeed> _globals = new();
+    private readonly SortedSet<string> _assumptions = new(StringComparer.Ordinal);
     private TableResolution? _columns;
+    private PluginBypass _bypass;
 
     public IReadOnlyCollection<string> Tables => _tables;
 
@@ -62,11 +65,28 @@ internal sealed class TableResolution
     public TableResolution? Columns => _columns;
 
     /// <summary>
+    /// For a message in <see cref="Fired"/>: the plugin steps the request skips, by the bypass parameters set on it.
+    /// </summary>
+    public PluginBypass Bypass => _bypass;
+
+    /// <summary>
+    /// Privileges not tied to a table that the operation needs, such as <c>prvBulkDelete</c>, each with the message
+    /// that needs it.
+    /// </summary>
+    public IReadOnlyCollection<GlobalNeed> Globals => _globals;
+
+    /// <summary>
+    /// What the analysis assumes about the operation, such as who an email is sent as.
+    /// </summary>
+    public IReadOnlyCollection<string> Assumptions => _assumptions;
+
+    /// <summary>
     /// Set when nothing in the value depends on the call context: no parameter and no method's return value.
     /// </summary>
     public bool IsBound => _slots.Count == 0 && _returns.Count == 0 && _fired.Values.All(f => f.IsBound) && (_columns?.IsBound ?? true);
 
-    public bool IsEmpty => _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && _fired.Count == 0 && IsBound;
+    public bool IsEmpty =>
+        _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && _fired.Count == 0 && _globals.Count == 0 && _assumptions.Count == 0 && IsBound;
 
     public static TableResolution Empty => new();
 
@@ -105,14 +125,29 @@ internal sealed class TableResolution
         return result;
     }
 
+    public static TableResolution Global(string privilege, string message)
+    {
+        var result = new TableResolution();
+        result._globals.Add(new GlobalNeed(privilege, message));
+        return result;
+    }
+
+    public static TableResolution Assumed(string assumption)
+    {
+        var result = new TableResolution();
+        result._assumptions.Add(assumption);
+        return result;
+    }
+
     /// <summary>
     /// <paramref name="message"/> fired on <paramref name="tables"/>, setting <paramref name="columns"/>; without
-    /// columns, those set aren't known.
+    /// columns, those set aren't known. <paramref name="bypass"/> are the steps the request skips.
     /// </summary>
-    public static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null)
+    public static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null, PluginBypass bypass = PluginBypass.None)
     {
         var fired = Empty.Add(tables);
         fired._columns = Empty.Add(columns ?? Unresolved("the columns set aren't known"));
+        fired._bypass = bypass;
         var result = new TableResolution();
         result._fired.Add(message, fired);
         return result;
@@ -125,10 +160,15 @@ internal sealed class TableResolution
         _lookupTargets.UnionWith(other._lookupTargets);
         _slots.UnionWith(other._slots);
         _returns.UnionWith(other._returns);
+        _globals.UnionWith(other._globals);
+        _assumptions.UnionWith(other._assumptions);
         foreach (var fired in other._fired)
         {
-            // Copied, as the resolutions added may be shared
-            _fired[fired.Key] = _fired.TryGetValue(fired.Key, out var existing) ? Empty.Add(existing).Add(fired.Value) : Empty.Add(fired.Value);
+            // Copied, as the resolutions added may be shared. A step is only known to be skipped when every request
+            // that fires the message skips it.
+            var merged = _fired.TryGetValue(fired.Key, out var existing) ? Empty.Add(existing).Add(fired.Value) : Empty.Add(fired.Value);
+            merged._bypass = existing is null ? fired.Value._bypass : existing._bypass & fired.Value._bypass;
+            _fired[fired.Key] = merged;
         }
         if (other._columns is { } columns) (_columns ??= Empty).Add(columns);
         return this;
@@ -154,6 +194,8 @@ internal sealed class TableResolution
         result._lookupTargets.UnionWith(targets.Select(t => t.ToLowerInvariant()));
         result._slots.UnionWith(_slots);
         result._returns.UnionWith(_returns);
+        result._globals.UnionWith(_globals);
+        result._assumptions.UnionWith(_assumptions);
         foreach (var fired in _fired) result._fired.Add(fired.Key, fired.Value);
         return result;
     }
@@ -163,7 +205,36 @@ internal sealed class TableResolution
     /// </summary>
     public override string ToString() =>
         string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "*" + string.Join("|", _lookupTargets) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns)
-        + "!" + string.Join("|", _fired.Select(f => $"{f.Key}=({f.Value})")) + (_columns is null ? "" : $"#({_columns})");
+        + "!" + string.Join("|", _fired.Select(f => $"{f.Key}=({f.Value})")) + (_columns is null ? "" : $"#({_columns})")
+        + (_bypass == PluginBypass.None ? "" : $"~{_bypass}") + "&" + string.Join("|", _globals) + "%" + string.Join("|", _assumptions);
+}
+
+/// <summary>
+/// A privilege not tied to a table, such as <c>prvBulkDelete</c>, that <see cref="Message"/> needs. The name is
+/// looked up in the privilege catalog, never derived from its spelling.
+/// </summary>
+internal sealed record GlobalNeed(string Privilege, string Message) : IComparable<GlobalNeed>
+{
+    public int CompareTo(GlobalNeed? other)
+    {
+        if (other is null) return 1;
+        var result = string.CompareOrdinal(Privilege, other.Privilege);
+        return result != 0 ? result : string.CompareOrdinal(Message, other.Message);
+    }
+
+    public override string ToString() => $"{Privilege}@{Message}";
+}
+
+/// <summary>
+/// The plugin steps a request skips, by its <c>BypassCustomPluginExecution</c> or <c>BypassBusinessLogicExecution</c>
+/// parameter.
+/// </summary>
+[Flags]
+internal enum PluginBypass
+{
+    None = 0,
+    Synchronous = 1,
+    Asynchronous = 2,
 }
 
 /// <summary>
@@ -227,8 +298,9 @@ internal static class RequestShapes
 }
 
 /// <summary>
-/// A table that depends on parameter <see cref="Ordinal"/>, or on a type parameter of a generic method (see
-/// <see cref="TypeParameterOrdinal"/>) of <see cref="Method"/>, read as <see cref="Shape"/>.
+/// A table that depends on parameter <see cref="Ordinal"/>, on a type parameter of a generic method (see
+/// <see cref="TypeParameterOrdinal"/>) of <see cref="Method"/>, or on a type parameter of its type (see
+/// <see cref="TypeArgumentOrdinal"/>), read as <see cref="Shape"/>.
 /// <see cref="Reason"/> is reported when no call site provides the argument; an empty reason reports nothing, for
 /// a request read for one privilege, whose reason is reported once under <see cref="TableShape.RequestOther"/>.
 /// </summary>
@@ -245,6 +317,12 @@ internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, s
     /// call binds type argument <c>i</c> as if it were argument <c>-1 - i</c>, read as <see cref="TableShape.Entity"/>.
     /// </summary>
     public static int TypeParameterOrdinal(int ordinal) => -1 - ordinal;
+
+    /// <summary>
+    /// The ordinal a type parameter of the method's type, or of a type it is nested in, is bound under: its
+    /// position among <see cref="Nodes.TypeParameters"/>, below the ordinals of a method's type parameters.
+    /// </summary>
+    public static int TypeArgumentOrdinal(int ordinal) => -(1 << 20) - ordinal;
 
     public int CompareTo(TableSlot? other)
     {

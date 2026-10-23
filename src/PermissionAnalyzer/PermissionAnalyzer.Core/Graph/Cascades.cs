@@ -1,3 +1,4 @@
+using XrmMockup.PermissionAnalyzer.Core.Extraction;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Graph;
@@ -5,7 +6,9 @@ namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 /// <summary>
 /// A plugin step or custom API that runs when an operation fires its message. <see cref="FilteredAttributes"/> are
 /// the columns an Update step runs for, or <c>null</c> when it runs on every update. <see cref="Code"/> is
-/// <c>null</c> for a step from the metadata whose plugin code isn't loaded.
+/// <c>null</c> for a step from the metadata whose plugin code isn't loaded. <see cref="Asynchronous"/> is set for a
+/// step that runs asynchronously; <see cref="IsCustomApi"/> for the code of a custom API, which no bypass parameter
+/// skips.
 /// </summary>
 internal sealed record CascadeStep(
     string Id,
@@ -13,7 +16,9 @@ internal sealed record CascadeStep(
     string? Table,
     string? ImpersonatingUserId,
     IReadOnlyList<string>? FilteredAttributes,
-    EntryCandidate? Code);
+    EntryCandidate? Code,
+    bool Asynchronous = false,
+    bool IsCustomApi = false);
 
 /// <summary>
 /// An evaluation with the hits of every step its operations fire, and the ids of those steps, sorted.
@@ -26,7 +31,8 @@ internal sealed record CascadeResult(EvaluationResult Result, IReadOnlyList<stri
 /// fired it, unless it impersonates. Each step is expanded once per identity and basis, which also stops cycles.
 /// An operation on an unknown table only runs the steps without a table; the others are reported as unresolved.
 /// An update runs an Update step filtered on columns when it sets one of them, and, with the basis
-/// <see cref="RequirementBasis.FilterUnknown"/>, when the columns it sets aren't all known.
+/// <see cref="RequirementBasis.FilterUnknown"/>, when the columns it sets aren't all known. A request with a bypass
+/// parameter doesn't run the plugin steps it bypasses.
 /// </summary>
 internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, Func<EntryCandidate, RunsAs, EntryContext> context)
 {
@@ -55,7 +61,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
         {
             var (current, currentBasis) = queue.Dequeue();
             var triggers = current.Triggers
-                .GroupBy(t => (Message: t.Message.ToLowerInvariant(), Table: t.Table?.ToLowerInvariant(), t.RunsAs, t.Basis, Columns: t.Columns is null ? null : string.Join(",", t.Columns)))
+                .GroupBy(t => (Message: t.Message.ToLowerInvariant(), Table: t.Table?.ToLowerInvariant(), t.RunsAs, t.Basis, Columns: t.Columns is null ? null : string.Join(",", t.Columns), t.Bypass))
                 .Select(g => g.First());
             foreach (var trigger in triggers)
             {
@@ -103,7 +109,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
     /// <summary>
     /// The steps registered for the trigger's message on its table, with the basis their filter gives. A step
     /// without a table runs on every table, so it is also the only step a trigger on an unknown table is known to
-    /// run.
+    /// run. Steps the trigger bypasses don't run.
     /// </summary>
     private IEnumerable<(CascadeStep Step, RequirementBasis Basis)> Matching(TriggerHit trigger)
     {
@@ -111,6 +117,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
         {
             if (!string.Equals(step.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)) continue;
             if (step.Table is not null && !string.Equals(step.Table, trigger.Table, StringComparison.OrdinalIgnoreCase)) continue;
+            if (Bypassed(step, trigger.Bypass)) continue;
 
             // As in XrmMockup, a filter applies to Update only
             if (step.FilteredAttributes is not { Count: > 0 } filter || !step.Message.Equals("Update", StringComparison.OrdinalIgnoreCase))
@@ -134,7 +141,10 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
     /// instead.
     /// </summary>
     private List<CascadeStep> Unmatched(TriggerHit trigger) =>
-        _steps.Where(s => s.Table is not null && string.Equals(s.Message, trigger.Message, StringComparison.OrdinalIgnoreCase)).ToList();
+        _steps.Where(s => s.Table is not null && string.Equals(s.Message, trigger.Message, StringComparison.OrdinalIgnoreCase) && !Bypassed(s, trigger.Bypass)).ToList();
+
+    private static bool Bypassed(CascadeStep step, PluginBypass bypass) =>
+        !step.IsCustomApi && (bypass & (step.Asynchronous ? PluginBypass.Asynchronous : PluginBypass.Synchronous)) != 0;
 
     private EvaluationResult Evaluate(EntryCandidate code, RunsAs runsAs)
     {
@@ -155,6 +165,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
         foreach (var hit in from.Requirements) to.Requirements.Add(hit with { Basis = Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
         foreach (var hit in from.Unresolved) to.Unresolved.Add(hit with { Source = Prefix(hit.Source, path) });
         foreach (var hit in from.Assumptions) to.Assumptions.Add(hit with { Source = Prefix(hit.Source, path) });
+        foreach (var hit in from.Globals) to.Globals.Add(hit with { Basis = Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
         to.Reached.UnionWith(from.Reached);
     }
 

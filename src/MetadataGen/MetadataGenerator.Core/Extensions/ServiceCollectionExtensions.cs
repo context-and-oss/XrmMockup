@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPluginReader, PluginReader>();
         services.AddSingleton<IWorkflowReader, WorkflowReader>();
         services.AddSingleton<ISecurityRoleReader, SecurityRoleReader>();
+        services.AddSingleton<IPrivilegeReader, PrivilegeReader>();
         services.AddSingleton<IOptionSetReader, OptionSetReader>();
         services.AddSingleton<ICurrencyReader, CurrencyReader>();
         services.AddSingleton<IOrganizationReader, OrganizationReader>();

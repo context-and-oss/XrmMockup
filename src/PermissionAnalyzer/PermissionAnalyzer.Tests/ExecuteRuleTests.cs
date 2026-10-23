@@ -367,7 +367,8 @@ public class ExecuteRuleTests
               { "Message": "ctx_Approve", "Target": "Target", "Privileges": ["Write", "$Access"] },
               { "Message": "ctx_ApproveMultiple", "Targets": "Targets", "As": ["ctx_Approve"] },
               { "Message": "ctx_Close", "Checks": [{ "Table": "Task", "Privileges": ["Create"], "When": "CreateTask" }], "Enforced": false },
-              { "Message": "WhoAmIRequest" }
+              { "Message": "WhoAmIRequest" },
+              { "Message": "ctx_Purge", "GlobalPrivileges": [" prvBulkDelete ", "PRVBULKDELETE"], "Assumption": "purges one table" }
             ]
             """));
 
@@ -377,6 +378,7 @@ public class ExecuteRuleTests
                 new RequestRule("ctx_ApproveMultiple") { As = ["ctx_Approve"], Targets = "Targets" },
                 new RequestRule("ctx_Close") { Checks = [new RuleCheck([Privilege.Create]) { Table = "task", When = "CreateTask" }], Enforced = false },
                 new RequestRule("WhoAmIRequest"),
+                new RequestRule("ctx_Purge") { GlobalPrivileges = ["prvBulkDelete"], Assumption = "purges one table" },
             ],
             rules,
             RuleComparer.Instance);
@@ -387,6 +389,7 @@ public class ExecuteRuleTests
     [InlineData("""[{ "Message": "ctx_A", "Privileges": ["Write"] }]""", "XrmMockup:Permissions:Rules:0 has Privileges but no Target")]
     [InlineData("""[{ "Message": "ctx_A", "Target": "Target", "Privileges": ["Update"] }]""", "XrmMockup:Permissions:Rules:0 has an unknown privilege 'Update'")]
     [InlineData("""[{ "Message": "ctx_A", "Checks": [{ "Privileges": ["Read"] }] }]""", "XrmMockup:Permissions:Rules:0:Checks:0 needs either a Member or a Table")]
+    [InlineData("""[{ "Message": "ctx_A", "GlobalPrivileges": [" "] }]""", "XrmMockup:Permissions:Rules:0 has an empty GlobalPrivileges entry")]
     public void ConfiguredRuleMistakesNameTheSetting(string rules, string error)
     {
         var exception = Assert.Throws<ToolException>(() => RuleSetup.Create(Configuration(rules)));
@@ -420,7 +423,8 @@ public class ExecuteRuleTests
         public int GetHashCode(RequestRule obj) => Describe(obj).GetHashCode();
 
         private static string Describe(RequestRule rule) =>
-            $"{rule.Message} as [{string.Join(",", rule.As)}] targets {rule.Targets} requests {rule.Requests} enforced {rule.Enforced} checks " +
+            $"{rule.Message} as [{string.Join(",", rule.As)}] targets {rule.Targets} requests {rule.Requests} enforced {rule.Enforced} " +
+            $"globals [{string.Join(",", rule.GlobalPrivileges)}] assumption {rule.Assumption} checks " +
             string.Join(";", rule.Checks.Select(c => $"{c.Member}/{c.Table}/{c.AccessMask}/{c.When}:{string.Join(",", c.Privileges)}"));
     }
 
@@ -440,7 +444,7 @@ public class ExecuteRuleTests
             setup: builder => builder.AddPluginSteps([new PluginStepRegistration("Contoso.Plugins.Recalculate", "Contoso.Plugins", "Recalculate", null, 40, null)]));
 
         Assert.Equal(
-            ["custom API 'Recalculate' is called; its privileges are not analyzed yet", "custom API 'ctx_Recalculate' is called; its privileges are not analyzed yet"],
+            ["custom API 'Recalculate' is called; its code and execute privilege are unknown", "custom API 'ctx_Recalculate' is called; its code and execute privilege are unknown"],
             Assert.Single(manifest.Unreached).Unresolved.Select(u => u.Reason).Order(StringComparer.Ordinal));
     }
 }

@@ -8,7 +8,8 @@ public sealed class MethodManifest(
     SourceLocation? declaration,
     IReadOnlyList<Requirement> requirements,
     IReadOnlyList<UnresolvedOperation> unresolved,
-    IReadOnlyList<Assumption> assumptions)
+    IReadOnlyList<Assumption> assumptions,
+    IReadOnlyList<GlobalRequirement>? globalRequirements = null)
 {
     /// <summary>
     /// Fully qualified method signature, e.g. <c>Contoso.Plugins.AccountPostPlugin.Execute(LocalPluginContext)</c>.
@@ -21,6 +22,11 @@ public sealed class MethodManifest(
     /// Requirements sorted by table, privilege, identity and basis.
     /// </summary>
     public IReadOnlyList<Requirement> Requirements { get; } = requirements;
+
+    /// <summary>
+    /// Privileges not tied to a table, sorted by name, identity and basis.
+    /// </summary>
+    public IReadOnlyList<GlobalRequirement> GlobalRequirements { get; } = globalRequirements ?? [];
 
     /// <summary>
     /// Operations whose table could not be resolved, sorted by source location.

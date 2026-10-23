@@ -33,14 +33,17 @@ internal sealed class RequestRules
         Rule("GrantAccess", On("Target", Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
         Rule("ModifyAccess", On("Target", Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
         Rule("RevokeAccess", On("Target", Privilege.Share)),
-        Rule("Merge", On("Target", Privilege.Read, Privilege.Write)),
+        Rule("Merge", On("Target", Privilege.Read, Privilege.Write)) with { GlobalPrivileges = ["prvMerge"] },
         Rule(
             "QualifyLead",
             On("LeadId", Privilege.Write),
             OnTable("account", Privilege.Create) with { When = "CreateAccount" },
             OnTable("contact", Privilege.Create) with { When = "CreateContact" },
             OnTable("opportunity", Privilege.Create) with { When = "CreateOpportunity" }),
-        Rule("SendEmail", OnTable("email", Privilege.Read, Privilege.Write)),
+        Rule("SendEmail", OnTable("email", Privilege.Read, Privilege.Write)) with
+        {
+            Assumption = "SendEmail sends the email as the calling user; sending it as another user needs prvSendAsUser",
+        },
         Rule("CloseIncident", On("IncidentResolution", Privilege.Create), OnTable("incident", Privilege.Write)),
         Rule("WinOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)),
         Rule("LoseOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)),
@@ -54,6 +57,21 @@ internal sealed class RequestRules
         new("UploadBlock"),
         new("CommitFileBlocksUpload"),
         new("DownloadBlock"),
+
+        // Privileges not tied to a table
+        Global("BulkDelete", "prvBulkDelete"),
+        Global("ImportSolution", "prvImportCustomization"),
+        Global("ImportSolutionAsync", "prvImportCustomization"),
+        Global("ExportSolution", "prvExportCustomization"),
+        Global("ExportSolutionAsync", "prvExportCustomization"),
+        Global("PublishXml", "prvPublishCustomization"),
+        Global("PublishAllXml", "prvPublishCustomization"),
+        Global("ExecuteWorkflow", "prvWorkflowExecution"),
+        Global("DeleteRecordChangeHistory", "prvDeleteRecordChangeHistory"),
+        Global("DeleteAuditData", "prvDeleteAuditPartitions"),
+        Global("RetrieveAuditDetails", "prvReadRecordAuditHistory", "prvReadAuditSummary"),
+        Global("RetrieveAttributeChangeHistory", "prvReadRecordAuditHistory", "prvReadAuditSummary"),
+        Global("RetrieveRecordChangeHistory", "prvReadRecordAuditHistory", "prvReadAuditSummary"),
 
         // Metadata and organization information, readable by every user
         new("RetrieveEntity"),
@@ -100,9 +118,12 @@ internal sealed class RequestRules
         if (!_rules.TryGetValue(message, out var rule)) return null;
 
         // A rule that is, through others, its own as-rule adds nothing more
-        if (!visiting.Add(message)) return new ExpandedRule([], [], [], []);
+        if (!visiting.Add(message)) return new ExpandedRule([], [], [], [], [], []);
 
         var checks = new List<RuleCheck>(rule.Checks);
+        var globals = new List<string>(rule.GlobalPrivileges);
+        var assumptions = new List<string>();
+        if (rule.Assumption is { } assumption) assumptions.Add(assumption);
         var requests = new List<string>();
         var missing = new List<string>();
         var messages = new List<string> { MessageOf(rule.Message) };
@@ -119,6 +140,8 @@ internal sealed class RequestRules
             checks.AddRange(rule.Targets is { } targets ? expanded.Checks.Select(c => c.Member == "Target" ? c with { Member = targets } : c) : expanded.Checks);
             requests.AddRange(expanded.Requests);
             missing.AddRange(expanded.Missing);
+            globals.AddRange(expanded.GlobalPrivileges);
+            assumptions.AddRange(expanded.Assumptions);
         }
         visiting.Remove(message);
 
@@ -126,13 +149,17 @@ internal sealed class RequestRules
             checks,
             requests.Distinct(StringComparer.Ordinal).ToList(),
             missing.Distinct(StringComparer.Ordinal).ToList(),
-            messages.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            messages.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            globals.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g, StringComparer.Ordinal).ToList(),
+            assumptions.Distinct(StringComparer.Ordinal).OrderBy(a => a, StringComparer.Ordinal).ToList());
         // A rule expanded inside a cycle misses the part of the cycle above it, so only complete ones are kept
         if (visiting.Count == 0) _expanded[message] = result;
         return result;
     }
 
     private static RequestRule Rule(string message, params RuleCheck[] checks) => new(message) { Checks = checks };
+
+    private static RequestRule Global(string message, params string[] privileges) => new(message) { GlobalPrivileges = privileges };
 
     private static RuleCheck On(string member, params Privilege[] privileges) => new(privileges) { Member = member };
 
@@ -149,7 +176,15 @@ internal sealed class RequestRules
 /// The messages the request fires plugin steps for: its own and its as-messages, as Dataverse runs the steps of
 /// <c>Create</c> and <c>Update</c> for <c>Upsert</c>.
 /// </param>
-internal sealed record ExpandedRule(IReadOnlyList<RuleCheck> Checks, IReadOnlyList<string> Requests, IReadOnlyList<string> Missing, IReadOnlyList<string> Messages);
+/// <param name="GlobalPrivileges">The privileges the request needs by name, sorted.</param>
+/// <param name="Assumptions">What the analysis assumes about the request, sorted.</param>
+internal sealed record ExpandedRule(
+    IReadOnlyList<RuleCheck> Checks,
+    IReadOnlyList<string> Requests,
+    IReadOnlyList<string> Missing,
+    IReadOnlyList<string> Messages,
+    IReadOnlyList<string> GlobalPrivileges,
+    IReadOnlyList<string> Assumptions);
 
 /// <summary>
 /// The reasons a request isn't checked, built and recognized in one place, so the coverage summary can count them.
@@ -158,11 +193,40 @@ internal static class RequestReasons
 {
     private const string NoRulePrefix = "no rule for message '";
     private const string CustomApiPrefix = "custom API '";
-    private const string CustomApiSuffix = "' is called; its privileges are not analyzed yet";
 
     public static string NoRule(string message) => NoRulePrefix + message + "'";
 
-    public static string CustomApi(string message) => CustomApiPrefix + message + CustomApiSuffix;
+    /// <summary>
+    /// A custom API that neither the code nor the privilege catalog has, so neither its code nor its execute
+    /// privilege is known.
+    /// </summary>
+    public static string CustomApi(string message) => CustomApiPrefix + message + "' is called; its code and execute privilege are unknown";
+
+    /// <summary>
+    /// A custom API in the privilege catalog whose code isn't loaded: its execute privilege is checked, its code isn't.
+    /// </summary>
+    public static string CustomApiCode(string message) => CustomApiPrefix + message + "' is called; its code isn't analyzed";
+
+    public static string ExecutePrivilegeComputed(string message) => CustomApiPrefix + message + "' needs an execute privilege set at runtime";
+
+    public static string PrivilegeCatalogMissing(string message, string privilege) =>
+        CustomApiPrefix + message + $"' needs execute privilege '{privilege}', which needs a privilege catalog (PrivilegeCatalog.xml) to look up";
+
+    public static string PrivilegeNotInCatalog(string message, string privilege) =>
+        CustomApiPrefix + message + $"' needs execute privilege '{privilege}', which isn't in the privilege catalog";
+
+    public static string PrivilegeWithoutTablePrivilege(string message, string privilege) =>
+        CustomApiPrefix + message + $"' needs execute privilege '{privilege}', whose access right isn't a table privilege";
+
+    /// <summary>
+    /// A privilege a request rule names that the privilege catalog doesn't have, such as one misspelled in a configured
+    /// rule.
+    /// </summary>
+    public static string NamedPrivilegeNotInCatalog(string message, string privilege) =>
+        $"the {message} request needs privilege '{privilege}', which isn't in the privilege catalog";
+
+    public static string NamedPrivilegeWithoutTablePrivilege(string message, string privilege) =>
+        $"the {message} request needs privilege '{privilege}', whose access right isn't a table privilege";
 
     /// <summary>
     /// The message of a <see cref="NoRule"/> reason, or <c>null</c> for any other reason.
@@ -172,6 +236,8 @@ internal static class RequestReasons
             ? reason.Substring(NoRulePrefix.Length, reason.Length - NoRulePrefix.Length - 1)
             : null;
 
-    public static bool IsCustomApi(string reason) =>
-        reason.StartsWith(CustomApiPrefix, StringComparison.Ordinal) && reason.EndsWith(CustomApiSuffix, StringComparison.Ordinal);
+    /// <summary>
+    /// A reason about calling a custom API: its code or its execute privilege.
+    /// </summary>
+    public static bool IsCustomApi(string reason) => reason.StartsWith(CustomApiPrefix, StringComparison.Ordinal);
 }

@@ -106,6 +106,107 @@ public class ReturnedTableTests
     }
 
     [Fact]
+    public void TypeParameterOfAGenericTypeIsTheReceiversTypeArgument()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c =>
+                {
+                    new Repository<Contact>(c.OrganizationService).Remove(Guid.Empty);
+                    new TaskRepository(c.OrganizationService).Archive(Guid.Empty);
+                });
+            }
+
+            public class Repository<T>(IOrganizationService service) where T : Entity, new()
+            {
+                public virtual void Remove(Guid id) => service.Delete(new T().LogicalName, id);
+
+                public void Archive(Guid id) => Remove(id);
+            }
+
+            public class TaskRepository(IOrganizationService service) : Repository<Task>(service);
+
+            [EntityLogicalName("task")]
+            public class Task : Entity
+            {
+                public Task() : base("task") { }
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Equal(["contact:Delete as Caller", "task:Delete as Caller"], entry.RequirementsWithIdentity());
+        Assert.Empty(entry.Unresolved);
+    }
+
+    [Fact]
+    public void TypeParameterOfAGenericTypeIsPassedOnByAnOverride()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c =>
+                {
+                    Repository<Contact> repository = new LoggedRepository<Contact>(c.OrganizationService);
+                    repository.Remove(Guid.Empty);
+                });
+            }
+
+            public class Repository<T>(IOrganizationService service) where T : Entity, new()
+            {
+                protected IOrganizationService Service { get; } = service;
+
+                public virtual void Remove(Guid id) => Service.Delete(new T().LogicalName, id);
+            }
+
+            public class LoggedRepository<E>(IOrganizationService service) : Repository<E>(service) where E : Entity, new()
+            {
+                public override void Remove(Guid id)
+                {
+                    Service.Create(new E());
+                    base.Remove(id);
+                }
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Equal(["contact:Create as Caller", "contact:Delete as Caller"], entry.RequirementsWithIdentity());
+        Assert.Empty(entry.Unresolved);
+    }
+
+    [Fact]
+    public void TypeParameterOfAGenericTypeIsTheTypeArgumentOfTheInterfaceItIsCalledOn()
+    {
+        var manifest = Analyze.Code("""
+            public class P : Plugin
+            {
+                public P() => RegisterPluginStep<Account>(EventOperation.Update, ExecutionStage.PostOperation, c => Remove(Repositories.Contacts(c.OrganizationService)));
+
+                private static void Remove(IRepository<Contact> contacts) => contacts.Remove(Guid.Empty);
+            }
+
+            public interface IRepository<T> where T : Entity
+            {
+                void Remove(Guid id);
+            }
+
+            public class Repository<E>(IOrganizationService service) : IRepository<E> where E : Entity, new()
+            {
+                public void Remove(Guid id) => service.Delete(new E().LogicalName, id);
+            }
+
+            public static class Repositories
+            {
+                public static IRepository<Contact> Contacts(IOrganizationService service) => new Repository<Contact>(service);
+            }
+            """);
+
+        var entry = manifest.Entry("plugin:P:Update:account:PostOperation");
+        Assert.Equal(["contact:Delete"], entry.Requirements());
+        Assert.Empty(entry.Unresolved);
+    }
+
+    [Fact]
     public void ReasonInsideHelperIsReported()
     {
         var method = Analyze.Method("""

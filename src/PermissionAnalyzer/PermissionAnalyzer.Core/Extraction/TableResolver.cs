@@ -16,13 +16,15 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// Parameters and type parameters of the method become slots, filled in per call site. <paramref name="calls"/>
 /// turns a call to a method in the solution into the call graph's view of it, so the tables of its return value
 /// are resolved per call context too; without it such a value is unresolved. Requests are read through
-/// <paramref name="rules"/>, and the tables a lookup refers to are narrowed by <paramref name="lookups"/>.
+/// <paramref name="rules"/>, and the tables a lookup refers to are narrowed by <paramref name="lookups"/>. A type
+/// parameter of the type of <paramref name="method"/> becomes a slot of it, filled in from the call's receiver.
 /// </remarks>
 internal sealed class TableResolver(
     XrmSymbols symbols,
     RequestRules? rules = null,
     Func<IInvocationOperation, CallFact?>? calls = null,
-    LookupColumns? lookups = null)
+    LookupColumns? lookups = null,
+    IMethodSymbol? method = null)
 {
     // The access rights of AccessRights, as in PrincipalAccess.AccessMask
     private static readonly (int Bit, Privilege Privilege)[] AccessRights =
@@ -377,7 +379,8 @@ internal sealed class TableResolver(
 
     /// <summary>
     /// The tables <paramref name="message"/> needs the privilege of <paramref name="shape"/> on, with the values of
-    /// the request's members from <paramref name="members"/>.
+    /// the request's members from <paramref name="members"/>. The privileges a request needs by name, its
+    /// assumptions and the steps it fires go with <see cref="TableShape.RequestOther"/>, so they are added once.
     /// </summary>
     private TableResolution Apply(string message, Func<string, List<IOperation>> members, TableShape shape)
     {
@@ -385,7 +388,9 @@ internal sealed class TableResolver(
         {
             // Steps registered on a message without a rule, such as a custom action, fire on no table
             var unknown = Other(shape, RequestReasons.NoRule(message));
-            return shape == TableShape.RequestOther ? unknown.Add(TableResolution.Fires(message, TableResolution.Empty)) : unknown;
+            if (shape != TableShape.RequestOther) return unknown;
+            var bypassed = Bypass(message, members, out var unknownBypass);
+            return unknown.Add(bypassed).Add(TableResolution.Fires(message, TableResolution.Empty, bypass: unknownBypass));
         }
 
         var result = TableResolution.Empty;
@@ -394,7 +399,13 @@ internal sealed class TableResolver(
         {
             foreach (var value in members(nested)) result.Add(Requests(value, shape));
         }
-        if (shape == TableShape.RequestOther) result.Add(Fired(message, rule, members));
+        if (shape == TableShape.RequestOther)
+        {
+            foreach (var global in rule.GlobalPrivileges) result.Add(TableResolution.Global(global, message));
+            foreach (var assumption in rule.Assumptions) result.Add(TableResolution.Assumed(assumption));
+            result.Add(Bypass(message, members, out var bypass));
+            result.Add(Fired(message, rule, members, bypass));
+        }
 
         var privilege = RequestShapes.PrivilegeOf(shape);
         foreach (var check in rule.Checks)
@@ -436,7 +447,7 @@ internal sealed class TableResolver(
     /// The plugin steps a request fires: those of each of its messages, on the table of its first check, usually
     /// <c>Target</c>. A request whose checks name no table fires on no table.
     /// </summary>
-    private TableResolution Fired(string message, ExpandedRule rule, Func<string, List<IOperation>> members)
+    private TableResolution Fired(string message, ExpandedRule rule, Func<string, List<IOperation>> members, PluginBypass bypass)
     {
         var primary = rule.Checks.FirstOrDefault(c => c.Member is not null) ?? rule.Checks.FirstOrDefault(c => c.Table is not null);
         var tables = TableResolution.Empty;
@@ -458,7 +469,67 @@ internal sealed class TableResolver(
             tables.Add(TableResolution.Table(table));
         }
 
-        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables, columns)));
+        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables, columns, bypass)));
+    }
+
+    /// <summary>
+    /// The privileges the bypass parameters of a request need, and in <paramref name="bypass"/> the plugin steps
+    /// they certainly skip. <c>BypassCustomPluginExecution</c> skips synchronous steps and needs
+    /// prvBypassCustomPlugins; <c>BypassBusinessLogicExecution</c> skips the synchronous steps for <c>CustomSync</c>
+    /// and the asynchronous ones for <c>CustomAsync</c>, and needs prvBypassCustomBusinessLogic, as does
+    /// <c>BypassBusinessLogicExecutionStepIds</c>. The steps that one skips aren't known, as the analysis doesn't
+    /// know step ids, so they are taken to run. A value set at runtime needs the privilege but skips no step.
+    /// </summary>
+    private static TableResolution Bypass(string message, Func<string, List<IOperation>> members, out PluginBypass bypass)
+    {
+        var result = TableResolution.Empty;
+        bypass = PluginBypass.None;
+
+        var plugins = members(BypassCustomPluginExecution);
+        if (plugins.Any(v => Unwrap(v)?.ConstantValue is not { HasValue: true, Value: false }))
+        {
+            result.Add(TableResolution.Global(GlobalRequirement.BypassCustomPlugins, message));
+        }
+        if (plugins.Count > 0 && plugins.All(v => Unwrap(v)?.ConstantValue is { HasValue: true, Value: true }))
+        {
+            bypass |= PluginBypass.Synchronous;
+        }
+
+        var logic = members(BypassBusinessLogicExecution);
+        var stepIds = members(BypassBusinessLogicExecutionStepIds);
+        if (logic.Concat(stepIds).Any(v => !IsEmptyConstant(v)))
+        {
+            result.Add(TableResolution.Global(GlobalRequirement.BypassCustomBusinessLogic, message));
+        }
+        if (logic.Count > 0)
+        {
+            // Only what every value set skips is certain
+            bypass |= logic.Aggregate(PluginBypass.Synchronous | PluginBypass.Asynchronous, (skipped, value) => skipped & Skipped(value));
+        }
+        return result;
+    }
+
+    private const string BypassCustomPluginExecution = "BypassCustomPluginExecution";
+    private const string BypassBusinessLogicExecution = "BypassBusinessLogicExecution";
+    private const string BypassBusinessLogicExecutionStepIds = "BypassBusinessLogicExecutionStepIds";
+
+    private static bool IsEmptyConstant(IOperation value) =>
+        Unwrap(value)?.ConstantValue is { HasValue: true, Value: null or "" };
+
+    /// <summary>
+    /// The steps a <c>BypassBusinessLogicExecution</c> value skips: <c>CustomSync</c>, <c>CustomAsync</c>, or both,
+    /// separated by commas. None when it is set at runtime.
+    /// </summary>
+    private static PluginBypass Skipped(IOperation value)
+    {
+        if (Unwrap(value)?.ConstantValue is not { HasValue: true, Value: string text }) return PluginBypass.None;
+        var skipped = PluginBypass.None;
+        foreach (var part in text.Split(','))
+        {
+            if (part.Trim().Equals("CustomSync", StringComparison.OrdinalIgnoreCase)) skipped |= PluginBypass.Synchronous;
+            else if (part.Trim().Equals("CustomAsync", StringComparison.OrdinalIgnoreCase)) skipped |= PluginBypass.Asynchronous;
+        }
+        return skipped;
     }
 
     /// <summary>
@@ -1333,14 +1404,20 @@ internal sealed class TableResolver(
         shape == TableShape.RequestOther ? TableResolution.Unresolved(reason) : TableResolution.Empty;
 
     /// <summary>
-    /// A type parameter of a generic method becomes a slot for the type argument at each call site. One of a
-    /// generic type is unresolved.
+    /// A type parameter of a generic method becomes a slot for the type argument at each call site, and one of the
+    /// method's type a slot for the type argument of the receiver.
     /// </summary>
-    private static TableResolution TypeParameter(ITypeParameterSymbol typeParameter)
+    private TableResolution TypeParameter(ITypeParameterSymbol typeParameter)
     {
         var reason = $"table depends on type parameter '{typeParameter.Name}'";
-        return typeParameter.DeclaringMethod is { } method
-            ? TableResolution.Slot(new TableSlot(Nodes.Id(method), TableSlot.TypeParameterOrdinal(typeParameter.Ordinal), TableShape.Entity, reason))
+        if (typeParameter.DeclaringMethod is { } declaringMethod)
+        {
+            return TableResolution.Slot(new TableSlot(Nodes.Id(declaringMethod), TableSlot.TypeParameterOrdinal(typeParameter.Ordinal), TableShape.Entity, reason));
+        }
+
+        var ordinal = method is null ? -1 : Nodes.TypeParameters(method.ContainingType).IndexOf(typeParameter.OriginalDefinition);
+        return ordinal >= 0
+            ? TableResolution.Slot(new TableSlot(Nodes.Id(method!), TableSlot.TypeArgumentOrdinal(ordinal), TableShape.Entity, reason))
             : TableResolution.Unresolved(reason);
     }
 

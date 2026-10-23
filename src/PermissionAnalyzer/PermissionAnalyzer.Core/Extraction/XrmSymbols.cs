@@ -36,6 +36,8 @@ internal sealed class XrmSymbols
         Plugin = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IPlugin");
         OrganizationServiceFactory = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IOrganizationServiceFactory");
         ExecutionContext = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.IExecutionContext");
+        OrganizationServiceContext = compilation.GetTypeByMetadataName("Microsoft.Xrm.Sdk.Client.OrganizationServiceContext");
+        Queryable = compilation.GetTypeByMetadataName("System.Linq.IQueryable`1");
     }
 
     /// <summary>
@@ -58,6 +60,8 @@ internal sealed class XrmSymbols
     public INamedTypeSymbol? Plugin { get; }
     public INamedTypeSymbol? OrganizationServiceFactory { get; }
     public INamedTypeSymbol? ExecutionContext { get; }
+    public INamedTypeSymbol? OrganizationServiceContext { get; }
+    public INamedTypeSymbol? Queryable { get; }
 
     /// <summary>
     /// Returns <c>null</c> when the compilation doesn't reference the Dataverse SDK, so it can't make service calls.
@@ -90,7 +94,37 @@ internal sealed class XrmSymbols
     /// Whether values of <paramref name="type"/> are organization services, so the identity they run as is tracked.
     /// </summary>
     public bool IsService(ITypeSymbol? type) =>
-        type is not null && ServiceInterfaces.Any(s => Implements(type, s));
+        type is not null && (ServiceInterfaces.Any(s => Implements(type, s)) || IsContext(type));
+
+    /// <summary>
+    /// Whether <paramref name="type"/> is an <c>OrganizationServiceContext</c>, such as a generated context. A context
+    /// runs as the organization service it is created with, so it is tracked as a service.
+    /// </summary>
+    public bool IsContext(ITypeSymbol? type) => Is(type, OrganizationServiceContext);
+
+    /// <summary>
+    /// The <c>OrganizationServiceContext</c> method <paramref name="method"/> is, such as <c>CreateQuery</c> or
+    /// <c>AddObject</c>, or <c>null</c> when it is another method.
+    /// </summary>
+    public string? ContextOperation(IMethodSymbol method) =>
+        method.MethodKind == MethodKind.Ordinary
+        && OrganizationServiceContext is not null
+        && SymbolEqualityComparer.Default.Equals(method.ContainingType?.OriginalDefinition, OrganizationServiceContext)
+            ? method.Name
+            : null;
+
+    /// <summary>
+    /// The record type of a query property of a context, such as <c>Account</c> for a generated
+    /// <c>IQueryable&lt;Account&gt; AccountSet</c>, or <c>null</c> when <paramref name="property"/> is another property.
+    /// </summary>
+    public ITypeSymbol? QueryElement(IPropertySymbol property) =>
+        !property.IsStatic
+        && !property.IsIndexer
+        && IsContext(property.ContainingType)
+        && property.Type is INamedTypeSymbol { TypeArguments.Length: 1 } type
+        && SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, Queryable)
+            ? type.TypeArguments[0]
+            : null;
 
     /// <summary>
     /// The table of an early-bound type, read from <c>[EntityLogicalName]</c> on the type or a base type.

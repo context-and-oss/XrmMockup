@@ -9,7 +9,7 @@ those privileges against your security roles. It is a companion to
 `xrmmockup-metadata` downloads.
 
 > **Preview.** This release lists the privileges each entry point needs and checks them against
-> security roles. Plugin cascades and custom API privileges are coming next.
+> security roles, including plugin cascades and the execute privileges of custom APIs.
 
 ## Installation
 
@@ -71,7 +71,7 @@ Lists the table privileges each entry point needs.
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) to analyze |
-| `--project` | `-p` | A single project (`.csproj`) to analyze, together with the projects it references. Can't be combined with `--solution` |
+| `--project` | `-p` | A single project (`.csproj`) to analyze, together with the projects it references. Methods in referenced projects that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps. Can't be combined with `--solution` |
 | `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/` |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
 | `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
@@ -141,19 +141,24 @@ Each requirement is checked against the roles of the identity it runs as:
   `Organization`) is shown but doesn't affect the result.
 - Requirements with an `(assumed)` identity are checked like the rest.
 - `✔` is granted (or on a table no role governs, which XrmMockup doesn't check), `✘` is missing, `-` is
-  [suppressed](#configuration), and `·` is not checked or runs as SYSTEM. Each entry point first lists the
+  [suppressed](#configuration), and `·` is not checked, unverifiable or runs as SYSTEM. Each entry point first lists the
   roles each identity was checked against, or why it wasn't checked.
 - Role names are matched exactly, then ignoring case. An unknown name is an error that suggests the
   closest names.
 - `Missing privileges` lists each missing privilege once, with the identity, the roles that don't
   grant it and every entry point or unreached method that needs it. The `check` error names them too.
 - `Not checked` lists what the result doesn't cover: unresolved operations (split into requests
-  without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles and the
-  impersonation privilege. It is left out when everything was checked. When nothing is
+  without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles and
+  unverifiable privileges. It is left out when everything was checked. When nothing is
   missing but something wasn't checked, `check` exits with `0` and logs a warning; `--strict` makes it fail.
-- Setting `CallerId` also needs the `prvActOnBehalfOfAnotherUser` privilege on the identity that sets
-  it, usually the application user. The metadata has no global privileges yet, so this is shown as
-  `! … unverifiable` and you have to check it yourself.
+- Some privileges aren't tied to a table, such as `prvActOnBehalfOfAnotherUser` or the execute
+  privilege of a custom API. They are listed with their name in the table column and `global` as the
+  privilege, and under `Privileges not tied to a table`.
+- Setting `CallerId` needs `prvActOnBehalfOfAnotherUser` on the identity that sets it, usually the
+  application user, for every operation that acts for the user in `CallerId`.
+- Privileges not tied to a table are checked against the roles' global privileges, which
+  `xrmmockup-metadata` downloads in releases after v1.2.0. Roles from older metadata don't have them,
+  so these privileges are `unverifiable` until you regenerate the metadata.
 
 Exit codes:
 
@@ -217,6 +222,22 @@ Calls on `IOrganizationService`, `IOrganizationServiceAsync`/`Async2` and their 
 | `Associate`, `Disassociate` | Read, AppendTo on the target; Read, Append on the related records |
 | `Execute` | From the rule for the request's message, see [Requests](#requests) |
 
+Calls on an `OrganizationServiceContext`, including generated contexts such as `new Xrm(service)`:
+
+| Call | Privileges |
+|------|------------|
+| `CreateQuery`, and query properties such as `AccountSet` | Read on the table, and on every table a LINQ `join` adds |
+| `AddObject` | Create, and Append and AppendTo for lookups |
+| `UpdateObject` | Write, and Append and AppendTo for lookups |
+| `DeleteObject` | Delete |
+| `AddLink`, `DeleteLink` | Read, AppendTo on the source; Read, Append on the target |
+| `AddRelatedObject` | Create on the related record, and the privileges of `AddLink` |
+| `Execute` | As on the service |
+
+The privileges of a change are reported where it's queued, not at `SaveChanges`. A context runs as
+the service it's created with, also in code inside a context class and when it's kept in a field.
+`LoadProperty` reads through a relationship whose table isn't known, and is reported as unresolved.
+
 The table is found from:
 
 - early-bound types (`[EntityLogicalName]`), such as `new Account()`
@@ -228,6 +249,10 @@ The table is found from:
   `service.Create(Build(flag))` or `RetrieveMultiple(Query<Contact>())`
 - type arguments of generic methods, such as `service.Get<Contact>(id)` where `Get<T>` uses
   `new T().LogicalName` or `Activator.CreateInstance<T>()`
+- type arguments of generic types, from the object a method is called on, such as
+  `new Repository<Contact>(service).GetRecords()` where `Repository<T>` runs `CreateQuery<T>()`.
+  This also works for a subclass such as `ContactRepository : Repository<Contact>`, for overrides and
+  for calls through a generic interface such as `IRepository<Contact>`
 - the record `Retrieve` returns, which is of the table it asks for
 - an early-bound lookup property, such as `order.CustomerId.LogicalName`, from the lookup's targets in
   the entity metadata, as for [lookups](#lookups)
@@ -250,19 +275,62 @@ collections built with `Add`, `AddRange` or collection expressions, including ba
 | `SetState` | Write on `EntityMoniker` |
 | `GrantAccess`, `ModifyAccess` | Share, and each right in `PrincipalAccess.AccessMask` |
 | `RevokeAccess` | Share |
-| `Merge` | Read, Write |
+| `Merge` | Read, Write; `prvMerge` |
 | `QualifyLead` | Write on the lead; Create on account, contact and opportunity when asked to create them |
-| `SendEmail` | Read, Write on email |
+| `SendEmail` | Read, Write on email, with the assumption that it is sent as the caller (sending as another user needs `prvSendAsUser`) |
 | `CloseIncident`, `WinOpportunity`, `LoseOpportunity`, `WinQuote`, `CloseQuote` | Create on the close activity, Write on the closed record |
 | `ReviseQuote` | Read, Create on quote |
 | `InitializeFileBlocksUpload` / `InitializeFileBlocksDownload` | Write / Read on `Target` |
+| `BulkDelete` | `prvBulkDelete` |
+| `ImportSolution`, `ImportSolutionAsync` / `ExportSolution`, `ExportSolutionAsync` | `prvImportCustomization` / `prvExportCustomization` |
+| `PublishXml`, `PublishAllXml` | `prvPublishCustomization` |
+| `ExecuteWorkflow` | `prvWorkflowExecution` |
+| `DeleteRecordChangeHistory` / `DeleteAuditData` | `prvDeleteRecordChangeHistory` / `prvDeleteAuditPartitions` |
+| `RetrieveAuditDetails`, `RetrieveAttributeChangeHistory`, `RetrieveRecordChangeHistory` | `prvReadRecordAuditHistory`, `prvReadAuditSummary` |
 | Block transfers, metadata requests, `WhoAmI`, `RetrieveVersion`, `RetrievePrincipalAccess` and similar | None |
 
+Privileges named with `prv` are looked up in `PrivilegeCatalog.xml`: one not tied to a table is a
+[privilege not tied to a table](#check), one tied to tables is the table privilege it grants on each,
+and a name the catalog doesn't have is reported as unresolved. Without a catalog they are taken as
+privileges not tied to a table.
+
+Some request parameters and columns need a privilege of their own:
+
+| Set | Needs |
+|-----|-------|
+| `BypassCustomPluginExecution` | `prvBypassCustomPlugins` |
+| `BypassBusinessLogicExecution`, `BypassBusinessLogicExecutionStepIds` | `prvBypassCustomBusinessLogic` |
+| `overriddencreatedon` on a record that is created | `prvOverrideCreatedOnCreatedBy` |
+
+A bypass parameter set to a constant `false` or empty value needs nothing. The bypassed plugin steps
+don't run, see [plugin cascades](#plugin-cascades).
+
 A request without a rule is reported as unresolved. When its message is a custom API (one found in
-the code, a plugin step message in the metadata, or a name with a publisher prefix such as
-`ctx_Approve`), it is reported as a custom API call: the privilege to execute it isn't checked. When the
-custom API is implemented in the analyzed code, its code runs as a [cascade](#plugin-cascades). Add a rule
-for your own messages in the [`Rules` setting](#request-rules).
+the code, in `PrivilegeCatalog.xml`, a plugin step message in the metadata, or a name with a publisher
+prefix such as `ctx_Approve`), it is reported as a custom API call. Add a rule for your own messages
+in the [`Rules` setting](#request-rules).
+
+### Custom APIs
+
+Calling a custom API needs its execute privilege, if it has one. It is read from the registration in
+the code, else from `PrivilegeCatalog.xml`, which `xrmmockup-metadata` writes with every privilege and
+custom API in the environment:
+
+| Registration | Requirement |
+|--------------|-------------|
+| `.WithExecutePrivilege<Account>(Privilege.Read)` | Read on `account` (basis `execute-privilege`) |
+| `.WithExecutePrivilege("ctx_Order", Privilege.Write)` | Write on `ctx_order` |
+| `.WithExecutePrivilegeName("prvReadctx_Order")` | The table privilege the catalog has for the name, or the name itself when it isn't tied to a table |
+| An execute privilege in the catalog only | The same, for a custom API whose code isn't analyzed |
+
+A privilege name is only looked up in the catalog, never guessed from its spelling. A name without a
+catalog, a name the catalog doesn't have, a name computed at runtime, and a privilege whose access
+right isn't a table privilege are reported as unresolved.
+
+The caller of a custom API needs the privilege, and so does the custom API's own entry point, under
+`Caller`. When the custom API is implemented in the analyzed code, its code runs as a
+[cascade](#plugin-cascades). A custom API that is only in the catalog is reported as unresolved,
+because its code isn't analyzed.
 
 ### Lookups
 
@@ -304,6 +372,11 @@ point. Steps come from code registrations and from the plugin steps in the metad
   plugin's `Target`, a column name computed at runtime, or an entity passed to a method that can
   set more, the step fires with basis `filter-unknown`.
 - A call to a custom API implemented in the analyzed code runs that code.
+- A request with `BypassCustomPluginExecution` set to `true` doesn't run synchronous steps, and one with
+  `BypassBusinessLogicExecution` doesn't run the synchronous (`CustomSync`) or asynchronous
+  (`CustomAsync`) steps it names. A step's mode comes from `.SetExecutionMode(…)` or the metadata.
+  Steps are still run when the value is set at runtime, and for `BypassBusinessLogicExecutionStepIds`,
+  because the analysis doesn't know step ids. A custom API's own code always runs.
 - A metadata step whose plugin code isn't loaded is reported as unresolved, so missing plugin code is
   never treated as needing nothing. Load it with `--plugin-solution` when it's in another solution.
 - Each step is expanded once per identity, so steps that fire each other don't loop.
@@ -353,8 +426,8 @@ Requirements of the operation itself have the source `--operation`; those of a s
 step's code, with a path that starts at the operation.
 
 Calls inside lambdas and local functions count towards the method that contains them. A generic
-helper that no entry point calls is listed under unreached methods with its type parameter as the
-unresolved reason.
+helper or generic class method that no entry point calls is listed under unreached methods with its
+type parameter as the unresolved reason.
 
 ## Configuration
 
@@ -381,7 +454,8 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
         "6a1e5c4d-2b3f-4a5e-8c7d-9e0f1a2b3c4d": { "Name": "svc-plugins", "Roles": ["Plugin Service"] }
       },
       "Suppress": [
-        { "Table": "ctx_auditlog", "Privilege": "Create", "Reason": "Created by SYSTEM via helper" }
+        { "Table": "ctx_auditlog", "Privilege": "Create", "Reason": "Created by SYSTEM via helper" },
+        { "Privilege": "prvActOnBehalfOfAnotherUser", "Reason": "Granted by the integration team" }
       ],
       "Rules": [
         { "Message": "ctx_Approve", "Target": "Target", "Privileges": ["Write"] }
@@ -400,7 +474,7 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
 | `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds to these. A name that matches no method is reported as a warning |
 | `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
 | `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |
-| `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table. Suppressed privileges are shown but don't fail `check` |
+| `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table, or leave out `Table` to accept a privilege not tied to a table by its name. Suppressed privileges are shown but don't fail `check` |
 | `Rules` | Rules for requests passed to `Execute`, which replace the built-in rule for their message or add one. See below |
 
 Configured paths are relative to the configuration file. `appsettings.{DOTNET_ENVIRONMENT}.json` and
@@ -429,9 +503,11 @@ needs:
 | `As` | Messages whose checks the request makes as well |
 | `Targets` | A member holding several targets; the `As` rules' checks on `Target` apply to it |
 | `Requests` | A member holding requests that run as part of this one |
+| `GlobalPrivileges` | Privileges the request needs by name, such as `prvBulkDelete`, looked up in the privilege catalog as above |
+| `Assumption` | What the analysis assumes about the request, listed under assumptions wherever it is called |
 | `Enforced` | `false` when XrmMockup doesn't make the checks (Dataverse still does) |
 
-A rule with none of these needs no table privilege, so its requests are no longer reported.
+A rule with none of these needs no privilege, so its requests are no longer reported.
 
 ### Excluding projects
 
@@ -474,14 +550,15 @@ grants them. `check` and `--role` use the roles from this folder, by name.
 `trigger`, `requirements`, `unresolved`, `assumptions` and `triggers`, the ids of the steps it fires),
 `unreached` and `notRoleGoverned`.
 Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, each with the call
-`path` from the entry point.
+`path` from the entry point. A privilege not tied to a table has no `table`, and its name as
+`privilege`.
 
 With roles, each requirement also has `coverage` (`status`: `granted`, `not-governed`, `missing`,
-`suppressed`, `not-checked` or `system`, with `depth` or `reason`), each entry point has `roles` (the
-roles per identity, with their `origin`) and `impersonation` when it sets `CallerId`, and the document
+`suppressed`, `not-checked`, `system` or `unverifiable`, with `depth` or `reason`), each entry point has `roles` (the
+roles per identity, with their `origin`), and the document
 has a `result` with the counts, `unresolvedNoRule` and `unresolvedCustomApi` (the unresolved operations
 that are requests without a rule and custom API calls) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
-with `table`, `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
+with `table` (left out for a privilege not tied to a table), `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
 it). Without roles, none of these are written.
 
 Output is deterministic: entry points, methods, tables and source locations are sorted ordinally, paths are

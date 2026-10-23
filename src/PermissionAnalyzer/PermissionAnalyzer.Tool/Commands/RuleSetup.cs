@@ -30,8 +30,17 @@ internal static class RuleSetup
             As = rule.As.Select(a => a.Trim()).ToList(),
             Targets = Blank(rule.Targets),
             Requests = Blank(rule.Requests),
+            GlobalPrivileges = GlobalPrivileges(rule.GlobalPrivileges, setting),
+            Assumption = Blank(rule.Assumption),
             Enforced = rule.Enforced ?? true,
         };
+    }
+
+    private static IReadOnlyList<string> GlobalPrivileges(IEnumerable<string> privileges, string setting)
+    {
+        var names = privileges.Select(p => p?.Trim() ?? "").ToList();
+        if (names.Any(n => n.Length == 0)) throw new ToolException($"{setting} has an empty GlobalPrivileges entry");
+        return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static RuleCheck Check(RuleCheckConfiguration check, string setting)

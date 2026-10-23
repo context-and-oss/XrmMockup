@@ -30,6 +30,12 @@ public sealed class Manifest(
         EntryPoints.SelectMany(e => e.Requirements).Concat(Unreached.SelectMany(m => m.Requirements));
 
     /// <summary>
+    /// Every requirement of a privilege not tied to a table, of entry points and unreached methods.
+    /// </summary>
+    public IEnumerable<GlobalRequirement> AllGlobalRequirements =>
+        EntryPoints.SelectMany(e => e.GlobalRequirements).Concat(Unreached.SelectMany(m => m.GlobalRequirements));
+
+    /// <summary>
     /// Every table that appears in a requirement, sorted.
     /// </summary>
     public IReadOnlyList<string> Tables =>
