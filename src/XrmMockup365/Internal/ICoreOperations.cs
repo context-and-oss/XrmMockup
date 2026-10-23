@@ -42,6 +42,7 @@ namespace DG.Tools.XrmMockup.Internal
         // Dispatch helpers — Core owns the managers so the pipeline delegates through these
         OrganizationResponse ExecuteAction(OrganizationRequest request);
         bool HandlesCustomApi(string requestName);
+        IEnumerable<KeyValuePair<string, object>> GetCustomApiInputParameters(OrganizationRequest request);
         OrganizationResponse ExecuteCustomApi(OrganizationRequest request, PluginContext pluginContext);
         bool IsExceptionFreeRequest(string requestName);
 

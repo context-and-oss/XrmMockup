@@ -113,6 +113,15 @@ namespace DG.Tools.XrmMockup
         public bool EnablePowerFxFields { get; set; } = true;
 
         /// <summary>
+        /// Optional:
+        /// Throw a <see cref="MockupException"/> when a Custom API is called with a request parameter that is not registered,
+        /// or sets an output parameter that is not a registered response property.
+        /// When disabled, such parameters are left out and a warning is logged.
+        /// Default is false.
+        /// </summary>
+        public bool StrictCustomApiParameters { get; set; }
+
+        /// <summary>
         /// Optional file path for diagnostic logging. When set, XrmMockup writes startup
         /// information (discovered plugins, workflows, custom APIs) to this file.
         /// </summary>
