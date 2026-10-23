@@ -24,6 +24,8 @@ dotnet new tool-manifest # if you don't have a manifest yet
 dotnet tool install XrmMockup.PermissionAnalyzer
 ```
 
+While only release candidates are published, add `--prerelease` to either command.
+
 ## Quick start
 
 From the folder with your solution and `appsettings.json`:

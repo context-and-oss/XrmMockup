@@ -38,6 +38,10 @@ jobs:
       shell: pwsh
       run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -PropsPath ./src/MetadataGen/Directory.Build.props
 
+    - name: Set PermissionAnalyzer version from CHANGELOG.md
+      shell: pwsh
+      run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/PermissionAnalyzer/PermissionAnalyzer.Tool/CHANGELOG.md -PropsPath ./src/PermissionAnalyzer/Directory.Build.props
+
     - name: Restore dependencies
       run: dotnet restore
 
@@ -52,6 +56,9 @@ jobs:
 
     - name: Pack MetadataGenerator.Tool
       run: dotnet pack src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj --configuration Release --no-build --output ./nupkg
+
+    - name: Pack PermissionAnalyzer.Tool
+      run: dotnet pack src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj --configuration Release --no-build --output ./nupkg
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

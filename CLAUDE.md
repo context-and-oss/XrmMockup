@@ -12,8 +12,8 @@ XrmMockup is a simulation engine that mocks Microsoft Dynamics 365/CRM instances
 # Build the solution (debug)
 dotnet build XrmMockup.slnx
 
-# Build for release (uses FAKE build script)
-build.cmd Build
+# Build for release
+dotnet build XrmMockup.slnx --configuration Release
 
 # Run all tests
 dotnet test
@@ -24,9 +24,11 @@ dotnet test --filter "FullyQualifiedName~TestCreate"
 # Run tests for a specific class
 dotnet test --filter "FullyQualifiedName~DG.XrmMockupTest.TestWorkflow"
 
-# Create NuGet package (uses FAKE build script)
-build.cmd NuGet
+# Create a NuGet package (CI packs XrmMockup365, MetadataGenerator.Tool and PermissionAnalyzer.Tool)
+dotnet pack src/XrmMockup365/XrmMockup365.csproj --configuration Release --output ./nupkg
 ```
+
+Releases are built by `.github/workflows/release.yml` when a GitHub release is published. Each package's version comes from the first `### vX.Y.Z` heading of its changelog (`RELEASE_NOTES.md` for XrmMockup365, `CHANGELOG.md` next to each tool), set by `scripts/Set-VersionFromChangelog.ps1`.
 
 ## Architecture
 
