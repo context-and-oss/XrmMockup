@@ -143,7 +143,7 @@ themselves.
 
 Methods with operations that no entry point reaches are reported under `unreached`, analyzed as if
 called by the caller (assumed), so code called from outside the solution is never silently dropped.
-With `--project`, only the project's own methods are: the projects it references are analyzed for
+When a project is analyzed rather than a solution, only the project's own methods are: the projects it references are analyzed for
 what its entry points call, but a shared library also holds code for other apps, so its unreached
 methods would only add privileges the project doesn't need.
 
@@ -512,7 +512,7 @@ Shared options:
 
 | Option | Meaning |
 |---|---|
-| `--solution <path>` / `--project <path>` | Code to analyze (default: the single `.sln`/`.slnx` in the current directory) |
+| `--solution <path>` | Solution (`.sln`/`.slnx`) or project (`.csproj`, with the projects it references) to analyze (default: the single `.sln`/`.slnx` in the current directory) |
 | `--metadata <dir>` | XrmMockup `Metadata/` folder (security roles, plugin steps, entity metadata). Default: `XrmMockup:Metadata:OutputDirectory` from `appsettings.json` |
 | `--config <file>` / `-c` | Path to `appsettings.json`, same as `xrmmockup-metadata` (§6.3) |
 | `--format text\|json\|markdown\|sarif` | Output format (default `text`; `sarif` for GitHub code scanning) |
@@ -653,7 +653,7 @@ conventions:
   `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` when it exists. A project that already
   generates metadata needs no extra path setting. Configured paths are relative to the config
   file; command-line paths are relative to the current directory.
-- Without `--solution`, `--project` or `Solution`, the tool uses the single `*.sln`/`*.slnx` in
+- Without `--solution` or `Solution`, the tool uses the single `*.sln`/`*.slnx` in
   the current directory.
 - The tool makes no Dataverse connection (a future `check --user` would be the exception,
   §10), so it ignores `DataverseUrl` and
@@ -766,7 +766,7 @@ location of each missing privilege.
   reported privilege and expect an access-denied fault. This ties the rule table to mockup's
   real behavior and catches drift when handlers change.
 - A runtime permission recorder in XrmMockup (recording every check inside
-  `Security.HasPermission`) automates this cross-check. It is planned as phase 7, see
+  `Security.HasPermission`) automates this cross-check. It is a later, not yet decided feature, see
   [role verification for scenarios](#future-role-verification-for-scenarios-in-xrmmockup-core).
 
 ## 10. Delivery plan
@@ -781,8 +781,7 @@ location of each missing privilege.
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
 | 5.5 | Output clean-up (below): filtering, and verbosity levels where the default shows what needs attention and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output, docs, NuGet tool packaging alongside `xrmmockup-metadata` | Release |
-| 7 | Role verification for scenarios in XrmMockup core (below), after phase 5. A core feature: it changes XrmMockup365 itself, not only the analyzer | Tests run a scenario as a principal and get back what was checked, granted and denied, to compare with the analyzer's output |
-| Later | Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
+| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
 
 **Output clean-up (phase 5.5).** On a real solution the output is long, and most of it is
 requirements the roles already grant. That is rarely what a reader needs, but it must stay
@@ -797,7 +796,7 @@ account". Proposed direction, to settle when the phase starts:
   (`RunsAs`) or bases, such as the `--basis` option in §6 that isn't built yet. Filters, like
   verbosity, apply after analysis, so they never change what is computed or whether `check`
   fails.
-- **JSON** stays complete at every verbosity, so tools and the phase 7 comparison always get
+- **JSON** stays complete at every verbosity, so tools and a later role verification always get
   the full result; filters may apply to it.
 - Without roles (`required` without `--role`), nothing is granted, so the default stays close
   to today's output and filtering does most of the work.
@@ -895,8 +894,8 @@ result.Fired       // plugin steps run, with the identity of each
 - How should depth (user, business unit, organization) be reported when the mockup's records
   don't exercise every depth?
 
-**Phase:** 7, after phase 5, as its own core feature. It needs changes to XrmMockup365 itself,
-not only the analyzer.
+**Phase:** later, not yet decided. It would be its own core feature, since it needs changes to
+XrmMockup365 itself, not only the analyzer.
 
 ## 11. Decisions
 

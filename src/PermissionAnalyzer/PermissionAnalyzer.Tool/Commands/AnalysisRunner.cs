@@ -38,7 +38,7 @@ internal static class AnalysisRunner
         try
         {
             var configuration = ConfigReader.Read(request.Config);
-            var settings = AnalysisSettings.Resolve(request.Solution, request.Project, request.Metadata, configuration, request.Exclude, request.PluginSolutions);
+            var settings = AnalysisSettings.Resolve(request.Solution, request.Metadata, configuration, request.Exclude, request.PluginSolutions);
 
             var roles = LoadRoles(settings.MetadataDirectory, logger);
             // Role names are checked before the slow part, so a typo fails fast

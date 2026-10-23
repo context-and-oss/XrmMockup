@@ -9,14 +9,7 @@ internal static class CliOptions
     {
         public const string Primary = "--solution";
         public const string Alias = "-s";
-        public const string Description = "Solution (.sln or .slnx) to analyze. Default: XrmMockup:Permissions:Solution, else the single solution in the current directory";
-    }
-
-    internal static class Project
-    {
-        public const string Primary = "--project";
-        public const string Alias = "-p";
-        public const string Description = "Project (.csproj) to analyze instead of a solution, with the projects it references";
+        public const string Description = "Solution (.sln or .slnx) or project (.csproj) to analyze. A project is analyzed with the projects it references. Default: XrmMockup:Permissions:Solution, else the single solution in the current directory";
     }
 
     internal static class Metadata

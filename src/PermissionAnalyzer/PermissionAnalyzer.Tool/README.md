@@ -70,8 +70,7 @@ Lists the table privileges each entry point needs.
 
 | Option | Alias | Description |
 |--------|-------|-------------|
-| `--solution` | `-s` | Solution (`.sln`/`.slnx`) to analyze |
-| `--project` | `-p` | A single project (`.csproj`) to analyze, together with the projects it references. Methods in referenced projects that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps. Can't be combined with `--solution` |
+| `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
 | `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/` |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
 | `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
@@ -392,7 +391,7 @@ code in its solution. Add the solutions or projects with the plugin code with `-
 `PluginSolutions` in the configuration:
 
 ```bash
-xrmmockup-permissions required -p ./src/Contoso.Functions/Contoso.Functions.csproj -m ./tests/Metadata \
+xrmmockup-permissions required -s ./src/Contoso.Functions/Contoso.Functions.csproj -m ./tests/Metadata \
   --plugin-solution ../Contoso.Plugins/Contoso.Plugins.sln
 ```
 

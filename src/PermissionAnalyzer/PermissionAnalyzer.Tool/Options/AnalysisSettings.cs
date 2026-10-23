@@ -18,7 +18,6 @@ internal sealed record AnalysisSettings(string Target, string? MetadataDirectory
     /// </summary>
     public static AnalysisSettings Resolve(
         string? solution,
-        string? project,
         string? metadata,
         LoadedConfiguration configuration,
         IReadOnlyList<string>? exclude = null,
@@ -27,7 +26,7 @@ internal sealed record AnalysisSettings(string Target, string? MetadataDirectory
         var excludeProjects = configuration.Permissions.ExcludeProjects.Concat(exclude ?? []).ToList();
         var currentDirectory = Directory.GetCurrentDirectory();
 
-        var target = (solution ?? project) is { } cliTarget ? Path.GetFullPath(cliTarget, currentDirectory)
+        var target = solution is { } cliTarget ? Path.GetFullPath(cliTarget, currentDirectory)
             : configuration.Permissions.Solution is { } configuredTarget ? Path.GetFullPath(configuredTarget, configuration.Directory)
             : FindSolution(currentDirectory);
         if (!File.Exists(target)) throw new ToolException($"Solution or project not found: {target}");
@@ -73,7 +72,7 @@ internal sealed record AnalysisSettings(string Target, string? MetadataDirectory
         return solutions.Count switch
         {
             1 => solutions[0],
-            0 => throw new ToolException($"No solution found in {directory}. Use {CliOptions.Solution.Primary} or {CliOptions.Project.Primary}."),
+            0 => throw new ToolException($"No solution found in {directory}. Use {CliOptions.Solution.Primary} to give a solution or project."),
             _ => throw new ToolException($"Several solutions found in {directory}. Use {CliOptions.Solution.Primary} to pick one."),
         };
     }

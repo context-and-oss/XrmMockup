@@ -57,7 +57,7 @@ public class ProjectFilterTests
                 """);
 
             var configuration = ConfigReader.Read(Path.Combine(directory, "appsettings.json"));
-            var settings = AnalysisSettings.Resolve(null, null, null, configuration, ["Tools"]);
+            var settings = AnalysisSettings.Resolve(null, null, configuration, ["Tools"]);
 
             Assert.Equal(["*.Tests", "tests/*", "Tools"], settings.ExcludeProjects);
         }
@@ -81,10 +81,10 @@ public class ProjectFilterTests
                 """);
             var configuration = ConfigReader.Read(Path.Combine(directory, "appsettings.json"));
 
-            var settings = AnalysisSettings.Resolve(null, null, null, configuration, pluginSolutions: [Path.Combine(directory, "plugins", "Plugins.slnx")]);
+            var settings = AnalysisSettings.Resolve(null, null, configuration, pluginSolutions: [Path.Combine(directory, "plugins", "Plugins.slnx")]);
             Assert.Equal([Path.Combine(directory, "plugins", "Plugins.slnx")], settings.PluginSolutions);
 
-            var missing = Assert.Throws<ToolException>(() => AnalysisSettings.Resolve(null, null, null, configuration, pluginSolutions: [Path.Combine(directory, "Missing.sln")]));
+            var missing = Assert.Throws<ToolException>(() => AnalysisSettings.Resolve(null, null, configuration, pluginSolutions: [Path.Combine(directory, "Missing.sln")]));
             Assert.Equal($"Plugin solution or project not found: {Path.Combine(directory, "Missing.sln")}", missing.Message);
         }
         finally

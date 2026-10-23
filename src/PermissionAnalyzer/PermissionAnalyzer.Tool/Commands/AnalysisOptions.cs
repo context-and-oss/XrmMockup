@@ -9,7 +9,6 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 internal sealed class AnalysisOptions
 {
     private readonly Option<string?> _solution = new(CliOptions.Solution.Primary, CliOptions.Solution.Alias) { Description = CliOptions.Solution.Description };
-    private readonly Option<string?> _project = new(CliOptions.Project.Primary, CliOptions.Project.Alias) { Description = CliOptions.Project.Description };
     private readonly Option<string?> _metadata = new(CliOptions.Metadata.Primary, CliOptions.Metadata.Alias) { Description = CliOptions.Metadata.Description };
     private readonly Option<string[]> _exclude = new(CliOptions.Exclude.Primary, CliOptions.Exclude.Alias) { Description = CliOptions.Exclude.Description };
     private readonly Option<string[]> _pluginSolution = new(CliOptions.PluginSolution.Primary) { Description = CliOptions.PluginSolution.Description };
@@ -40,18 +39,13 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _project, _metadata, _exclude, _pluginSolution, _config, _format, _output })
+        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output })
         {
             command.Options.Add(option);
         }
 
         command.Validators.Add(result =>
         {
-            if (result.GetResult(_solution) is not null && result.GetResult(_project) is not null)
-            {
-                result.AddError($"Use either {CliOptions.Solution.Primary} or {CliOptions.Project.Primary}, not both.");
-            }
-
             var scopes = new Option[] { _plugin, _customApi, _function, _entry, _operation }.Count(o => result.GetResult(o) is not null);
             if (scopes > 1)
             {
@@ -88,7 +82,6 @@ internal sealed class AnalysisOptions
 
         return new AnalysisRequest(
             parseResult.GetValue(_solution),
-            parseResult.GetValue(_project),
             parseResult.GetValue(_metadata),
             parseResult.GetValue(_exclude) ?? [],
             parseResult.GetValue(_config),
@@ -108,7 +101,6 @@ internal sealed class AnalysisOptions
 /// </summary>
 internal sealed record AnalysisRequest(
     string? Solution,
-    string? Project,
     string? Metadata,
     IReadOnlyList<string> Exclude,
     string? Config,

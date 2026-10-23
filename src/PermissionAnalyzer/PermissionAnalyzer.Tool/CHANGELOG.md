@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: The identity each requirement runs as (`Caller`, `User`, `ApplicationUser`, `ImpersonatedCaller`, `System`), including impersonation from `SetUserContext` and plugin step metadata, with assumptions listed when it can't be determined
 * Add: `--plugin`, `--custom-api`, `--function` and `--entry` to analyze one entry point, and the `EntryPoints` setting for extra entry methods
 * Add: Methods with service calls that no entry point reaches are listed separately
-* Change: `--project` also analyzes the projects it references, so entry points reach code in shared libraries. Methods in those libraries that the project doesn't reach aren't listed as unreached
+* Change: `--solution` also takes a project (`.csproj`), analyzed with the projects it references, so entry points reach code in shared libraries. Methods in those libraries that the project doesn't reach aren't listed as unreached. `--project` is removed
 * Change: A missing metadata folder is a warning, because security roles and plugin steps are then not used
 * Add: `check` command, which checks the requirements against security roles from the metadata, per identity: `--role` for the caller and the application user, `--caller-role` for users acted for through `CallerId`, and the `Principals` and `Users` settings. Exits with `1` when a privilege is missing; `--strict` also fails on unresolved operations, unchecked identities and unverifiable privileges
 * Add: `--role` and `--caller-role` on `required`, which mark each requirement as granted or missing without changing the exit code
