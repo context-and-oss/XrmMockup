@@ -45,28 +45,9 @@ internal static class AnalysisRunner
             var coverageOptions = CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, requireRoles);
 
             var root = Path.GetDirectoryName(settings.Target)!;
-            var lookups = settings.MetadataDirectory is { } lookupDirectory ? LookupLoader.Load(lookupDirectory) : [];
-            if (settings.MetadataDirectory is not null)
-            {
-                logger.LogInformation("Loaded {Count} lookup columns from {Directory}", lookups.Count, settings.MetadataDirectory);
-            }
+            var lookups = settings.MetadataDirectory is { } lookupDirectory ? LoadLookups(lookupDirectory, logger) : [];
             var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), lookups);
-            if (settings.MetadataDirectory is { } metadataDirectory)
-            {
-                var steps = PluginStepLoader.Load(metadataDirectory);
-                logger.LogInformation("Loaded {Count} plugin steps from {Directory}", steps.Count, metadataDirectory);
-                builder.AddPluginSteps(steps);
-
-                if (PrivilegeCatalogLoader.Load(metadataDirectory) is var (privileges, customApis))
-                {
-                    logger.LogInformation("Loaded {Count} privileges and {CustomApis} custom APIs from {File}", privileges.Count, customApis.Count, PrivilegeCatalogLoader.FileName);
-                    builder.AddPrivilegeCatalog(privileges, customApis);
-                }
-                else
-                {
-                    logger.LogWarning("No {File} in {Directory}, so execute privileges set by name can't be looked up. Regenerate the metadata to add it", PrivilegeCatalogLoader.FileName, metadataDirectory);
-                }
-            }
+            if (settings.MetadataDirectory is { } metadataDirectory) AddMetadata(builder, metadataDirectory, logger);
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
@@ -101,16 +82,16 @@ internal static class AnalysisRunner
                 {
                     throw new ToolException(
                         $"No roles to check against: no {CliOptions.Role.Primary} or {CliOptions.CallerRole.Primary}, and nothing analyzed matches " +
-                        "XrmMockup:Permissions:Principals or XrmMockup:Permissions:Users");
+                        $"{PermissionsConfiguration.SectionPath}:Principals or {PermissionsConfiguration.SectionPath}:Users");
                 }
             }
 
-            var report = request.Report ?? ReportOptions.Default;
+            var report = request.Report;
             IManifestWriter writer = request.Format switch
             {
-                "json" => new JsonManifestWriter(report.Filters),
-                "markdown" => new MarkdownManifestWriter(report.Filters),
-                "sarif" => new SarifManifestWriter(report.Filters, SarifManifestWriter.RepositoryPath(root), version),
+                ReportFormat.Json => new JsonManifestWriter(report.Filter),
+                ReportFormat.Markdown => new MarkdownManifestWriter(report.Filter),
+                ReportFormat.Sarif => new SarifManifestWriter(report.Filter, SarifManifestWriter.RepositoryPath(root), version),
                 _ => new TextManifestWriter(report),
             };
             if (request.Output is null)
@@ -139,11 +120,38 @@ internal static class AnalysisRunner
         }
     }
 
+    private static IReadOnlyList<LookupColumn> LoadLookups(string metadataDirectory, ILogger logger)
+    {
+        var lookups = LookupLoader.Load(metadataDirectory);
+        logger.LogInformation("Loaded {Count} lookup columns from {Directory}", lookups.Count, metadataDirectory);
+        return lookups;
+    }
+
+    /// <summary>
+    /// The plugin steps and the privilege catalog of the metadata folder.
+    /// </summary>
+    private static void AddMetadata(ManifestBuilder builder, string metadataDirectory, ILogger logger)
+    {
+        var steps = PluginStepLoader.Load(metadataDirectory);
+        logger.LogInformation("Loaded {Count} plugin steps from {Directory}", steps.Count, metadataDirectory);
+        builder.AddPluginSteps(steps);
+
+        if (PrivilegeCatalogLoader.Load(metadataDirectory) is var (privileges, customApis))
+        {
+            logger.LogInformation("Loaded {Count} privileges and {CustomApis} custom APIs from {File}", privileges.Count, customApis.Count, PrivilegeCatalogLoader.FileName);
+            builder.AddPrivilegeCatalog(privileges, customApis);
+        }
+        else
+        {
+            logger.LogWarning("No {File} in {Directory}, so execute privileges set by name can't be looked up. Regenerate the metadata to add it", PrivilegeCatalogLoader.FileName, metadataDirectory);
+        }
+    }
+
     private static IReadOnlyList<RoleDefinition>? LoadRoles(string? metadataDirectory, ILogger logger)
     {
         if (metadataDirectory is null)
         {
-            logger.LogWarning("No metadata folder found, so security roles and plugin step registrations aren't used. Pass --metadata or set XrmMockup:Permissions:MetadataDirectory");
+            logger.LogWarning("No metadata folder found, so security roles and plugin step registrations aren't used. Pass {Metadata} or set {Setting}:MetadataDirectory", CliOptions.Metadata.Primary, PermissionsConfiguration.SectionPath);
             return null;
         }
 

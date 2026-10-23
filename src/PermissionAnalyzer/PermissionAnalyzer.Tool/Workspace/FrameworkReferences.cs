@@ -60,8 +60,11 @@ internal static class FrameworkReferences
             foreach (var (name, path) in frameworks)
             {
                 var link = Path.Combine(target, name);
-                if (new DirectoryInfo(link) is { Exists: true, LinkTarget: { } existing } && existing == path) continue;
-                if (Directory.Exists(link)) Directory.Delete(link);
+                var info = new DirectoryInfo(link);
+                if (info is { Exists: true, LinkTarget: { } existing } && existing == path) continue;
+                // File.Delete also removes a link whose target is gone, such as a package version cleared from the cache
+                if (info.LinkTarget is not null) File.Delete(link);
+                else if (info.Exists) Directory.Delete(link);
                 Directory.CreateSymbolicLink(link, path);
             }
         }

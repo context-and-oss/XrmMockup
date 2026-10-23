@@ -175,6 +175,6 @@ public class OutputFormatTests
         var result = command.Parse(["--format", format]);
 
         Assert.Empty(result.Errors);
-        Assert.Equal(format, options.Read(result).Format);
+        Assert.Equal(format, options.Read(result).Format.ToString().ToLowerInvariant());
     }
 }

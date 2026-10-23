@@ -32,6 +32,12 @@ internal static class UnresolvedSites
             .Select(s => new UnresolvedSite(s.Value.Operation, s.Value.In))
             .ToList();
     }
+
+    /// <summary>
+    /// The privileges an unresolved operation would need, such as <c> [Write, Delete]</c>; empty when they aren't known.
+    /// </summary>
+    public static string PrivilegeSuffix(UnresolvedOperation operation) =>
+        operation.Privileges.Count > 0 ? $" [{string.Join(", ", operation.Privileges)}]" : "";
 }
 
 /// <param name="Operation">The operation, as found in the first section that reaches it.</param>

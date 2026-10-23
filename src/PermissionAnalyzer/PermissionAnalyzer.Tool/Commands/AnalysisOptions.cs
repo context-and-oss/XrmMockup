@@ -107,7 +107,7 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_metadata),
             parseResult.GetValue(_exclude) ?? [],
             parseResult.GetValue(_config),
-            parseResult.GetValue(_format)!,
+            Enum.Parse<ReportFormat>(parseResult.GetValue(_format)!, ignoreCase: true),
             parseResult.GetValue(_output),
             scope,
             entry,
@@ -145,15 +145,15 @@ internal sealed record AnalysisRequest(
     string? Metadata,
     IReadOnlyList<string> Exclude,
     string? Config,
-    string Format,
+    ReportFormat Format,
     string? Output,
     EntryPointSelector? Scope,
     IReadOnlyList<string> EntryMethods,
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> CallerRoles,
-    OperationRequest? Operation = null,
-    IReadOnlyList<string>? PluginSolutions = null,
-    ReportOptions? Report = null);
+    OperationRequest? Operation,
+    IReadOnlyList<string> PluginSolutions,
+    ReportOptions Report);
 
 /// <summary>
 /// The user operation of <c>--operation</c>, with the columns of <c>--attributes</c> when given.

@@ -27,12 +27,12 @@ internal static class CoverageSetup
         {
             throw new ToolException(
                 $"No roles to check against. Pass {CliOptions.Role.Primary}, or map the application user's roles in " +
-                "XrmMockup:Permissions:Principals or users' roles in XrmMockup:Permissions:Users");
+                $"{PermissionsConfiguration.SectionPath}:Principals or users' roles in {PermissionsConfiguration.SectionPath}:Users");
         }
 
         if (roles is null)
         {
-            throw new ToolException("No security roles loaded, so there is nothing to check against. Pass --metadata with a folder that has SecurityRoles");
+            throw new ToolException($"No security roles loaded, so there is nothing to check against. Pass {CliOptions.Metadata.Primary} with a folder that has SecurityRoles");
         }
 
         var catalog = new RoleCatalog(roles);
@@ -44,13 +44,13 @@ internal static class CoverageSetup
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
                 .ToDictionary(
                     p => p.Key,
-                    p => Resolve(catalog, p.Value.Roles, $"Principals: {p.Key}", $"XrmMockup:Permissions:Principals:{p.Key}"),
+                    p => Resolve(catalog, p.Value.Roles, $"Principals: {p.Key}", $"{PermissionsConfiguration.SectionPath}:Principals:{p.Key}"),
                     StringComparer.OrdinalIgnoreCase),
             Users = configuration.Users
                 .OrderBy(u => u.Key, StringComparer.Ordinal)
                 .ToDictionary(
                     u => u.Key,
-                    u => Resolve(catalog, u.Value.Roles, $"Users: {u.Value.Name ?? u.Key}", $"XrmMockup:Permissions:Users:{u.Key}"),
+                    u => Resolve(catalog, u.Value.Roles, $"Users: {u.Value.Name ?? u.Key}", $"{PermissionsConfiguration.SectionPath}:Users:{u.Key}"),
                     StringComparer.OrdinalIgnoreCase),
             Suppress = configuration.Suppress.Select(Suppression).ToList(),
         };
@@ -78,11 +78,11 @@ internal static class CoverageSetup
 
     internal static Suppression Suppression(SuppressionConfiguration suppression, int index)
     {
-        var setting = $"XrmMockup:Permissions:Suppress:{index}";
+        var setting = $"{PermissionsConfiguration.SectionPath}:Suppress:{index}";
         if (string.IsNullOrWhiteSpace(suppression.Table))
         {
             // A privilege not tied to a table is suppressed by its name, such as prvActOnBehalfOfAnotherUser
-            if (suppression.Privilege is { } name && !string.IsNullOrWhiteSpace(name) && !Enum.TryParse<Privilege>(name, ignoreCase: true, out _))
+            if (suppression.Privilege is { } name && !string.IsNullOrWhiteSpace(name) && RuleSetup.ParsePrivilege(name) is null)
             {
                 return new Suppression("", null, suppression.Reason, name.Trim());
             }
@@ -92,11 +92,8 @@ internal static class CoverageSetup
         Privilege? privilege = null;
         if (suppression.Privilege is { } text)
         {
-            if (!Enum.TryParse<Privilege>(text, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
-            {
-                throw new ToolException($"{setting} has an unknown Privilege '{text}'. Use one of {string.Join(", ", Enum.GetNames<Privilege>())}");
-            }
-            privilege = parsed;
+            privilege = RuleSetup.ParsePrivilege(text)
+                ?? throw new ToolException($"{setting} has an unknown Privilege '{text}'. Use one of {RuleSetup.PrivilegeNames}");
         }
         return new Suppression(suppression.Table.Trim().ToLowerInvariant(), privilege, suppression.Reason);
     }

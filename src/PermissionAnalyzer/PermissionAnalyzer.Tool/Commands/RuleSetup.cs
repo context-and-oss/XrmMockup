@@ -13,7 +13,7 @@ internal static class RuleSetup
 
     private static RequestRule Rule(RuleConfiguration rule, int index)
     {
-        var setting = $"XrmMockup:Permissions:Rules:{index}";
+        var setting = $"{PermissionsConfiguration.SectionPath}:Rules:{index}";
         if (string.IsNullOrWhiteSpace(rule.Message)) throw new ToolException($"{setting} has no Message");
 
         var checks = new List<RuleCheck>();
@@ -65,19 +65,27 @@ internal static class RuleSetup
                 accessMask = text.Substring(1);
                 if (accessMask.Length == 0) throw new ToolException($"{setting} has a $ privilege without a member");
             }
-            else if (Enum.TryParse<Privilege>(text, ignoreCase: true, out var privilege) && Enum.IsDefined(privilege))
+            else if (ParsePrivilege(text) is { } privilege)
             {
                 if (!parsed.Contains(privilege)) parsed.Add(privilege);
             }
             else
             {
                 throw new ToolException(
-                    $"{setting} has an unknown privilege '{text}'. Use one of {string.Join(", ", Enum.GetNames<Privilege>())}, " +
+                    $"{setting} has an unknown privilege '{text}'. Use one of {PrivilegeNames}, " +
                     "or $Member for the rights a member grants");
             }
         }
         return new RuleCheck(parsed) { AccessMask = accessMask };
     }
+
+    /// <summary>
+    /// A table privilege by name, ignoring case; <c>null</c> for any other text, numbers included.
+    /// </summary>
+    internal static Privilege? ParsePrivilege(string text) =>
+        Enum.TryParse<Privilege>(text.Trim(), ignoreCase: true, out var privilege) && Enum.IsDefined(privilege) ? privilege : null;
+
+    internal static string PrivilegeNames { get; } = string.Join(", ", Enum.GetNames<Privilege>());
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

@@ -54,8 +54,7 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
             foreach (var site in unresolved)
             {
                 var operation = site.Operation;
-                var privileges = operation.Privileges.Count > 0 ? $" [{string.Join(", ", operation.Privileges)}]" : "";
-                writer.Write($"| {Code(operation.Operation)}{privileges} | {operation.RunsAs} | {Text(operation.Reason)} | {Code(operation.Source.Location.ToString())} |\n");
+                writer.Write($"| {Code(operation.Operation)}{UnresolvedSites.PrivilegeSuffix(operation)} | {operation.RunsAs} | {Text(operation.Reason)} | {Code(operation.Source.Location.ToString())} |\n");
             }
             writer.Write("\n</details>\n\n");
         }

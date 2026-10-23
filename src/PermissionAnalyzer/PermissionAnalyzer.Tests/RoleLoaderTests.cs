@@ -26,6 +26,33 @@ public class RoleLoaderTests
     }
 
     [Fact]
+    public void RolesWithTheSameNameAreInFileNameOrder()
+    {
+        // Every business unit has its own copy of a role, so names repeat
+        var directory = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            var roles = Directory.CreateDirectory(Path.Combine(directory, RoleLoader.SecurityRolesFolder)).FullName;
+            foreach (var (file, old) in new[] { ("b.xml", true), ("a.xml", false) })
+            {
+                using var stream = File.Create(Path.Combine(roles, file));
+                new DataContractSerializer(typeof(SecurityRole)).WriteObject(stream, new SecurityRole
+                {
+                    Name = "Salesperson",
+                    Privileges = [],
+                    GlobalPrivileges = old ? null : new(),
+                });
+            }
+
+            Assert.Equal([false, true], RoleLoader.Load(directory).Select(r => r.GlobalPrivileges is null));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void MissingFolderGivesNoRoles()
     {
         Assert.Empty(RoleLoader.Load(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())));

@@ -23,7 +23,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
 
     public void Write(Manifest manifest, CoverageReport? coverage, TextWriter writer)
     {
-        var filter = _options.Filters;
+        var filter = _options.Filter;
         var verbosity = _options.Verbosity;
         var hiddenRows = 0;
         var hiddenAssumptions = 0;
@@ -118,8 +118,7 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
 
             foreach (var operation in section.Unresolved)
             {
-                var privileges = operation.Privileges.Count > 0 ? $" [{string.Join(", ", operation.Privileges)}]" : "";
-                writer.Write($"  ? {operation.Operation}{privileges} as {operation.RunsAs}: {operation.Reason}  {Sources([operation.Source])}\n");
+                writer.Write($"  ? {operation.Operation}{UnresolvedSites.PrivilegeSuffix(operation)} as {operation.RunsAs}: {operation.Reason}  {Sources([operation.Source])}\n");
             }
 
             foreach (var assumption in section.Assumptions)
@@ -287,10 +286,10 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
         if (assumptions > 0) parts.Add(Count(assumptions, "assumption"));
         if (parts.Count > 0)
         {
-            var full = trimmed ? $", {Verbosity.Full.ToString().ToLowerInvariant()} also adds every source and call path" : "";
-            return $"Not shown: {string.Join(", ", parts)}. {CliOptions.Verbosity.Primary} {Verbosity.Detailed.ToString().ToLowerInvariant()} lists them{full}";
+            var full = trimmed ? $", {Name(Verbosity.Full)} also adds every source and call path" : "";
+            return $"Not shown: {string.Join(", ", parts)}. {CliOptions.Verbosity.Primary} {Name(Verbosity.Detailed)} lists them{full}";
         }
-        return trimmed ? $"Not shown: every source and call path. {CliOptions.Verbosity.Primary} {Verbosity.Full.ToString().ToLowerInvariant()} adds them" : null;
+        return trimmed ? $"Not shown: every source and call path. {CliOptions.Verbosity.Primary} {Name(Verbosity.Full)} adds them" : null;
     }
 
     /// <summary>

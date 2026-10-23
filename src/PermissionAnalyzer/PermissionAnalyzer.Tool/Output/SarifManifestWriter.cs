@@ -28,6 +28,9 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
 
     private readonly ReportFilter _filter = filter ?? ReportFilter.None;
 
+    // The rules by their index in Rules
+    private const int MissingRule = 0, UnresolvedRule = 1, NotCheckedRule = 2, UnverifiableRule = 3;
+
     private static readonly IReadOnlyList<RuleDocument> Rules =
     [
         new("missing-privilege", "MissingPrivilege",
@@ -116,18 +119,18 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
                 var what = table is null ? privilege : $"{privilege} on {table}";
                 var (rule, message) = result.Status switch
                 {
-                    CoverageStatus.Missing or CoverageStatus.Suppressed => (0, $"{what} is missing from {roles?.Roles}, needed as {identity}"),
-                    CoverageStatus.NotChecked => (2, $"{what} as {identity} isn't checked ({roles?.Note ?? "no roles"})"),
-                    CoverageStatus.Unverifiable => (3, $"{what} can't be checked against {roles?.Roles} for {identity} (the role metadata predates privileges not tied to a table)"),
-                    _ => (-1, ""),
+                    CoverageStatus.Missing or CoverageStatus.Suppressed => ((int?)MissingRule, $"{what} is missing from {roles?.Roles}, needed as {identity}"),
+                    CoverageStatus.NotChecked => (NotCheckedRule, $"{what} as {identity} isn't checked ({roles?.Note ?? "no roles"})"),
+                    CoverageStatus.Unverifiable => (UnverifiableRule, $"{what} can't be checked against {roles?.Roles} for {identity} (the role metadata predates privileges not tied to a table)"),
+                    _ => (null, ""),
                 };
-                if (rule < 0) continue;
+                if (rule is not { } index) continue;
 
                 var suppressed = result.Status == CoverageStatus.Suppressed ? result.Reason ?? "" : null;
                 var rolesText = roles?.Roles?.ToString() ?? "";
                 foreach (var location in sources.Select(s => s.Location).Distinct())
                 {
-                    var key = (rule, location, $"{table} {privilege}", identity, rolesText, suppressed);
+                    var key = (index, location, $"{table} {privilege}", identity, rolesText, suppressed);
                     if (!findings.TryGetValue(key, out var finding))
                     {
                         findings.Add(key, finding = (message, new Properties(table, privilege, identity.ToString(), roles?.Roles?.Names), []));
@@ -151,8 +154,7 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
         UnresolvedSites.Of(manifest, _filter).Where(s => s.Operation.RunsAs.Kind != RunsAsKind.System).Select(site =>
         {
             var operation = site.Operation;
-            var privileges = operation.Privileges.Count > 0 ? $" [{string.Join(", ", operation.Privileges)}]" : "";
-            return Result(1, $"{operation.Operation}{privileges} as {operation.RunsAs}: {operation.Reason}, in {Sections(site.In)}", operation.Source.Location, site.In,
+            return Result(UnresolvedRule, $"{operation.Operation}{UnresolvedSites.PrivilegeSuffix(operation)} as {operation.RunsAs}: {operation.Reason}, in {Sections(site.In)}", operation.Source.Location, site.In,
                 new Properties(null, operation.Privileges.Count > 0 ? string.Join(", ", operation.Privileges) : null, operation.RunsAs.ToString(), null), null);
         });
 

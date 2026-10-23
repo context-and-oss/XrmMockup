@@ -19,7 +19,7 @@ internal static class RoleChanges
 
     public static IReadOnlyList<RoleChange> Of(Manifest manifest, CoverageReport? coverage, ReportFilter filter)
     {
-        var blocks = new Dictionary<(int Order, string Key), Block>();
+        var blocks = new Dictionary<(BlockKind Kind, string Key), Block>();
         var sections = manifest.EntryPoints.Select(e => (e.Id, e.Requirements, e.GlobalRequirements, Coverage: coverage?.For(e)))
             .Concat(manifest.Unreached.Select(m => (m.Id, m.Requirements, m.GlobalRequirements, Coverage: coverage?.For(m))))
             .ToList();
@@ -43,15 +43,15 @@ internal static class RoleChanges
             }
         }
 
-        return blocks.OrderBy(b => b.Key.Order).ThenBy(b => b.Key.Key, StringComparer.Ordinal).Select(b =>
+        return blocks.OrderBy(b => b.Key.Kind).ThenBy(b => b.Key.Key, StringComparer.Ordinal).Select(b =>
         {
-            var ((order, key), block) = (b.Key, b.Value);
+            var ((kind, key), block) = (b.Key, b.Value);
             var identities = string.Join(", ", block.Identities.Order());
-            var heading = order switch
+            var heading = kind switch
             {
-                0 when coverage is null => $"{key} needs",
-                0 => $"Missing from {key}, for {identities}",
-                1 => key,
+                BlockKind.Missing when coverage is null => $"{key} needs",
+                BlockKind.Missing => $"Missing from {key}, for {identities}",
+                BlockKind.NotChecked => key,
                 _ => $"Can't be checked against {key}, for {identities} (the role metadata predates privileges not tied to a table; regenerate it)",
             };
             // Sections that need exactly the same privileges are one group, placed where its first section is
@@ -60,7 +60,7 @@ internal static class RoleChanges
                 .Select(g => new EntryPointChange(g.Select(s => s.Key).OrderBy(id => position[id]).ToList(), Tables(g.First().Value)))
                 .OrderBy(g => position[g.Ids[0]])
                 .ToList();
-            return new RoleChange(heading, order == 0 && coverage is not null, Tables(block.Needs), groups);
+            return new RoleChange(heading, kind == BlockKind.Missing && coverage is not null, Tables(block.Needs), groups);
         }).ToList();
     }
 
@@ -77,21 +77,30 @@ internal static class RoleChanges
         .ToList();
 
     /// <summary>
-    /// The block a requirement goes in, by order and key: missing from a role set, or without roles needed by an
-    /// identity (0), not checked for an identity (1), or unverifiable against a role set (2); <c>null</c> when it
-    /// needs no change.
+    /// The block a requirement goes in, by kind and key: missing from a role set, or without roles needed by an
+    /// identity, not checked for an identity, or unverifiable against a role set; <c>null</c> when it needs no change.
     /// </summary>
-    private static (int Order, string Key)? BlockOf(RunsAs identity, RequirementCoverage? result, SectionCoverage? coverage)
+    private static (BlockKind Kind, string Key)? BlockOf(RunsAs identity, RequirementCoverage? result, SectionCoverage? coverage)
     {
         var roles = coverage?.Identities.FirstOrDefault(i => i.RunsAs == identity);
         return result?.Status switch
         {
-            null => identity.Kind == RunsAsKind.System ? null : (0, identity.ToString()),
-            CoverageStatus.Missing => (0, roles!.Roles!.ToString()),
-            CoverageStatus.NotChecked => (1, $"{identity} needs ({roles?.Note ?? "not checked"})"),
-            CoverageStatus.Unverifiable => (2, roles!.Roles!.ToString()),
+            null => identity.Kind == RunsAsKind.System ? null : (BlockKind.Missing, identity.ToString()),
+            CoverageStatus.Missing => (BlockKind.Missing, roles!.Roles!.ToString()),
+            CoverageStatus.NotChecked => (BlockKind.NotChecked, $"{identity} needs ({roles?.Note ?? "not checked"})"),
+            CoverageStatus.Unverifiable => (BlockKind.Unverifiable, roles!.Roles!.ToString()),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The kinds of block, in the order they are shown.
+    /// </summary>
+    private enum BlockKind
+    {
+        Missing,
+        NotChecked,
+        Unverifiable,
     }
 
     /// <summary>

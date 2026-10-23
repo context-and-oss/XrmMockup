@@ -16,7 +16,8 @@ internal static class PluginStepLoader
     // The mode of an sdkmessageprocessingstep: 0 is synchronous, 1 asynchronous
     private const int AsynchronousMode = 1;
 
-    private const string Namespace = "http://schemas.datacontract.org/2004/07/DG.Tools.XrmMockup";
+    // The data contract namespace of the XrmMockup metadata files
+    internal const string Namespace = "http://schemas.datacontract.org/2004/07/DG.Tools.XrmMockup";
 
     /// <summary>
     /// Every plugin step in the metadata folder. Empty when there's no metadata file or it has no steps.

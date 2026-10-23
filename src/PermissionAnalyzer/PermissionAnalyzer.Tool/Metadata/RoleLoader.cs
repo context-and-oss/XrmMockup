@@ -24,7 +24,9 @@ internal static class RoleLoader
         if (!Directory.Exists(directory)) return [];
 
         var serializer = new DataContractSerializer(typeof(SecurityRole));
+        // Files in name order, so copies of a role with the same name always come in the same order
         return Directory.GetFiles(directory, "*.xml")
+            .Order(StringComparer.Ordinal)
             .Select(file =>
             {
                 using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);

@@ -64,8 +64,8 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
                 Roles(coverage?.For(m))))
                 .ToList(),
             manifest.NotRoleGoverned,
-            missing?.Missing.Select(m => new MissingDocument(m.Table, m.Privilege.ToString(), m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In))
-                .Concat(missing.Value.MissingGlobal.Select(m => new MissingDocument(null, m.Privilege, m.RunsAs.Kind, m.RunsAs.UserId, m.Roles.Names, m.Roles.Origin, m.In)))
+            missing?.Missing.Select(m => Missing(m.Table, m.Privilege.ToString(), m.RunsAs, m.Roles, m.In))
+                .Concat(missing.Value.MissingGlobal.Select(m => Missing(null, m.Privilege, m.RunsAs, m.Roles, m.In)))
                 .ToList(),
             coverage?.Summary is { } summary
                 ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.Unverifiable, summary.Incomplete)
@@ -79,25 +79,20 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
         IEnumerable<Requirement> requirements,
         IEnumerable<GlobalRequirement> globalRequirements,
         SectionCoverage? coverage) =>
-        requirements.Where(_filter.Matches).Select(r => new RequirementDocument(
-            r.Table,
-            r.Privilege.ToString(),
-            r.RunsAs.Kind,
-            r.RunsAs.UserId,
-            r.RunsAs.Assumed ? true : null,
-            r.Basis,
-            r.Sources.Select(Source).ToList(),
-            Coverage(coverage?.For(r))))
-            .Concat(globalRequirements.Where(_filter.Matches).Select(r => new RequirementDocument(
-                null,
-                r.Privilege,
-                r.RunsAs.Kind,
-                r.RunsAs.UserId,
-                r.RunsAs.Assumed ? true : null,
-                r.Basis,
-                r.Sources.Select(Source).ToList(),
-                Coverage(coverage?.For(r)))))
+        requirements.Where(_filter.Matches).Select(r => Requirement(r.Table, r.Privilege.ToString(), r.RunsAs, r.Basis, r.Sources, coverage?.For(r)))
+            .Concat(globalRequirements.Where(_filter.Matches).Select(r => Requirement(null, r.Privilege, r.RunsAs, r.Basis, r.Sources, coverage?.For(r))))
             .ToList();
+
+    private static RequirementDocument Requirement(string? table, string privilege, RunsAs runsAs, RequirementBasis basis, IReadOnlyList<RequirementSource> sources, RequirementCoverage? coverage) =>
+        new(table, privilege, runsAs.Kind, runsAs.UserId, Assumed(runsAs), basis, sources.Select(Source).ToList(), Coverage(coverage));
+
+    /// <summary>
+    /// <c>true</c> for an assumed identity, else left out of the JSON.
+    /// </summary>
+    private static bool? Assumed(RunsAs runsAs) => runsAs.Assumed ? true : null;
+
+    private static MissingDocument Missing(string? table, string privilege, RunsAs runsAs, RoleSet roles, IReadOnlyList<string> @in) =>
+        new(table, privilege, runsAs.Kind, runsAs.UserId, roles.Names, roles.Origin, @in);
 
     private static CoverageDocument? Coverage(RequirementCoverage? result) =>
         result is null ? null : new CoverageDocument(result.Status, result.Depth, result.Reason);
@@ -112,7 +107,7 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
             u.Reason,
             u.RunsAs.Kind,
             u.RunsAs.UserId,
-            u.RunsAs.Assumed ? true : null,
+            Assumed(u.RunsAs),
             Source(u.Source)))
             .ToList();
 

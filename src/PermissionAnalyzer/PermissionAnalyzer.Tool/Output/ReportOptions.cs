@@ -5,6 +5,17 @@ using XrmMockup.PermissionAnalyzer.Core.Model;
 namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 
 /// <summary>
+/// The format of the report, by <c>--format</c>.
+/// </summary>
+internal enum ReportFormat
+{
+    Text,
+    Json,
+    Markdown,
+    Sarif,
+}
+
+/// <summary>
 /// How much of the text report to show.
 /// </summary>
 internal enum Verbosity
@@ -46,7 +57,7 @@ internal sealed record ReportOptions(Verbosity Verbosity = Verbosity.Minimal, Re
 {
     public static ReportOptions Default { get; } = new();
 
-    public ReportFilter Filters => Filter ?? ReportFilter.None;
+    public ReportFilter Filter { get; init; } = Filter ?? ReportFilter.None;
 }
 
 /// <summary>

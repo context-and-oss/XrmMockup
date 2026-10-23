@@ -288,7 +288,7 @@ public class ReportTests
         Assert.Empty(result.Errors);
         var report = options.Read(result).Report!;
         Assert.Equal(Verbosity.Full, report.Verbosity);
-        Assert.Equal("--table account, contact, lead; --runs-as System; --basis filter-unknown", report.Filters.ToString());
+        Assert.Equal("--table account, contact, lead; --runs-as System; --basis filter-unknown", report.Filter.ToString());
     }
 
     [Fact]
