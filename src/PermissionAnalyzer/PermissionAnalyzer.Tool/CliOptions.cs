@@ -135,9 +135,21 @@ internal static class CliOptions
         public const string Description = "Only report requirements with these bases: direct, execute-privilege, all-implementations, all-lookup-targets or filter-unknown. Comma-separated or repeatable";
     }
 
+    internal static class NoRoles
+    {
+        public const string Primary = "--no-roles";
+        public const string Description = "Only list what the code needs, without checking it against the roles in XrmMockup:Permissions:Principals and Users";
+    }
+
+    internal static class FailOnMissing
+    {
+        public const string Primary = "--fail-on-missing";
+        public const string Description = "Exit with 1 when the roles don't grant a privilege the code needs, and with 2 when there are no roles to check against";
+    }
+
     internal static class Strict
     {
         public const string Primary = "--strict";
-        public const string Description = "Also fail on unresolved operations, identities without roles and privileges that can't be checked";
+        public const string Description = "Fail like --fail-on-missing, and also on unresolved operations, identities without roles and privileges that can't be checked";
     }
 }

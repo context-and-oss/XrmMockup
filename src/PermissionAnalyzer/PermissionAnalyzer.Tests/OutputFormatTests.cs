@@ -169,7 +169,7 @@ public class OutputFormatTests
     [InlineData("sarif")]
     public void FormatAcceptsMarkdownAndSarif(string format)
     {
-        var command = new Command("check");
+        var command = new RootCommand();
         var options = new AnalysisOptions();
         options.AddTo(command);
         var result = command.Parse(["--format", format]);

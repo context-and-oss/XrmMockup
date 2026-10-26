@@ -51,7 +51,7 @@ public record PermissionsConfiguration
     public Dictionary<string, UserConfiguration> Users { get; init; } = [];
 
     /// <summary>
-    /// Missing privileges that are accepted. They are reported as suppressed and don't fail <c>check</c>.
+    /// Missing privileges that are accepted. They are reported as suppressed and don't fail <c>--fail-on-missing</c>.
     /// </summary>
     public SuppressionConfiguration[] Suppress { get; init; } = [];
 

@@ -280,7 +280,7 @@ public class ReportTests
     [Fact]
     public void FiltersTakeCommaSeparatedAndRepeatedValues()
     {
-        var command = new Command("check");
+        var command = new RootCommand();
         var options = new AnalysisOptions();
         options.AddTo(command);
         var result = command.Parse(["--table", "account,contact", "--table", "lead", "--runs-as", "system", "--basis", "filter-unknown", "-v", "full"]);
@@ -292,9 +292,38 @@ public class ReportTests
     }
 
     [Fact]
+    public void StrictAlsoFailsOnMissing()
+    {
+        var command = new RootCommand();
+        var options = new AnalysisOptions();
+        options.AddTo(command);
+
+        var plain = options.Read(command.Parse([]));
+        Assert.False(plain.FailOnMissing);
+        var strict = options.Read(command.Parse(["--strict"]));
+        Assert.True(strict.FailOnMissing);
+        Assert.True(strict.Strict);
+    }
+
+    [Fact]
+    public void NoRolesCantBeUsedWithRolesOrFailing()
+    {
+        var command = new RootCommand();
+        new AnalysisOptions().AddTo(command);
+
+        Assert.Empty(command.Parse(["--no-roles"]).Errors);
+        Assert.Equal(
+            "--no-roles can't be used with --fail-on-missing, which needs roles.",
+            Assert.Single(command.Parse(["--no-roles", "--fail-on-missing"]).Errors).Message);
+        Assert.Equal(
+            "--no-roles can't be used with --role, which needs roles.",
+            Assert.Single(command.Parse(["--no-roles", "-r", "Salesperson", "--strict"]).Errors).Message);
+    }
+
+    [Fact]
     public void UnknownIdentityOrBasisIsAnError()
     {
-        var command = new Command("check");
+        var command = new RootCommand();
         new AnalysisOptions().AddTo(command);
         var result = command.Parse(["--runs-as", "Admin", "--basis", "guess"]);
 

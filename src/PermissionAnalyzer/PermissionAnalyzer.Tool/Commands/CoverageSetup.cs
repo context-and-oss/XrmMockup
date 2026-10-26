@@ -10,8 +10,10 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 internal static class CoverageSetup
 {
     /// <summary>
-    /// The roles to check against, or <c>null</c> to report without coverage: when no role option is given and
-    /// <paramref name="requireRoles"/> isn't set. Unknown role names are an error that suggests the closest names.
+    /// The roles to check against: the role options, else the <c>Principals</c> and <c>Users</c> settings.
+    /// <c>null</c> to report without coverage, when there are none and <paramref name="requireRoles"/> isn't set,
+    /// or only settings and no roles to look them up in. Unknown role names are an error that suggests the closest
+    /// names.
     /// </summary>
     public static CoverageOptions? Create(
         IReadOnlyList<RoleDefinition>? roles,
@@ -21,10 +23,9 @@ internal static class CoverageSetup
         bool requireRoles)
     {
         var given = roleNames.Count > 0 || callerRoleNames.Count > 0;
-        if (!given && !requireRoles) return null;
-
         if (!given && configuration.Principals.Count == 0 && configuration.Users.Count == 0)
         {
+            if (!requireRoles) return null;
             throw new ToolException(
                 $"No roles to check against. Pass {CliOptions.Role.Primary}, or map the application user's roles in " +
                 $"{PermissionsConfiguration.SectionPath}:Principals or users' roles in {PermissionsConfiguration.SectionPath}:Users");
@@ -32,6 +33,8 @@ internal static class CoverageSetup
 
         if (roles is null)
         {
+            // Without metadata a plain run lists what the code needs; the missing metadata is already warned about
+            if (!given && !requireRoles) return null;
             throw new ToolException($"No security roles loaded, so there is nothing to check against. Pass {CliOptions.Metadata.Primary} with a folder that has SecurityRoles");
         }
 

@@ -5,7 +5,7 @@ internal static class ExitCodes
     public const int Success = 0;
 
     /// <summary>
-    /// <c>check</c>: the roles don't grant everything the code needs.
+    /// With <c>--fail-on-missing</c> or <c>--strict</c>: the roles don't grant everything the code needs.
     /// </summary>
     public const int MissingPrivileges = 1;
 

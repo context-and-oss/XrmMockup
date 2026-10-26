@@ -369,11 +369,25 @@ public class CoverageTests
     }
 
     [Fact]
-    public void CheckNeedsRolesAndRequiredDoesnt()
+    public void FailingNeedsRolesAndAPlainRunDoesnt()
     {
         Assert.Null(CoverageSetup.Create([Salesperson], [], [], new PermissionsConfiguration(), requireRoles: false));
         var error = Assert.Throws<ToolException>(() => CoverageSetup.Create([Salesperson], [], [], new PermissionsConfiguration(), requireRoles: true));
         Assert.StartsWith("No roles to check against", error.Message);
+    }
+
+    [Fact]
+    public void ConfiguredRolesApplyWithoutFailing()
+    {
+        var configuration = new PermissionsConfiguration
+        {
+            Principals = new() { ["Contoso.Functions"] = new PrincipalConfiguration { Roles = ["Integration App"] } },
+        };
+
+        Assert.NotNull(CoverageSetup.Create([Integration], [], [], configuration, requireRoles: false));
+        // Without roles to look them up in, a plain run only lists what the code needs
+        Assert.Null(CoverageSetup.Create(null, [], [], configuration, requireRoles: false));
+        Assert.Throws<ToolException>(() => CoverageSetup.Create(null, [], [], configuration, requireRoles: true));
     }
 
     [Fact]

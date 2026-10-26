@@ -31,7 +31,7 @@ While only release candidates are published, add `--prerelease` to either comman
 From the folder with your solution and `appsettings.json`:
 
 ```bash
-xrmmockup-permissions required
+xrmmockup-permissions
 ```
 
 Example output:
@@ -83,11 +83,14 @@ in another method shows the call path from the entry point after it, such as
 - `Not reached from any entry point` lists methods that make service calls but that no entry point
   calls. Add them with `--entry` or `EntryPoints` if something outside the solution calls them.
 
-## Commands
+## Usage
 
-### `required`
+```bash
+xrmmockup-permissions [scope] [--role <name>] [--fail-on-missing] [options]
+```
 
-Lists the table privileges each entry point needs.
+Lists the privileges each entry point needs and, when there are roles to check against, whether the
+roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so a build can fail on it.
 
 | Option | Alias | Description |
 |--------|-------|-------------|
@@ -109,30 +112,31 @@ Lists the table privileges each entry point needs.
 | `--entry` | | Analyze a method as an entry point, such as `Contoso.Sync.Importer.Run`, and show only that. Repeatable |
 | `--operation` | | Only a user operation on a table and the plugin steps it fires: `"<message> <table>"`, such as `"Update account"` (see [User operations](#user-operations)) |
 | `--attributes` | | The columns the `--operation` sets, such as `name,statecode`. Comma-separated or repeatable |
-| `--role` | `-r` | Also show whether these roles grant each requirement (see [`check`](#check)). Repeatable |
+| `--role` | `-r` | Check the requirements against these roles (see [Checking against roles](#checking-against-roles)). Repeatable; roles combine. Replaces `Principals` |
 | `--caller-role` | | Roles of the user that app code acts for through `CallerId`. Repeatable |
+| `--no-roles` | | Only list what the code needs, without checking it against `Principals` and `Users` in `appsettings.json` |
+| `--fail-on-missing` | | Exit with `1` when the roles don't grant a privilege the code needs (see [Failing a build](#failing-a-build)) |
+| `--strict` | | Like `--fail-on-missing`, and also fail on what couldn't be checked |
 
 Use at most one of `--plugin`, `--custom-api`, `--function`, `--entry` and `--operation`. Without any, every entry
 point is listed. A scope that matches nothing is an error. Type names may be simple or full and are
 matched case-insensitively.
 
-Without `--role` or `--caller-role`, the output has no role data, so it only changes when the code or
-the metadata changes. That is the output to commit and diff. With them, each requirement is marked as
-`check` does, but the exit code stays `0`.
+Without roles to check against (no `--role` or `--caller-role`, and nothing analyzed matches `Principals`
+or `Users`), or with `--no-roles`, the output has no role data, so it only changes when the code or the
+metadata changes. That is the output to commit and diff.
 
-Exit codes: `0` on success, `2` on errors (invalid options, missing files, or a solution that fails to load).
+### Checking against roles
 
-### `check`
-
-Checks that security roles grant every privilege the code needs. It takes the same options as
-`required`, plus `--strict`.
+The requirements are checked against `--role` and `--caller-role`, else against the roles mapped in
+`Principals` and `Users` in `appsettings.json`.
 
 ```bash
-xrmmockup-permissions check --role "Salesperson" --plugin AccountPostPlugin
-xrmmockup-permissions check --role "Salesperson" --role "Marketing"
-xrmmockup-permissions check --function ProcessOrder --role "Integration App" --caller-role "Salesperson"
-xrmmockup-permissions check --operation "Update account" --attributes statecode --role "Salesperson"
-xrmmockup-permissions check   # roles from Principals and Users in appsettings.json
+xrmmockup-permissions --role "Salesperson" --plugin AccountPostPlugin
+xrmmockup-permissions --role "Salesperson" --role "Marketing"
+xrmmockup-permissions --function ProcessOrder --role "Integration App" --caller-role "Salesperson"
+xrmmockup-permissions --operation "Update account" --attributes statecode --role "Salesperson"
+xrmmockup-permissions   # roles from Principals and Users in appsettings.json
 ```
 
 Example output:
@@ -200,11 +204,11 @@ Each requirement is checked against the roles of the identity it runs as:
 - Role names are matched exactly, then ignoring case. An unknown name is an error that suggests the
   closest names.
 - `Missing privileges` lists each missing privilege once, with the identity, the roles that don't
-  grant it and every entry point or unreached method that needs it. The `check` error names them too.
+  grant it and every entry point or unreached method that needs it. With `--fail-on-missing`, the error names them too.
 - `Not checked` lists what the result doesn't cover: unresolved operations (split into requests
   without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles and
   unverifiable privileges. It is left out when everything was checked. When nothing is
-  missing but something wasn't checked, `check` exits with `0` and logs a warning; `--strict` makes it fail.
+  missing but something wasn't checked, `--fail-on-missing` exits with `0` and logs a warning; `--strict` makes it fail.
 - Some privileges aren't tied to a table, such as `prvActOnBehalfOfAnotherUser` or the execute
   privilege of a custom API. They are listed with their name in the table column and `global` as the
   privilege, and under `Privileges not tied to a table`.
@@ -214,13 +218,20 @@ Each requirement is checked against the roles of the identity it runs as:
   `xrmmockup-metadata` downloads in releases after v1.2.0. Roles from older metadata don't have them,
   so these privileges are `unverifiable` until you regenerate the metadata.
 
-Exit codes:
+### Failing a build
+
+Without `--fail-on-missing` or `--strict`, the exit code is `0` whatever the roles lack, so the report can
+be read without failing anything. In CI, pass `--fail-on-missing`:
+
+```bash
+xrmmockup-permissions --function ProcessOrder --role "Integration App" --fail-on-missing
+```
 
 | Code | Meaning |
 |------|---------|
-| `0` | Every checked privilege is granted, suppressed or on a table no role governs |
-| `1` | Some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, or a privilege is unverifiable |
-| `2` | Error: invalid options, missing files, an unknown role, or no roles at all (no `--role`, `--caller-role`, and nothing analyzed matches `Principals` or `Users`) |
+| `0` | Success. With `--fail-on-missing`: every checked privilege is granted, suppressed or on a table no role governs |
+| `1` | With `--fail-on-missing`: some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, or a privilege is unverifiable |
+| `2` | Error: invalid options, missing files, an unknown role, or, with `--fail-on-missing`, no roles at all (no `--role`, `--caller-role`, and nothing analyzed matches `Principals` or `Users`) |
 
 ## Entry points
 
@@ -344,7 +355,7 @@ collections built with `Add`, `AddRange` or collection expressions, including ba
 | Block transfers, metadata requests, `WhoAmI`, `RetrieveVersion`, `RetrievePrincipalAccess` and similar | None |
 
 Privileges named with `prv` are looked up in `PrivilegeCatalog.xml`: one not tied to a table is a
-[privilege not tied to a table](#check), one tied to tables is the table privilege it grants on each,
+[privilege not tied to a table](#checking-against-roles), one tied to tables is the table privilege it grants on each,
 and a name the catalog doesn't have is reported as unresolved. Without a catalog they are taken as
 privileges not tied to a table.
 
@@ -446,7 +457,7 @@ code in its solution. Add the solutions or projects with the plugin code with `-
 `PluginSolutions` in the configuration:
 
 ```bash
-xrmmockup-permissions required -s ./src/Contoso.Functions/Contoso.Functions.csproj -m ./tests/Metadata \
+xrmmockup-permissions -s ./src/Contoso.Functions/Contoso.Functions.csproj -m ./tests/Metadata \
   --plugin-solution ../Contoso.Plugins/Contoso.Plugins.sln
 ```
 
@@ -462,8 +473,8 @@ account in an app. The operation runs as `Caller` and needs the privileges of it
 [Request rules](#request-rules)) on the table, plus those of every plugin step it fires:
 
 ```bash
-xrmmockup-permissions required --operation "Update account" --attributes name,statecode
-xrmmockup-permissions check --operation "Create contact" --attributes parentcustomerid --role "Salesperson"
+xrmmockup-permissions --operation "Update account" --attributes name,statecode
+xrmmockup-permissions --operation "Create contact" --attributes parentcustomerid --role "Salesperson"
 ```
 
 - The message may be any message with a rule, such as `Create`, `Update`, `Delete`, `Assign` or
@@ -528,7 +539,7 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
 | `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds to these. A name that matches no method is reported as a warning |
 | `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
 | `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |
-| `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table, or leave out `Table` to accept a privilege not tied to a table by its name. Suppressed privileges are shown but don't fail `check` |
+| `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table, or leave out `Table` to accept a privilege not tied to a table by its name. Suppressed privileges are shown but don't fail `--fail-on-missing` |
 | `Rules` | Rules for requests passed to `Execute`, which replace the built-in rule for their message or add one. See below |
 
 Configured paths are relative to the configuration file. `appsettings.{DOTNET_ENVIRONMENT}.json` and
@@ -571,7 +582,7 @@ privileges for. Leave them out with patterns in `ExcludeProjects`, `--exclude`, 
 command line adds to the configured patterns:
 
 ```bash
-xrmmockup-permissions required -x "*.Tests" -x "tests/*"
+xrmmockup-permissions -x "*.Tests" -x "tests/*"
 ```
 
 - `*` matches any characters and `?` matches one. Matching is case-insensitive.
@@ -597,7 +608,7 @@ The metadata folder is also where plugin step registrations are read from (`Meta
 
 When the metadata folder contains `SecurityRoles/`, the output also lists the required tables that no
 role mentions. XrmMockup doesn't check privileges on those tables, so tests pass even when no role
-grants them. `check` and `--role` use the roles from this folder, by name.
+grants them. `--role`, `--caller-role` and the roles in `Principals` and `Users` are looked up in this folder, by name.
 
 ## Output
 
@@ -650,7 +661,7 @@ analysis.
 function needs `Write` on `account`:
 
 ```bash
-xrmmockup-permissions check --function ProcessOrder --role "Integration App" --table account --privilege Write --verbosity full
+xrmmockup-permissions --function ProcessOrder --role "Integration App" --table account --privilege Write --verbosity full
 ```
 
 Each takes several values, comma-separated or repeated, and matches any of them ignoring case;
@@ -693,7 +704,7 @@ are folded away in `<details>`. It ends with the counts. Markdown ignores `--ver
 narrow it like the text. Role names, reasons and ids are escaped, so they show as written.
 
 ```yaml
-- run: xrmmockup-permissions check --format markdown --output permissions.md
+- run: xrmmockup-permissions --fail-on-missing --format markdown --output permissions.md
 - run: cat permissions.md >> "$GITHUB_STEP_SUMMARY"
   if: always()
 ```
@@ -718,7 +729,7 @@ apply. Each result has `properties` with the `table`, `privilege`, `runsAs`, `ro
 is in, so code scanning finds the files; outside a repository they are relative to the solution.
 
 ```yaml
-- run: xrmmockup-permissions check --format sarif --output permissions.sarif
+- run: xrmmockup-permissions --fail-on-missing --format sarif --output permissions.sarif
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:

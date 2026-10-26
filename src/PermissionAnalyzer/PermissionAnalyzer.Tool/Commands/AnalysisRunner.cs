@@ -12,24 +12,19 @@ using XrmMockup.PermissionAnalyzer.Tool.Workspace;
 namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 
 /// <summary>
-/// What <c>required</c> and <c>check</c> have in common: analyze the code, check it against roles when there are
-/// any, and write the report.
+/// One run of the tool: analyze the code, check it against roles when there are any, and write the report.
 /// </summary>
 internal static class AnalysisRunner
 {
     /// <summary>
-    /// Runs the analysis and writes the report. <paramref name="exitCode"/> turns the result into the exit code;
-    /// errors exit with <see cref="ExitCodes.Error"/>.
+    /// Runs the analysis and writes the report. Exits with <see cref="ExitCodes.MissingPrivileges"/> when
+    /// <see cref="AnalysisRequest.FailOnMissing"/> is set and the roles don't grant everything, and with
+    /// <see cref="ExitCodes.Error"/> on errors.
     /// </summary>
-    public static async Task<int> RunAsync(
-        string commandName,
-        AnalysisRequest request,
-        bool requireRoles,
-        Func<CoverageReport?, ILogger, int> exitCode,
-        CancellationToken cancellationToken)
+    public static async Task<int> RunAsync(AnalysisRequest request, CancellationToken cancellationToken)
     {
         using var loggerFactory = ToolLogging.Create();
-        var logger = loggerFactory.CreateLogger(typeof(AnalysisRunner).Namespace + "." + commandName);
+        var logger = loggerFactory.CreateLogger(typeof(AnalysisRunner));
 
         var version = Assembly.GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -42,7 +37,9 @@ internal static class AnalysisRunner
 
             var roles = LoadRoles(settings.MetadataDirectory, logger);
             // Role names are checked before the slow part, so a typo fails fast
-            var coverageOptions = CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, requireRoles);
+            var coverageOptions = request.NoRoles
+                ? null
+                : CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, request.FailOnMissing);
 
             var root = Path.GetDirectoryName(settings.Target)!;
             var lookups = settings.MetadataDirectory is { } lookupDirectory ? LoadLookups(lookupDirectory, logger) : [];
@@ -78,11 +75,16 @@ internal static class AnalysisRunner
             if (coverageOptions is not null)
             {
                 coverage = CoverageEvaluator.Evaluate(manifest, coverageOptions);
-                if (requireRoles && coverageOptions.Roles is null && coverageOptions.CallerRoles is null && !coverage.UsesConfiguredRoles)
+                if (coverageOptions.Roles is null && coverageOptions.CallerRoles is null && !coverage.UsesConfiguredRoles)
                 {
-                    throw new ToolException(
-                        $"No roles to check against: no {CliOptions.Role.Primary} or {CliOptions.CallerRole.Primary}, and nothing analyzed matches " +
-                        $"{PermissionsConfiguration.SectionPath}:Principals or {PermissionsConfiguration.SectionPath}:Users");
+                    if (request.FailOnMissing)
+                    {
+                        throw new ToolException(
+                            $"No roles to check against: no {CliOptions.Role.Primary} or {CliOptions.CallerRole.Primary}, and nothing analyzed matches " +
+                            $"{PermissionsConfiguration.SectionPath}:Principals or {PermissionsConfiguration.SectionPath}:Users");
+                    }
+                    // The settings name no identity of the code analyzed, so the run just lists what it needs
+                    coverage = null;
                 }
             }
 
@@ -99,7 +101,7 @@ internal static class AnalysisRunner
                 logger.LogInformation("Wrote {Path}", path);
             }
 
-            return exitCode(coverage, logger);
+            return coverage is not null && request.FailOnMissing ? ExitCode(coverage, request.Strict, logger) : ExitCodes.Success;
         }
         catch (ToolException ex)
         {
@@ -111,6 +113,39 @@ internal static class AnalysisRunner
             logger.LogError(ex, "Analysis failed");
             return ExitCodes.Error;
         }
+    }
+
+    /// <summary>
+    /// The exit code of a run with <c>--fail-on-missing</c> or <c>--strict</c>, with the reason it fails logged.
+    /// </summary>
+    private static int ExitCode(CoverageReport coverage, bool strict, ILogger logger)
+    {
+        var summary = coverage.Summary;
+        if (summary.Passed(strict))
+        {
+            if (summary.Incomplete)
+            {
+                logger.LogWarning(
+                    "The roles grant every privilege found, but the result is incomplete: {Unresolved} unresolved operations, " +
+                    "{NotChecked} requirements without roles and {Unverifiable} privileges not tied to a table that the role metadata predates weren't checked. " +
+                    "See 'Not checked' in the report, or pass {Strict} to fail on them",
+                    summary.Unresolved, summary.NotChecked, summary.Unverifiable, CliOptions.Strict.Primary);
+            }
+            return ExitCodes.Success;
+        }
+
+        if (summary.Missing > 0)
+        {
+            var privileges = coverage.Missing.Select(m => $"{m.Table} {m.Privilege}").Concat(coverage.MissingGlobal.Select(m => m.Privilege)).Distinct().ToList();
+            logger.LogError("The roles don't grant {Count} privileges: {Privileges}. See 'Missing privileges' in the report", privileges.Count, string.Join(", ", privileges));
+        }
+        else
+        {
+            logger.LogError(
+                "{Strict}: {Unresolved} unresolved, {NotChecked} not checked, {Unverifiable} unverifiable",
+                CliOptions.Strict.Primary, summary.Unresolved, summary.NotChecked, summary.Unverifiable);
+        }
+        return ExitCodes.MissingPrivileges;
     }
 
     private static IReadOnlyList<LookupColumn> LoadLookups(string metadataDirectory, ILogger logger)

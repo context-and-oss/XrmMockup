@@ -6,7 +6,7 @@ using XrmMockup.PermissionAnalyzer.Tool.Output;
 namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 
 /// <summary>
-/// The options <c>required</c> and <c>check</c> share: what to analyze, the scope, the roles and the output.
+/// The options of the command: what to analyze, the scope, the roles, when to fail and the output.
 /// </summary>
 internal sealed class AnalysisOptions
 {
@@ -24,6 +24,9 @@ internal sealed class AnalysisOptions
     private readonly Option<string[]> _attributes = new(CliOptions.Attributes.Primary) { Description = CliOptions.Attributes.Description };
     private readonly Option<string[]> _role = new(CliOptions.Role.Primary, CliOptions.Role.Alias) { Description = CliOptions.Role.Description };
     private readonly Option<string[]> _callerRole = new(CliOptions.CallerRole.Primary) { Description = CliOptions.CallerRole.Description };
+    private readonly Option<bool> _noRoles = new(CliOptions.NoRoles.Primary) { Description = CliOptions.NoRoles.Description };
+    private readonly Option<bool> _failOnMissing = new(CliOptions.FailOnMissing.Primary) { Description = CliOptions.FailOnMissing.Description };
+    private readonly Option<bool> _strict = new(CliOptions.Strict.Primary) { Description = CliOptions.Strict.Description };
     private readonly Option<string[]> _table = new(CliOptions.Table.Primary) { Description = CliOptions.Table.Description };
     private readonly Option<string[]> _privilege = new(CliOptions.Privilege.Primary) { Description = CliOptions.Privilege.Description };
     private readonly Option<string[]> _runsAs = new(CliOptions.RunsAs.Primary) { Description = CliOptions.RunsAs.Description };
@@ -48,11 +51,11 @@ internal sealed class AnalysisOptions
     }
 
     /// <summary>
-    /// Adds the options and their validation to <paramref name="command"/>, scope and roles first.
+    /// Adds the options and their validation to <paramref name="command"/>, scope, roles and failing first.
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _verbosity, _table, _privilege, _runsAs, _basis })
+        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _noRoles, _failOnMissing, _strict, _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _verbosity, _table, _privilege, _runsAs, _basis })
         {
             command.Options.Add(option);
         }
@@ -72,6 +75,10 @@ internal sealed class AnalysisOptions
             if (result.GetResult(_attributes) is not null && result.GetResult(_operation) is null)
             {
                 result.AddError($"{CliOptions.Attributes.Primary} needs {CliOptions.Operation.Primary}.");
+            }
+            if (result.GetValue(_noRoles) && new Option[] { _role, _callerRole, _failOnMissing, _strict }.FirstOrDefault(o => result.GetResult(o) is not null) is { } conflict)
+            {
+                result.AddError($"{CliOptions.NoRoles.Primary} can't be used with {conflict.Name}, which needs roles.");
             }
 
             foreach (var name in Values(result.GetValue(_runsAs)).Where(n => ParseRunsAs(n) is null))
@@ -115,6 +122,9 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_callerRole) ?? [],
             operation,
             parseResult.GetValue(_pluginSolution) ?? [],
+            parseResult.GetValue(_noRoles),
+            parseResult.GetValue(_failOnMissing) || parseResult.GetValue(_strict),
+            parseResult.GetValue(_strict),
             new ReportOptions(
                 Enum.Parse<Verbosity>(parseResult.GetValue(_verbosity)!, ignoreCase: true),
                 new ReportFilter(
@@ -138,7 +148,7 @@ internal sealed class AnalysisOptions
 }
 
 /// <summary>
-/// The command line of one <c>required</c> or <c>check</c> run.
+/// The command line of one run. <see cref="FailOnMissing"/> is also set by <c>--strict</c>.
 /// </summary>
 internal sealed record AnalysisRequest(
     string? Solution,
@@ -153,6 +163,9 @@ internal sealed record AnalysisRequest(
     IReadOnlyList<string> CallerRoles,
     OperationRequest? Operation,
     IReadOnlyList<string> PluginSolutions,
+    bool NoRoles,
+    bool FailOnMissing,
+    bool Strict,
     ReportOptions Report);
 
 /// <summary>

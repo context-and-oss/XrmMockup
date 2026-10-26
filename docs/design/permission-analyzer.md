@@ -27,10 +27,10 @@ Goals
   never a sample.
 - Cover plugin-style entry points (plugin steps, custom APIs, code activities) and
   application-style entry points (Azure Functions, plus any method named as an entry point).
-- Two questions, available as CLI commands:
-  1. **check**: does role *R* (or a set of roles) grant everything action *A* needs?
-  2. **required**: exactly which privileges does action *A* need? Optionally: do given roles
-     cover it?
+- Two questions, answered by one CLI command:
+  1. **required**: exactly which privileges does action *A* need?
+  2. **check**: does role *R* (or a set of roles) grant everything action *A* needs? Answered
+     whenever there are roles to check against, and failing the run with `--fail-on-missing`.
 - Scope can be the **whole solution** or a single **query**: one operation that fires
   plugins (e.g. `Update account`), one plugin step, one custom API or one Azure Function.
 - Machine-readable output for CI, with an exit code that fails the build on gaps.
@@ -114,7 +114,7 @@ solution ──► compile ──► discover entry points ──► extract ope
                expand plugin cascades (operation → triggered steps → their operations)
                                    │
                                    ▼
-               per-entry-point requirement set ──► role coverage (check / required) ──► report
+               per-entry-point requirement set ──► role coverage (when roles are given) ──► report
 ```
 
 ## 5. Analysis
@@ -413,8 +413,8 @@ Its own hits are reported at the location `--operation` with no path, so a fired
 starts at the operation.
 
 **Cascades from Azure Functions and app code.** The same expansion applies to the operations an
-Azure Function (or an `--entry` method) performs, so `check --role "Integration App" --function
-ProcessOrder` and `required --function ProcessOrder --role …` cover the plugins the function's
+Azure Function (or an `--entry` method) performs, so `--function ProcessOrder --role "Integration App"`
+covers the plugins the function's
 requests fire, not just the function's own calls. A request that fails in a plugin fails for the
 function too. Specifics:
 
@@ -506,10 +506,11 @@ Execute privileges are never derived from naming conventions.
 ## 6. CLI
 
 ```
-xrmmockup-permissions <command> [scope] [options]
+xrmmockup-permissions [scope] [roles] [--fail-on-missing | --strict] [options]
 ```
 
-Shared options:
+There is one command, the root command, like `xrmmockup-metadata`. It always lists what the code needs
+and checks it against roles when there are any (§6.2). Options:
 
 | Option | Meaning |
 |---|---|
@@ -518,9 +519,11 @@ Shared options:
 | `--config <file>` / `-c` | Path to `appsettings.json`, same as `xrmmockup-metadata` (§6.3) |
 | `--format text\|json\|markdown\|sarif` | Output format (default `text`; `markdown` for pull request comments and job summaries, `sarif` for GitHub code scanning; phase 6, §10) |
 | `--output <file>` | Write report to file |
-| `--include-system` | Also list operations that run as SYSTEM |
 | `--verbosity minimal\|compact\|normal\|detailed\|full` / `-v` | How much of the text report to show (phase 5.5, §10): `minimal` (default) shows only the privileges to change per set of roles, `compact` adds the entry points that need them, `normal` shows what needs attention with its sources, `detailed` adds what is granted, `full` adds every source and call path |
 | `--table <list>`, `--privilege <list>`, `--runs-as <list>`, `--basis <list>` | Only show requirements on the given tables, with the given privileges, identities or bases (§5.2); filtering is applied after analysis, so it never changes what is computed |
+| `--role <name>` / `-r`, `--caller-role <name>` | Roles to check against (§6.2); repeatable |
+| `--no-roles` | Don't check against the `Principals` and `Users` settings (§6.2) |
+| `--fail-on-missing`, `--strict` | Exit with `1` when a privilege is missing, and with `--strict` also when something couldn't be checked (§6.2) |
 
 ### 6.1 Scope selectors
 
@@ -535,16 +538,27 @@ Exactly one, or none for the whole solution:
 | `--function <name>` | `--function ProcessOrder` | One Azure Function (by function name) |
 | `--entry <method>` | `--entry Contoso.Sync.Importer.Run` | Any method as an entry point |
 
-### 6.2 Commands
-
-**`check`**: does a role grant what the action needs?
+### 6.2 Roles and exit codes
 
 ```
-xrmmockup-permissions check --role "Salesperson" --operation "Update account"
-xrmmockup-permissions check --role "Salesperson" --role "Marketing" --plugin AccountPostPlugin
-xrmmockup-permissions check --role "Integration App" --function ProcessOrder
+xrmmockup-permissions                                              # every entry point
+xrmmockup-permissions --operation "Create contact"
+xrmmockup-permissions --role "Salesperson" --operation "Update account"
+xrmmockup-permissions --role "Salesperson" --role "Marketing" --plugin AccountPostPlugin
+xrmmockup-permissions --role "Integration App" --function ProcessOrder --fail-on-missing
 ```
 
+- **Roles to check against**: `--role` and `--caller-role` (repeatable), else the `Principals`
+  and `Users` settings (§6.3) that match the analyzed code. Without any, or with `--no-roles`,
+  the output is the requirement manifest per entry point (table → privileges, identity, basis,
+  locations). It contains no role data, so it depends only on code and metadata: the artifact to
+  commit or diff in CI. `--no-roles` can't be combined with the role options, `--fail-on-missing`
+  or `--strict`.
+- **Exit code**: `0` unless `--fail-on-missing` or `--strict` is given, so the report can be read
+  without failing anything. With `--fail-on-missing`, `1` when a privilege is missing; `--strict`
+  implies it and also fails on what couldn't be checked (below). Errors exit `2`. Failing is
+  opt-in, so a CI job has to pass the flag; in return, the flag with nothing to check against is an
+  error, so a misconfigured job can't pass by checking nothing.
 - Repeating `--role` combines roles (union of privileges, highest depth wins), the same way
   mockup combines a principal's roles in `Security.JoinPrivileges`.
 - **Any depth counts**: a privilege is covered when the combined roles grant it at any depth
@@ -564,7 +578,7 @@ xrmmockup-permissions check --role "Integration App" --function ProcessOrder
   | System | Nothing; listed for information |
 
   `--role` replaces `Principals`. Requirements with an assumed identity are checked like the
-  rest and keep their `(assumed)` label, so a missing privilege on one fails `check`.
+  rest and keep their `(assumed)` label, so a missing privilege on one fails `--fail-on-missing`.
 - **Impersonation**: a call made with `CallerId` set runs with the privileges of the
   impersonated user, so its requirements are checked against `--caller-role`. The identity that
   sets `CallerId` (the application user, for app code) must also hold
@@ -576,16 +590,18 @@ xrmmockup-permissions check --role "Integration App" --function ProcessOrder
   privileges. In order: SYSTEM needs nothing, an identity without roles is not checked, roles
   from metadata without global privileges make it `unverifiable` (only `--strict` fails on that),
   then granted, suppressed or missing.
-- Without `--role` or `--caller-role`, and with no `Principals` or `Users` entry that matches
-  the analyzed code, `check` has nothing to check against and exits with `2`. A role name that
-  isn't in `Metadata/` is also an error (exit `2`), which suggests the closest names.
+- With `--fail-on-missing`, no `--role` or `--caller-role`, and no `Principals` or `Users` entry
+  that matches the analyzed code, there is nothing to check against and the run exits with `2`.
+  Without the flag it lists what the code needs. A role name that isn't in `Metadata/`, given or
+  configured, is an error (exit `2`) that suggests the closest names.
 - `Suppress` entries (§6.3) turn a missing privilege into "suppressed", which doesn't fail.
   A table no role in `Metadata/` mentions counts as covered, because XrmMockup doesn't check it.
-- `--strict` also fails on unresolved operations, identities with no roles to check against
+- `--strict` fails like `--fail-on-missing`, and also on unresolved operations, identities with no roles to check against
   and unverifiable privileges.
 - Output: granted / missing per `(table, privilege)` with the depth the role grants, the
-  source location and the call path. Exit code `0` = covered, `1` = missing privileges,
-  `2` = analysis error. Unresolved operations alone don't fail the run unless `--strict` is set.
+  source location and the call path. With `--fail-on-missing`, exit code `0` = covered, `1` =
+  missing privileges; `2` is always an analysis error. Unresolved operations alone don't fail
+  the run unless `--strict` is set.
 
 ```
 Update account (as caller) — role "Salesperson"
@@ -621,22 +637,7 @@ so each gap is listed once with every entry point that needs it. `Not checked` l
 operations (requests with no rule and custom API calls apart from operations with an unknown
 table or request, §5.3), requirements whose identity has no roles, and privileges not tied to a
 table that are unverifiable because the role metadata predates them. The line is left out when everything was checked. When nothing is missing but something wasn't
-checked, `check` exits `0` with a warning, and `--strict` fails.
-
-**`required`**: exactly what is needed, optionally with role coverage.
-
-```
-xrmmockup-permissions required                                   # full solution manifest
-xrmmockup-permissions required --operation "Create contact"
-xrmmockup-permissions required --function ProcessOrder --role "Integration App"
-```
-
-- With no role options: the requirement manifest per entry point (table → privileges,
-  identity, basis, locations). It contains no role data, so it depends only on code and
-  metadata. This is the artifact to commit or diff in CI.
-- `--role <name>` and `--caller-role <name>` (repeatable): the same manifest with a
-  granted/missing column for the given roles, plus the `Principals` and `Users` settings. It
-  reports, like `check`, but doesn't change the exit code.
+checked, `--fail-on-missing` exits `0` with a warning, and `--strict` fails.
 
 Finding which downloaded roles, or smallest combination of roles, would cover a requirement
 is deferred (§10).
@@ -659,7 +660,7 @@ conventions:
   file; command-line paths are relative to the current directory.
 - Without `--solution` or `Solution`, the tool uses the single `*.sln`/`*.slnx` in
   the current directory.
-- The tool makes no Dataverse connection (a future `check --user` would be the exception,
+- The tool makes no Dataverse connection (a future `--user` would be the exception,
   §10), so it ignores `DataverseUrl` and
   `DataverseCredentialType`.
 
@@ -724,7 +725,7 @@ Command-line options override the matching setting, as in the metadata tool. For
     }],
     "unresolved": [ /* operation + location + reason + path */ ],
     "assumptions": [ /* reason + location */ ],
-    // With roles only (check, required --role): each requirement also gets
+    // With roles only: each requirement also gets
     // A privilege not tied to a table is a requirement without "table":
     //   { "privilege": "prvActOnBehalfOfAnotherUser", "runsAs": "ApplicationUser", "basis": "direct", "sources": [ … ] }
     // "coverage": { "status": "granted", "depth": "User" }   (or missing, suppressed + reason, not-governed, not-checked, system, unverifiable)
@@ -756,7 +757,7 @@ results point at the source location of each missing privilege; see phase 6 in �
 - Interface dispatch without DI registrations over-approximates (all implementations).
 - Conditional code is treated as reachable (no path sensitivity), so requirements are a
   superset.
-- Team-inherited roles and record sharing are outside the static view. `check` answers for
+- Team-inherited roles and record sharing are outside the static view. The check answers for
   the roles given, not for a specific user's effective rights.
 
 ## 9. Validation strategy
@@ -780,7 +781,7 @@ results point at the source location of each missing privilege; see phase 6 in �
 |---|---|---|
 | 1 | Project skeleton, MSBuildWorkspace loading, role loading via MetadataSkeleton, direct `IOrganizationService` CRUD with early-bound/literal tables, per-method manifest, `required` (no scope). Also pulled forward: `QueryExpression`/`AddLink`/FetchXML tables, `Associate`/`Disassociate`, loops over `RetrieveMultiple` results, `Solution`/`MetadataDirectory` configuration | First useful manifest |
 | 2 | Entry-point discovery (XrmPluginCore, metadata steps, custom APIs, activities, Azure Functions), call graph, runs-as tagging, DI resolution | Per-entry-point requirements; `--plugin`, `--custom-api`, `--function`, `--entry` |
-| 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration | Both questions answerable; CI-ready |
+| 3 | `check` command, `required --role`, role combination, exit codes, `XrmMockup:Permissions` configuration. The two commands were later merged into the root command, with `--fail-on-missing` in place of `check` (§6.2) | Both questions answerable; CI-ready |
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
 | 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope, plugin code loaded from other solutions (§5.6)) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
@@ -828,7 +829,7 @@ what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
   result with every call path. Filters apply to it: requirements and unresolved operations they
   don't match are left out, as are sections left without any, and `missing` is narrowed as in
   the text. `result` stays the count of the whole analysis.
-- Without roles (`required` without `--role`), nothing is granted, so `normal` shows every
+- Without roles, nothing is granted, so `normal` shows every
   requirement and the privileges per table, and differs from `full` only in the sources and in
   leaving out assumptions and fired steps.
 
@@ -875,11 +876,11 @@ more useful. The proposal: without `--caller-role`, stop following the chain at 
 call, and report in the output that it was detected and what it does. That splits the check in
 two:
 
-1. Check the application user alone: `check --function ProcessOrder --role "Integration App"`
+1. Check the application user alone: `--function ProcessOrder --role "Integration App"`
    covers what the function does as itself, plus `prvActOnBehalfOfAnotherUser` for the
    impersonation (§6.2), which stays a requirement of the impersonating identity.
 2. Check the calling user independently, from the impersonated operations the first run lists,
-   for example `Create account` and `Update contact`: `check --operation "Create account" --role
+   for example `Create account` and `Update contact`: `--operation "Create account" --role
    Salesperson`, which fires the same plugins as the impersonated call would.
 
 What the output shows of the impersonated calls, by verbosity (§10, phase 5.5):
@@ -897,7 +898,7 @@ What the output shows of the impersonated calls, by verbosity (§10, phase 5.5):
 Things to settle before it is built:
 
 - Whether it replaces today's behavior or is opt-in, and whether `--strict` fails on it. It
-  shouldn't fail `check` otherwise, since nothing is known to be missing.
+  shouldn't fail `--fail-on-missing` otherwise, since nothing is known to be missing.
 - An operation whose table can't be resolved stays unresolved; whether it is also listed as an
   impersonated call.
 - Calls the plugins make with `CallerId`, which are rarer: whether the same applies to them, and
@@ -906,11 +907,11 @@ Things to settle before it is built:
   operation unless it becomes repeatable, which would let the `compact` list be passed as is.
 - With `--caller-user` (below), the second check could run in the same invocation instead.
 
-**Idea: privileges the roles grant but nothing uses.** The reverse of `check`: list the
+**Idea: privileges the roles grant but nothing uses.** The reverse of the role check: list the
 privileges in the `--role` roles that none of the selected entry points needs, so a role can be
 trimmed to least privilege. It only means something when the selected entry points are everything
 the role is for, such as an API security role held by the application user of one Azure Function
-app (`check --function ... --role "Order API"`). For a role people also use in the UI,
+app (`--function ... --role "Order API"`). For a role people also use in the UI,
 most of what it grants is unused by the code, and the list would be noise. Things to settle before
 it is built:
 
@@ -931,7 +932,7 @@ it is built:
   editor's column order like `Missing privileges`, plus JSON; Markdown and SARIF probably don't
   need it.
 
- `check --user <username>` (e.g.
+ `--user <username>` (e.g.
 `--user jane@contoso.com`) looks the user up in Dataverse and checks against the roles they
 actually hold, instead of a hand-written `--role` list:
 
@@ -954,7 +955,7 @@ Things to settle before building it:
 
 - It is the first feature that connects to Dataverse. It would reuse the metadata tool's
   connection settings (`DataverseUrl`, `DataverseCredentialType`, `--credential-type`).
-  Only `check --user` connects; `required` stays offline (goal in §2, §6.3).
+  Only a run with `--user` connects; every other run stays offline (goal in §2, §6.3).
 - The result depends on live data, so it is not deterministic over time. The output should
   record the environment URL, the user and when the roles were read. A `--save-roles` option
   could write the resolved role list to a file, so a later run can reproduce the check
@@ -1001,7 +1002,7 @@ result.Fired       // plugin steps run, with the identity of each
 **Link with the analyzer:**
 
 - The output uses the analyzer's terms: table, privilege, `RunsAs` and step ids. That lets a
-  test compare a run with `xrmmockup-permissions required` output and flag requirements the
+  test compare a run with `xrmmockup-permissions` output and flag requirements the
   analyzer missed (for example LINQ through an `OrganizationServiceContext`, until phase 5) or
   included without need. This replaces the manual cross-check in §9.
 - The analyzer's `Principals` and `Users` settings in `appsettings.json` (§6.3) could feed the
@@ -1023,8 +1024,12 @@ XrmMockup365 itself, not only the analyzer.
 
 - **Packaging**: a separate dotnet tool, `xrmmockup-permissions`, not a subcommand of
   `xrmmockup-metadata`.
-- **Deterministic output**: `required` gives an exact, reproducible requirement set derived
-  from code and metadata only. Role coverage (`check`, `required --role`)
+- **One command**: `required` and `check` were the same analysis and report, differing only in
+  the exit code, so they are one root command. Failing is opt-in with `--fail-on-missing`, which
+  is an error without roles to check against; configured roles always apply, and `--no-roles`
+  gives the role-free output (§6.2).
+- **Deterministic output**: without roles, the output is an exact, reproducible requirement set
+  derived from code and metadata only. Role coverage (`--role`, `Principals`, `Users`)
   is a layer on top that compares that set against the roles present in `Metadata/`. The
   tool does not guess whether the downloaded role set is complete.
 - **Custom API privileges**: execute privileges are mapped exactly through a privilege

@@ -6,8 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### v1.0.0-rc.1 - 23 October 2026
-* Add: `required` command, which lists the Dataverse table privileges, and privileges not tied to a table, that a solution or project needs, found by static analysis of its `IOrganizationService`, request and `OrganizationServiceContext` calls
-* Add: `check` command, which checks them against security roles from the XrmMockup metadata and exits with `1` when a privilege is missing (`--strict` also fails on what couldn't be checked)
+* Add: `xrmmockup-permissions`, which lists the Dataverse table privileges, and privileges not tied to a table, that a solution or project needs, found by static analysis of its `IOrganizationService`, request and `OrganizationServiceContext` calls
+* Add: Checking them against security roles from the XrmMockup metadata, with `--fail-on-missing` to exit with `1` when a privilege is missing (`--strict` also fails on what couldn't be checked)
 * Add: Entry points (XrmPluginCore plugin steps and custom APIs, plugin steps from the metadata, code activities and Azure Functions), followed through the call graph and dependency injection, with the identity each operation runs as
 * Add: Plugin cascades, including filtered attributes, bypass parameters and plugin code from other solutions (`--plugin-solution`)
 * Add: Scopes to analyze one entry point or user operation (`--plugin`, `--custom-api`, `--function`, `--entry`, `--operation`)
