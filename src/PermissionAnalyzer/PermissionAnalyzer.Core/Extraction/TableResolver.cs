@@ -43,6 +43,8 @@ internal sealed class TableResolver(
     private const int MaxTemplates = 64;
 
     private const int MaxNesting = 4;
+    private const string NotFetch = "FetchXML could not be parsed";
+    private static readonly char[] XmlWhitespace = [' ', '\t', '\r', '\n'];
     private const string NestedLinksReason = "tables linked through LinkEntities, LinkEntity.AddLink or new LinkEntity are not analyzed yet";
 
     private readonly HashSet<ILocalSymbol> _visiting = new(SymbolEqualityComparer.Default);
@@ -1068,14 +1070,16 @@ internal sealed class TableResolver(
 
     private static TableResolution ParseFetch(string template, bool includeLinks)
     {
+        // Every string passed to a method is read as FetchXML too, so plain text is turned away before it can throw
         XDocument document;
         try
         {
+            if (!template.TrimStart(XmlWhitespace).StartsWith("<", StringComparison.Ordinal)) return TableResolution.Unresolved(NotFetch);
             document = XDocument.Parse(template);
         }
         catch (XmlException)
         {
-            return TableResolution.Unresolved("FetchXML could not be parsed");
+            return TableResolution.Unresolved(NotFetch);
         }
 
         var result = TableResolution.Empty;

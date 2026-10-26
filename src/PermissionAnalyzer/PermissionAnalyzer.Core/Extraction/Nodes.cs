@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
@@ -15,6 +16,10 @@ internal static class Nodes
     private static readonly SymbolDisplayFormat ShortTypeFormat = new(
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters);
+
+    // Display strings are slow and the same members and types are named at every call to them
+    private static readonly ConditionalWeakTable<ISymbol, string> MemberIds = new();
+    private static readonly ConditionalWeakTable<ISymbol, string> TypeIds = new();
 
     /// <summary>
     /// A stable id such as <c>Contoso.Plugins.AccountPlugin.Execute(IServiceProvider)</c>. A lambda adds its
@@ -74,7 +79,7 @@ internal static class Nodes
         return $"{type}.{name}";
     }
 
-    public static string TypeId(ITypeSymbol type) => type.OriginalDefinition.ToDisplayString(TypeFormat);
+    public static string TypeId(ITypeSymbol type) => TypeIds.GetValue(type.OriginalDefinition, definition => definition.ToDisplayString(TypeFormat));
 
     /// <summary>
     /// The type parameters of <paramref name="type"/> as declared, after those of the types it is nested in.
@@ -107,7 +112,9 @@ internal static class Nodes
         return symbol.OriginalDefinition;
     }
 
-    private static string MemberId(ISymbol member)
+    private static string MemberId(ISymbol member) => MemberIds.GetValue(member, NewMemberId);
+
+    private static string NewMemberId(ISymbol member)
     {
         var type = member.ContainingType.ToDisplayString(TypeFormat);
         if (member is not IMethodSymbol method) return $"{type}.{member.Name}";

@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>XrmMockup.PermissionAnalyzer.Tool</RootNamespace>
     <AssemblyName>XrmMockup.PermissionAnalyzer.Tool</AssemblyName>
+    <!-- The analysis allocates heavily while it holds whole compilations, as the compiler does -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <PropertyGroup>
     <!-- Tool-specific settings -->

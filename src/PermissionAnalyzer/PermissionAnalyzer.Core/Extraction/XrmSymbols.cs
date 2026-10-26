@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
@@ -7,6 +8,10 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// </summary>
 internal sealed class XrmSymbols
 {
+    // Attributes are read for every early-bound type and column used, which is the same few over and over
+    private readonly ConcurrentDictionary<ISymbol, string?> _logicalNames = new(SymbolEqualityComparer.Default);
+    private readonly ConcurrentDictionary<ISymbol, string?> _attributeNames = new(SymbolEqualityComparer.Default);
+
     private XrmSymbols(Compilation compilation, INamedTypeSymbol organizationService)
     {
         var services = new[]
@@ -129,9 +134,11 @@ internal sealed class XrmSymbols
     /// <summary>
     /// The table of an early-bound type, read from <c>[EntityLogicalName]</c> on the type or a base type.
     /// </summary>
-    public string? LogicalNameOf(ITypeSymbol? type)
+    public string? LogicalNameOf(ITypeSymbol? type) => type is null ? null : _logicalNames.GetOrAdd(type, NewLogicalName);
+
+    private string? NewLogicalName(ISymbol type)
     {
-        for (var current = type; current is not null; current = current.BaseType)
+        for (var current = type as ITypeSymbol; current is not null; current = current.BaseType)
         {
             if (NameArgument(current, EntityLogicalNameAttribute) is { } name) return name;
         }
@@ -141,7 +148,8 @@ internal sealed class XrmSymbols
     /// <summary>
     /// The column of an early-bound property, read from <c>[AttributeLogicalName]</c>.
     /// </summary>
-    public string? AttributeNameOf(IPropertySymbol property) => NameArgument(property, AttributeLogicalNameAttribute);
+    public string? AttributeNameOf(IPropertySymbol property) =>
+        _attributeNames.GetOrAdd(property, p => NameArgument(p, AttributeLogicalNameAttribute));
 
     /// <summary>
     /// The name given to <paramref name="attributeType"/> on <paramref name="symbol"/>, its only constructor argument.

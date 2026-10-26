@@ -784,7 +784,7 @@ results point at the source location of each missing privilege; see phase 6 in �
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
 | 5.5 | Output clean-up (below, done): filtering, and verbosity levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output (below, done), docs, NuGet tool packaging alongside `xrmmockup-metadata` (done: `XrmMockup.PermissionAnalyzer`, versioned from its CHANGELOG by CI and `release.yml`, first version `1.0.0-rc.1`) | Release |
-| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth and roles from a user's assignments (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
+| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth, roles from a user's assignments and privileges the roles grant but nothing uses (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
 
 **Output clean-up (phase 5.5, done).** On a real solution the output is long, and most of it is
 requirements the roles already grant. That is rarely what a reader needs, but it must stay
@@ -864,7 +864,32 @@ how it interacts with combined roles and with tables no role governs; how it rel
 ownership XrmMockup actually checks at runtime (owner, business unit, sharing); and how it is
 configured in `XrmMockup:Permissions`. Deferred until then.
 
-**Idea: roles from a user's current assignments.** `check --user <username>` (e.g.
+**Idea: privileges the roles grant but nothing uses.** The reverse of `check`: list the
+privileges in the `--role` roles that none of the selected entry points needs, so a role can be
+trimmed to least privilege. It only means something when the selected entry points are everything
+the role is for, such as an API security role held by the application user of one Azure Function
+app (`check --function ... --role "Order API"`). For a role people also use in the UI,
+most of what it grants is unused by the code, and the list would be noise. Things to settle before
+it is built:
+
+- How it is asked for: an option such as `--unused`, since it is a different question from
+  whether the roles suffice, and whether it can fail CI or only reports.
+- What counts as used: the requirements of the selected entry points under that role's identity,
+  including the plugin steps and custom APIs they fire (§5.6) and global privileges (§5.7). A
+  privilege used only by code outside the scope looks unused, so the output must say which entry
+  points it was measured against.
+- Unresolved operations, unknown tables and unknown custom APIs make "unused" uncertain: a table
+  the analysis couldn't name may be the one a privilege is for. The report should say how many
+  there were, and perhaps refuse to call anything unused while there are any for that identity.
+- Depth: whether a privilege granted at `Organization` where `User` would do is reported, which
+  needs the minimum required depth (above) to be settled first.
+- Several roles: whether a privilege is unused in each role on its own, or redundant because
+  another of the given roles grants it too.
+- Output: a block per role with the tables and privileges that could be removed, in the role
+  editor's column order like `Missing privileges`, plus JSON; Markdown and SARIF probably don't
+  need it.
+
+ `check --user <username>` (e.g.
 `--user jane@contoso.com`) looks the user up in Dataverse and checks against the roles they
 actually hold, instead of a hand-written `--role` list:
 

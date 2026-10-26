@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using XrmMockup.PermissionAnalyzer.Core.Model;
@@ -13,6 +14,7 @@ internal sealed class SourcePaths
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     private readonly string _root;
+    private readonly ConcurrentDictionary<string, string> _relative = new(StringComparer.Ordinal);
 
     public SourcePaths(string rootDirectory)
     {
@@ -36,7 +38,9 @@ internal sealed class SourcePaths
     /// The path relative to the root, with <c>../</c> for a file outside it, such as plugin code in a solution next to
     /// the analyzed one. A file on another drive keeps its full path.
     /// </summary>
-    private string Relative(string path)
+    private string Relative(string path) => _relative.GetOrAdd(path ?? "", NewRelative);
+
+    private string NewRelative(string path)
     {
         if (string.IsNullOrEmpty(path)) return "<unknown>";
 

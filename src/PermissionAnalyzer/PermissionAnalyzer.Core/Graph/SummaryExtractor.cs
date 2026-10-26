@@ -32,53 +32,68 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
     public CallGraph Extract(CancellationToken cancellationToken = default)
     {
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            var model = compilation.GetSemanticModel(tree);
-            foreach (var syntax in tree.GetRoot(cancellationToken).DescendantNodesAndSelf())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                Visit(model, syntax);
-            }
-        }
+        // Binding the bodies is most of the work and a semantic model is thread-safe, so declarations are bound in
+        // parallel, even within one large generated file, while the graph is built from them in source order
+        var declarations = compilation.SyntaxTrees
+            .Select(tree => compilation.GetSemanticModel(tree))
+            .SelectMany(model => model.SyntaxTree.GetRoot(cancellationToken).DescendantNodesAndSelf().Select(syntax => (Model: model, Syntax: syntax)))
+            .AsParallel().AsOrdered().WithCancellation(cancellationToken)
+            .Select(node => Bind(node.Model, node.Syntax))
+            .OfType<Declaration>();
+        foreach (var declaration in declarations) Visit(declaration);
         return _graph;
     }
 
-    private void Visit(SemanticModel model, SyntaxNode syntax)
+    private enum DeclarationKind { Body, Type, Initializer }
+
+    /// <summary>A declaration with its symbol and bound operation, ready to be summarized.</summary>
+    private sealed record Declaration(DeclarationKind Kind, SemanticModel Model, SyntaxNode Syntax, ISymbol? Symbol, IOperation? Operation = null);
+
+    private static Declaration? Bind(SemanticModel model, SyntaxNode syntax) => syntax switch
     {
-        switch (syntax)
+        CompilationUnitSyntax unit when unit.Members.OfType<GlobalStatementSyntax>().Any()
+            => new(DeclarationKind.Body, model, unit, model.GetDeclaredSymbol(unit), model.GetOperation(unit)),
+
+        BaseMethodDeclarationSyntax method when method.Body is not null || method.ExpressionBody is not null
+            => new(DeclarationKind.Body, model, method, model.GetDeclaredSymbol(method), model.GetOperation(method)),
+
+        AccessorDeclarationSyntax accessor when accessor.Body is not null || accessor.ExpressionBody is not null
+            => new(DeclarationKind.Body, model, accessor, model.GetDeclaredSymbol(accessor), model.GetOperation(accessor)),
+
+        PropertyDeclarationSyntax { ExpressionBody: { } body } property
+            => new(DeclarationKind.Body, model, property, (model.GetDeclaredSymbol(property) as IPropertySymbol)?.GetMethod, model.GetOperation(body)),
+
+        IndexerDeclarationSyntax { ExpressionBody: { } body } indexer
+            => new(DeclarationKind.Body, model, indexer, (model.GetDeclaredSymbol(indexer) as IPropertySymbol)?.GetMethod, model.GetOperation(body)),
+
+        BaseTypeDeclarationSyntax declaration when model.GetDeclaredSymbol(declaration) is INamedTypeSymbol type
+            => new(DeclarationKind.Type, model, declaration, type),
+
+        EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent.Parent: FieldDeclarationSyntax } declarator } initializer
+            => new(DeclarationKind.Initializer, model, initializer, model.GetDeclaredSymbol(declarator), model.GetOperation(initializer)),
+
+        EqualsValueClauseSyntax { Parent: PropertyDeclarationSyntax property } initializer
+            => new(DeclarationKind.Initializer, model, initializer, model.GetDeclaredSymbol(property), model.GetOperation(initializer)),
+
+        _ => null,
+    };
+
+    private void Visit(Declaration declaration)
+    {
+        switch (declaration.Kind)
         {
-            case CompilationUnitSyntax unit when unit.Members.OfType<GlobalStatementSyntax>().Any():
-                Body(model.GetDeclaredSymbol(unit), model.GetOperation(unit));
+            case DeclarationKind.Body:
+                Body(declaration.Symbol as IMethodSymbol, declaration.Operation);
                 break;
 
-            case BaseMethodDeclarationSyntax method when method.Body is not null || method.ExpressionBody is not null:
-                Body(model.GetDeclaredSymbol(method) as IMethodSymbol, model.GetOperation(method));
-                break;
-
-            case AccessorDeclarationSyntax accessor when accessor.Body is not null || accessor.ExpressionBody is not null:
-                Body(model.GetDeclaredSymbol(accessor) as IMethodSymbol, model.GetOperation(accessor));
-                break;
-
-            case PropertyDeclarationSyntax { ExpressionBody: { } body } property:
-                Body((model.GetDeclaredSymbol(property) as IPropertySymbol)?.GetMethod, model.GetOperation(body));
-                break;
-
-            case IndexerDeclarationSyntax { ExpressionBody: { } body } indexer:
-                Body((model.GetDeclaredSymbol(indexer) as IPropertySymbol)?.GetMethod, model.GetOperation(body));
-                break;
-
-            case BaseTypeDeclarationSyntax declaration when model.GetDeclaredSymbol(declaration) is INamedTypeSymbol type:
+            case DeclarationKind.Type:
+                var type = (INamedTypeSymbol)declaration.Symbol!;
                 AddType(type);
-                if (declaration is TypeDeclarationSyntax { ParameterList: not null } primary) PrimaryConstructor(model, primary, type);
+                if (declaration.Syntax is TypeDeclarationSyntax { ParameterList: not null } primary) PrimaryConstructor(declaration.Model, primary, type);
                 break;
 
-            case EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent.Parent: FieldDeclarationSyntax } declarator } initializer:
-                Initializer(model.GetDeclaredSymbol(declarator), model.GetOperation(initializer));
-                break;
-
-            case EqualsValueClauseSyntax { Parent: PropertyDeclarationSyntax property } initializer:
-                Initializer(model.GetDeclaredSymbol(property), model.GetOperation(initializer));
+            case DeclarationKind.Initializer:
+                Initializer(declaration.Symbol, declaration.Operation);
                 break;
         }
     }

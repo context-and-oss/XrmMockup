@@ -30,12 +30,13 @@ The simple fixes from that review are already in. Paths are relative to
    `--operation` (`MessageNamed`) falls back to the message of a request type, so `CreateRequest` is still
    `Create`. Steps fire on the message as called, so a custom API named `ctx_SubmitRequest` with a rule
    runs its code.
-
-## 5. Speed
-
-`Execute` resolves each request once per request shape (9 times), and resolving a local re-walks the
-whole method each time, which is quadratic per method. A per-method index of assignments plus
-resolving each request once would fix both. This matters on large solutions.
+5. **Speed.** A profile showed the suspected causes were cheap: resolving a request once per shape and
+   re-walking a method for each local cost well under a second on the sample. Most of the time went to
+   Roslyn binding the method bodies, one at a time, then to garbage collection. `SummaryExtractor.Extract`
+   now binds declarations in parallel, including within one large generated file, and builds the graph from
+   them in source order, so the output is unchanged. The tool uses server GC. FetchXML parsing turns away
+   text that can't be XML before it throws (every string argument is read as FetchXML), and member and type
+   ids, relative paths and logical names are cached. On the sample, extraction went from about 24s to 9s.
 
 ## 6. Split up `ManifestBuilder`
 
