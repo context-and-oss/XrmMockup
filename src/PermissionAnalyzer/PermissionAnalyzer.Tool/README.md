@@ -444,6 +444,11 @@ point. Steps come from code registrations and from the plugin steps in the metad
   because the analysis doesn't know step ids. A custom API's own code always runs.
 - A metadata step whose plugin code isn't loaded is reported as unresolved, so missing plugin code is
   never treated as needing nothing. Load it with `--plugin-solution` when it's in another solution.
+- The workflows in `Metadata/Workflows` that run automatically fire like steps: on create, on delete,
+  or on an update that sets one of their columns. Their steps aren't analyzed, so each one an
+  operation fires is reported as unresolved ("fires real-time workflow 'Set credit limit', whose steps
+  aren't analyzed"), and `--strict` fails on it. A real-time workflow runs as the caller or its owner,
+  as set on it, and a background workflow as its owner. Bypass parameters skip them like steps.
 - Each step is expanded once per identity, so steps that fire each other don't loop.
 
 The source path of a cascaded requirement runs from the entry point through the operation (such as
@@ -689,8 +694,8 @@ Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, 
 With roles, each requirement also has `coverage` (`status`: `granted`, `not-governed`, `missing`,
 `suppressed`, `not-checked`, `system` or `unverifiable`, with `depth` or `reason`), each entry point has `roles` (the
 roles per identity, with their `origin`), and the document
-has a `result` with the counts, `unresolvedNoRule` and `unresolvedCustomApi` (the unresolved operations
-that are requests without a rule and custom API calls) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
+has a `result` with the counts, `unresolvedNoRule`, `unresolvedCustomApi` and `unresolvedWorkflow` (the
+unresolved operations that are requests without a rule, custom API calls and fired workflows) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
 with `table` (left out for a privilege not tied to a table), `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
 it). Without roles, none of these are written.
 

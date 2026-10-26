@@ -29,6 +29,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     private readonly Dictionary<string, EntryCandidate> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PluginClass> _plugins = new(StringComparer.Ordinal);
     private readonly List<PluginStepRegistration> _steps = [];
+    private readonly List<WorkflowRegistration> _workflows = [];
     private readonly List<string> _entryMethods = [];
     private readonly Dictionary<string, UserOperation> _operations = new(StringComparer.Ordinal);
 
@@ -98,6 +99,12 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     public void AddPluginSteps(IEnumerable<PluginStepRegistration> steps) => _steps.AddRange(steps);
 
     /// <summary>
+    /// Adds the workflows that run automatically, from the XrmMockup metadata. Their steps aren't analyzed, so an
+    /// operation that fires one reports it as unresolved.
+    /// </summary>
+    public void AddWorkflows(IEnumerable<WorkflowRegistration> workflows) => _workflows.AddRange(workflows);
+
+    /// <summary>
     /// Adds the privilege catalog from the metadata: the tables and table privilege of each privilege, by name, and
     /// the execute privileges of the custom APIs in the environment. Without it, an execute privilege set by name
     /// can't be looked up and is reported as unresolved.
@@ -150,6 +157,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         {
             candidates[operation.Key] = new EntryCandidate(operation.Key, EntryPointKind.Operation, "", null, new Trigger(operation.Value.Message, operation.Value.Table), null, null, []);
         }
+        codeless.AddRange(WorkflowSteps());
         var cascades = new Cascades(_graph, CascadeSteps(candidates.Values, codeless), (step, caller) => Context(caller, step.Trigger?.Table));
 
         var resolver = new PrivilegeResolver(_privilegeCatalog, _catalogCustomApis, candidates.Values, _steps.Select(s => s.Message));
@@ -351,6 +359,27 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .Where(c => c.Kind is EntryPointKind.PluginStep or EntryPointKind.CustomApi && c.Trigger?.Message is not null)
             .Select(c => new CascadeStep(c.Id, c.Trigger!.Message!, c.Trigger.Table, c.ImpersonatingUserId, c.Trigger.FilteredAttributes, c, c.Trigger.Asynchronous, c.Kind == EntryPointKind.CustomApi))
             .Concat(codeless.GroupBy(s => s.Id, StringComparer.Ordinal).Select(g => g.First()));
+
+    /// <summary>
+    /// A step for each message that runs a workflow from the metadata. A workflow that runs as its owner runs as that
+    /// user, like a step that impersonates.
+    /// </summary>
+    private IEnumerable<CascadeStep> WorkflowSteps()
+    {
+        foreach (var workflow in _workflows)
+        {
+            var table = workflow.Table.ToLowerInvariant();
+            var messages = new List<(string Message, IReadOnlyList<string>? Columns)>();
+            if (workflow.OnCreate) messages.Add((Messages.Create, null));
+            if (workflow.UpdateColumns is { Count: > 0 } filter) messages.Add((Messages.Update, filter.Select(c => c.ToLowerInvariant()).ToList()));
+            if (workflow.OnDelete) messages.Add((Messages.Delete, null));
+            foreach (var (message, columns) in messages)
+            {
+                yield return new CascadeStep(
+                    EntryPointIds.Workflow(workflow.Name, message, table), message, table, Lower(workflow.RunsAsUserId), columns, null, !workflow.RealTime, Workflow: workflow.Name);
+            }
+        }
+    }
 
     private void AddMethodEntries(Dictionary<string, EntryCandidate> candidates)
     {

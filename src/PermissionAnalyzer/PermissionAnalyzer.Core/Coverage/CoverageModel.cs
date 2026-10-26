@@ -66,7 +66,8 @@ public sealed class SectionCoverage(
     IReadOnlyList<IdentityRoles> identities,
     int unresolved,
     int unresolvedNoRule,
-    int unresolvedCustomApi)
+    int unresolvedCustomApi,
+    int unresolvedWorkflow)
 {
     /// <summary>
     /// The identities of the section's requirements, with their roles, sorted by identity.
@@ -88,6 +89,11 @@ public sealed class SectionCoverage(
     /// </summary>
     public int UnresolvedCustomApi { get; } = unresolvedCustomApi;
 
+    /// <summary>
+    /// The part of <see cref="Unresolved"/> that are workflows from the metadata, whose steps aren't analyzed.
+    /// </summary>
+    public int UnresolvedWorkflow { get; } = unresolvedWorkflow;
+
     public RequirementCoverage For(Requirement requirement) => requirements[requirement];
 
     public RequirementCoverage For(GlobalRequirement requirement) => globalRequirements[requirement];
@@ -96,9 +102,9 @@ public sealed class SectionCoverage(
 }
 
 /// <summary>
-/// Counts over every requirement of a <see cref="CoverageReport"/>, including privileges not tied to a table. <see cref="UnresolvedNoRule"/> and
-/// <see cref="UnresolvedCustomApi"/> are the parts of <see cref="Unresolved"/> that are requests without a rule and
-/// custom API calls.
+/// Counts over every requirement of a <see cref="CoverageReport"/>, including privileges not tied to a table. <see cref="UnresolvedNoRule"/>,
+/// <see cref="UnresolvedCustomApi"/> and <see cref="UnresolvedWorkflow"/> are the parts of <see cref="Unresolved"/> that are requests
+/// without a rule, custom API calls and fired workflows.
 /// </summary>
 public sealed record CoverageSummary(
     int Granted,
@@ -110,6 +116,7 @@ public sealed record CoverageSummary(
     int Unresolved,
     int UnresolvedNoRule,
     int UnresolvedCustomApi,
+    int UnresolvedWorkflow,
     int Unverifiable)
 {
     /// <summary>

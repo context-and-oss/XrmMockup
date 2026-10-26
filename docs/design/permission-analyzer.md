@@ -456,8 +456,14 @@ function too. Specifics:
   but skips nothing. `BypassBusinessLogicExecutionStepIds` skips nothing either, because the
   analysis doesn't know step ids. A custom API's own code is never skipped.
 
-Real-time workflows (XAML in `Metadata/Workflows`) are a later extension: mockup already
-parses them, and their create/update steps can be turned into operations with the same rules.
+**Workflows.** The workflows in `Metadata/Workflows` that run automatically (category workflow,
+with a table, and on create, on delete or on an update of listed columns, as mockup reads them)
+fire like steps without code. A real-time workflow runs as the caller or its owner (`runas`), a
+background workflow as its owner, and the bypass parameters skip them like steps of the same mode.
+Their steps (XAML) aren't analyzed, so each fired workflow is an unresolved finding ("fires
+real-time workflow 'X', whose steps aren't analyzed"), counted as `unresolvedWorkflow`, which
+`--strict` fails on. Without this, a workflow's needs would be silently missed. Analyzing its
+create and update steps, which mockup already parses, with the same rules is a later extension.
 
 ### 5.7 Custom API execute privileges
 
@@ -737,7 +743,8 @@ Command-line options override the matching setting, as in the metadata tool. For
   "missing": [{ "table": "contact", "privilege": "Create", "runsAs": "Caller", "roles": ["Salesperson"],
                 "origin": "--role", "in": ["plugin:Contoso.AccountPostPlugin:Update:account:PostOperation"] }],   // with roles only; no "table" for a privilege not tied to a table
   "result": { "granted": 12, "notGoverned": 0, "missing": 2, "suppressed": 0, "notChecked": 1,
-              "system": 1, "unresolved": 1, "unresolvedNoRule": 0, "unresolvedCustomApi": 0, "unverifiable": 0,
+              "system": 1, "unresolved": 1, "unresolvedNoRule": 0, "unresolvedCustomApi": 0, "unresolvedWorkflow": 0,
+              "unverifiable": 0,
               "incomplete": true }   // with roles only
 }
 ```
@@ -755,6 +762,8 @@ results point at the source location of each missing privilege; see phase 6 in �
 - Table names computed at runtime, reflection, `dynamic`, and requests built in other
   assemblies (binary-only references) come out as `Unresolved`.
 - Interface dispatch without DI registrations over-approximates (all implementations).
+- The steps of workflows aren't analyzed. A workflow an operation fires is reported as unresolved
+  (§5.6), not what it needs.
 - Conditional code is treated as reachable (no path sensitivity), so requirements are a
   superset.
 - Team-inherited roles and record sharing are outside the static view. The check answers for
@@ -787,7 +796,7 @@ results point at the source location of each missing privilege; see phase 6 in �
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
 | 5.5 | Output clean-up (below, done): filtering, and verbosity levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output (below, done), docs, NuGet tool packaging alongside `xrmmockup-metadata` (done: `XrmMockup.PermissionAnalyzer`, versioned from its CHANGELOG by CI and `release.yml`, first version `1.0.0-rc.1`) | Release |
-| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth, stopping at impersonated calls without `--caller-role`, roles from a user's assignments and privileges the roles grant but nothing uses (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
+| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth, stopping at impersonated calls without `--caller-role` (opt-in, see below), roles from a user's assignments and privileges the roles grant but nothing uses (see below), IDE `DiagnosticAnalyzer` package on Core, analyzing the steps of workflows (fired workflows are reported as unresolved until then) | |
 
 **Output clean-up (phase 5.5, done).** On a real solution the output is long, and most of it is
 requirements the roles already grant. That is rarely what a reader needs, but it must stay
@@ -895,10 +904,13 @@ What the output shows of the impersonated calls, by verbosity (§10, phase 5.5):
 - JSON lists them in full, whatever the verbosity; Markdown lists them like `compact`, and SARIF
   perhaps as `note` results.
 
+It is opt-in, with a flag whose name is still to be decided. Without the flag the impersonated
+call is followed as it is today, so adding it changes no existing output or exit code.
+
 Things to settle before it is built:
 
-- Whether it replaces today's behavior or is opt-in, and whether `--strict` fails on it. It
-  shouldn't fail `--fail-on-missing` otherwise, since nothing is known to be missing.
+- The name of the flag, and whether `--strict` fails on the calls it stops at. It shouldn't fail
+  `--fail-on-missing`, since nothing is known to be missing.
 - An operation whose table can't be resolved stays unresolved; whether it is also listed as an
   impersonated call.
 - Calls the plugins make with `CallerId`, which are rarer: whether the same applies to them, and
@@ -1041,5 +1053,8 @@ XrmMockup365 itself, not only the analyzer.
 - **Roles per identity**: `--role` covers the caller and the application user, `--caller-role`
   the user acted for through `CallerId`, and `Users` specific users. A requirement whose
   identity has no roles is "not checked" instead of silently passing or failing (§6.2).
+- **Stopping at impersonated calls is opt-in**: when it is built, a flag (name to be decided)
+  turns it on, and the default keeps following the impersonated call, so it can be added after
+  the first release without changing existing output or exit codes (§10).
 - **Role suggestions deferred**: the first version answers "what is needed" and "do these
   roles cover it". Working out which roles would cover a requirement comes later.

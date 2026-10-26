@@ -221,6 +221,8 @@ internal static class RequestReasons
 {
     private const string NoRulePrefix = "no rule for message '";
     private const string CustomApiPrefix = "custom API '";
+    private const string RealTimeWorkflowPrefix = "fires real-time workflow '";
+    private const string BackgroundWorkflowPrefix = "fires background workflow '";
 
     public static string NoRule(string message) => NoRulePrefix + message + "'";
 
@@ -268,4 +270,16 @@ internal static class RequestReasons
     /// A reason about calling a custom API: its code or its execute privilege.
     /// </summary>
     public static bool IsCustomApi(string reason) => reason.StartsWith(CustomApiPrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// A workflow from the metadata that an operation fires, whose steps aren't analyzed.
+    /// </summary>
+    public static string Workflow(string name, bool realTime) =>
+        (realTime ? RealTimeWorkflowPrefix : BackgroundWorkflowPrefix) + name + "', whose steps aren't analyzed";
+
+    /// <summary>
+    /// A reason about a fired <see cref="Workflow"/>.
+    /// </summary>
+    public static bool IsWorkflow(string reason) =>
+        reason.StartsWith(RealTimeWorkflowPrefix, StringComparison.Ordinal) || reason.StartsWith(BackgroundWorkflowPrefix, StringComparison.Ordinal);
 }

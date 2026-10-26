@@ -117,7 +117,8 @@ public static class CoverageEvaluator
                 identities.Values.Where(i => i.RunsAs.Kind != RunsAsKind.System).ToList(),
                 needsRole.Count,
                 needsRole.Count(u => RequestReasons.NoRuleMessage(u.Reason) is not null),
-                needsRole.Count(u => RequestReasons.IsCustomApi(u.Reason)));
+                needsRole.Count(u => RequestReasons.IsCustomApi(u.Reason)),
+                needsRole.Count(u => RequestReasons.IsWorkflow(u.Reason)));
             sections.Add(section);
             return section;
         }
@@ -141,6 +142,7 @@ public static class CoverageEvaluator
             sections.Sum(s => s.Unresolved),
             sections.Sum(s => s.UnresolvedNoRule),
             sections.Sum(s => s.UnresolvedCustomApi),
+            sections.Sum(s => s.UnresolvedWorkflow),
             Count(CoverageStatus.Unverifiable));
 
         var missingPrivileges = missing.Select(m => new MissingPrivilege(m.Key.Table, m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();

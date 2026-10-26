@@ -83,7 +83,7 @@ public class CoverageTests
         Assert.Equal(
             ["account:Read as Caller: Granted User", "contact:Create as Caller: Missing", "contact:Delete as System: System"],
             Results(report, entry));
-        Assert.Equal(new CoverageSummary(1, 0, 1, 0, 0, 1, 0, 0, 0, 0), report.Summary);
+        Assert.Equal(new CoverageSummary(1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0), report.Summary);
         Assert.False(report.Summary.Passed(strict: false));
 
         var identity = Assert.Single(report.For(entry).Identities);
@@ -447,7 +447,7 @@ public class CoverageTests
     [Fact]
     public void TextOutputListsWhatWasNotChecked()
     {
-        var summary = new CoverageSummary(Granted: 2, NotGoverned: 0, Missing: 0, Suppressed: 0, NotChecked: 1, System: 0, Unresolved: 3, UnresolvedNoRule: 1, UnresolvedCustomApi: 1, Unverifiable: 1);
+        var summary = new CoverageSummary(Granted: 2, NotGoverned: 0, Missing: 0, Suppressed: 0, NotChecked: 1, System: 0, Unresolved: 3, UnresolvedNoRule: 1, UnresolvedCustomApi: 1, UnresolvedWorkflow: 0, Unverifiable: 1);
         Assert.True(summary.Incomplete);
         Assert.True(summary.Passed(strict: false));
         Assert.False(summary.Passed(strict: true));

@@ -8,7 +8,8 @@ namespace XrmMockup.PermissionAnalyzer.Core.Graph;
 /// the columns an Update step runs for, or <c>null</c> when it runs on every update. <see cref="Code"/> is
 /// <c>null</c> for a step from the metadata whose plugin code isn't loaded. <see cref="Asynchronous"/> is set for a
 /// step that runs asynchronously; <see cref="IsCustomApi"/> for the code of a custom API, which no bypass parameter
-/// skips.
+/// skips. <see cref="Workflow"/> names a workflow from the metadata, which runs like a step but whose steps aren't
+/// analyzed.
 /// </summary>
 internal sealed record CascadeStep(
     string Id,
@@ -18,7 +19,8 @@ internal sealed record CascadeStep(
     IReadOnlyList<string>? FilteredAttributes,
     EntryCandidate? Code,
     bool Asynchronous = false,
-    bool IsCustomApi = false);
+    bool IsCustomApi = false,
+    string? Workflow = null);
 
 /// <summary>
 /// An evaluation with the hits of every step its operations fire, and the ids of those steps, sorted.
@@ -26,8 +28,8 @@ internal sealed record CascadeStep(
 internal sealed record CascadeResult(EvaluationResult Result, IReadOnlyList<string> Fired);
 
 /// <summary>
-/// Expands an evaluation with the plugin steps and custom APIs its operations fire, and the steps those fire in
-/// turn, as Dataverse runs them in the request pipeline. A fired step runs as the identity of the operation that
+/// Expands an evaluation with the plugin steps, custom APIs and workflows its operations fire, and the steps those
+/// fire in turn, as Dataverse runs them in the request pipeline. A fired step runs as the identity of the operation that
 /// fired it, unless it impersonates. Each step is expanded once per identity and basis, which also stops cycles.
 /// An operation on an unknown table only runs the steps without a table; the others are reported as unresolved.
 /// An update runs an Update step filtered on columns when it sets one of them, and, with the basis
@@ -89,7 +91,9 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
                         expanded.Unresolved.Add(new UnresolvedHit(
                             trigger.Message,
                             [],
-                            $"fires plugin step {step.Id}, whose code isn't analyzed",
+                            step.Workflow is { } workflow
+                                ? RequestReasons.Workflow(workflow, !step.Asynchronous)
+                                : $"fires plugin step {step.Id}, whose code isn't analyzed",
                             runsAs,
                             new RequirementSource(trigger.Source.Location, path)));
                         continue;

@@ -11,6 +11,7 @@ internal static class EntryPointIds
     private const string FunctionPrefix = "function:";
     private const string MethodPrefix = "method:";
     private const string OperationPrefix = "operation:";
+    private const string WorkflowPrefix = "workflow:";
 
     /// <summary>
     /// A plugin step, on any table when <paramref name="table"/> is <c>null</c>.
@@ -30,6 +31,12 @@ internal static class EntryPointIds
     public static string Function(string name) => FunctionPrefix + name;
 
     public static string Method(string methodId) => MethodPrefix + methodId;
+
+    /// <summary>
+    /// A workflow from the metadata, run by <paramref name="message"/> on its table. Not an entry point: operations
+    /// only fire it.
+    /// </summary>
+    public static string Workflow(string name, string message, string table) => $"{WorkflowPrefix}{name}:{message}:{table}";
 
     /// <summary>
     /// A user operation, with the columns it sets when they are known.

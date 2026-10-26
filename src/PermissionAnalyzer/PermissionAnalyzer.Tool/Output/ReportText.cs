@@ -67,7 +67,8 @@ internal static class ReportText
             var details = new List<string>();
             if (summary.UnresolvedNoRule > 0) details.Add($"{Count(summary.UnresolvedNoRule, "request")} without a rule");
             if (summary.UnresolvedCustomApi > 0) details.Add($"{Count(summary.UnresolvedCustomApi, "custom API call")}");
-            var other = summary.Unresolved - summary.UnresolvedNoRule - summary.UnresolvedCustomApi;
+            if (summary.UnresolvedWorkflow > 0) details.Add($"{Count(summary.UnresolvedWorkflow, "workflow")} whose steps aren't analyzed");
+            var other = summary.Unresolved - summary.UnresolvedNoRule - summary.UnresolvedCustomApi - summary.UnresolvedWorkflow;
             if (other > 0) details.Add($"{other} with an unknown table or request");
             parts.Add($"{Count(summary.Unresolved, "unresolved operation")} ({string.Join(", ", details)})");
         }

@@ -156,13 +156,17 @@ internal static class AnalysisRunner
     }
 
     /// <summary>
-    /// The plugin steps and the privilege catalog of the metadata folder.
+    /// The plugin steps, the workflows and the privilege catalog of the metadata folder.
     /// </summary>
     private static void AddMetadata(ManifestBuilder builder, string metadataDirectory, ILogger logger)
     {
         var steps = PluginStepLoader.Load(metadataDirectory);
         logger.LogInformation("Loaded {Count} plugin steps from {Directory}", steps.Count, metadataDirectory);
         builder.AddPluginSteps(steps);
+
+        var workflows = WorkflowLoader.Load(metadataDirectory);
+        logger.LogInformation("Loaded {Count} workflows that run on a table from {Directory}", workflows.Count, metadataDirectory);
+        builder.AddWorkflows(workflows);
 
         if (PrivilegeCatalogLoader.Load(metadataDirectory) is var (privileges, customApis))
         {
