@@ -99,7 +99,7 @@ internal sealed class AnalysisOptions
             : customApi is not null ? EntryPointSelector.CustomApi(customApi)
             : function is not null ? EntryPointSelector.Function(function)
             : entry.Length > 0 ? EntryPointSelector.Methods(entry)
-            : operation is not null ? EntryPointSelector.Operation(operationText!)
+            : operation is not null ? EntryPointSelector.Operation(operation.Message, operation.Table)
             : null;
 
         return new AnalysisRequest(

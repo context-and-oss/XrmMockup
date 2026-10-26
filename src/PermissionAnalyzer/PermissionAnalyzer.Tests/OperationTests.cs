@@ -153,11 +153,26 @@ public class OperationTests
         Assert.Contains(send.Assumptions, a => a.Reason.StartsWith("SendEmail sends the email as the calling user", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void OperationScopeSelectsOnlyItsOperation()
+    {
+        var manifest = Analyze.Code(
+            Plugins,
+            scope: EntryPointSelector.Operation("UpdateRequest", "Account"),
+            setup: builder =>
+            {
+                builder.AddOperation("Update", "account");
+                builder.AddOperation("Create", "account");
+                builder.AddOperation("Update", "contact");
+            });
+        Assert.Equal("operation:Update account", Assert.Single(manifest.EntryPoints).Id);
+    }
+
     private static EntryPoint Run(string message, string table, IReadOnlyList<string>? columns = null, IEnumerable<LookupColumn>? lookups = null)
     {
         var manifest = Analyze.Code(
             Plugins,
-            scope: EntryPointSelector.Operation($"{message} {table}"),
+            scope: EntryPointSelector.Operation(message, table),
             setup: builder => builder.AddOperation(message, table, columns),
             lookups: lookups);
         return Assert.Single(manifest.EntryPoints);

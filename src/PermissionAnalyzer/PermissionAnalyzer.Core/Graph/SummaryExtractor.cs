@@ -172,7 +172,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
         foreach (var shape in shapes)
         {
             var tables = resolver.Resolve(value, shape);
-            returns[shape] = returns.TryGetValue(shape, out var known) ? known.Add(tables) : tables;
+            returns[shape] = returns.TryGetValue(shape, out var known) ? known.Union(tables) : tables;
         }
     }
 
@@ -223,33 +223,33 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
         switch (operation)
         {
-            case "Create":
-                return Write(site, resolver, "Create", first, Privilege.Create);
+            case Messages.Create:
+                return Write(site, resolver, Messages.Create, first, Privilege.Create);
             case "CreateAndReturn":
-                return Write(site, resolver, "Create", first, Privilege.Create, Privilege.Read);
-            case "Update":
-                return Write(site, resolver, "Update", first, Privilege.Write);
-            case "Retrieve":
-                return [site.Access(Fires("Retrieve", resolver.Name(first)), Privilege.Read)];
-            case "Delete":
-                return [site.Access(Fires("Delete", resolver.Name(first)), Privilege.Delete)];
-            case "RetrieveMultiple":
+                return Write(site, resolver, Messages.Create, first, Privilege.Create, Privilege.Read);
+            case Messages.Update:
+                return Write(site, resolver, Messages.Update, first, Privilege.Write);
+            case Messages.Retrieve:
+                return [site.Access(Fires(Messages.Retrieve, resolver.Name(first)), Privilege.Read)];
+            case Messages.Delete:
+                return [site.Access(Fires(Messages.Delete, resolver.Name(first)), Privilege.Delete)];
+            case Messages.RetrieveMultiple:
                 return
                 [
                     site.Access(
                         resolver.Query(first).OrUnresolved("query has no table name")
-                            .Add(TableResolution.Fires("RetrieveMultiple", resolver.Query(first, includeLinks: false).OrUnresolved("query has no table name"))),
+                            .Union(TableResolution.Fires(Messages.RetrieveMultiple, resolver.Query(first, includeLinks: false).OrUnresolved("query has no table name"))),
                         Privilege.Read),
                 ];
-            case "Associate":
-            case "Disassociate":
+            case Messages.Associate:
+            case Messages.Disassociate:
                 var related = invocation.Arguments.FirstOrDefault(a => symbols.Is(a.Parameter?.Type, symbols.EntityReferenceCollection));
                 return
                 [
                     site.Access(Fires(operation, resolver.Name(first)), Privilege.Read, Privilege.AppendTo),
                     site.Access(resolver.EntityReferences(related).OrUnresolved("no related records are added"), "related records: ", Privilege.Read, Privilege.Append),
                 ];
-            case "Execute":
+            case Messages.Execute:
                 // One access per privilege the request can need, and one for what it can't be tied to a privilege
                 return
                 [
@@ -278,20 +278,20 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 var tables = invocation.TargetMethod.IsGenericMethod ? resolver.TypeArgument(invocation.TargetMethod.TypeArguments[0]) : resolver.Name(first);
                 return [Query(site, tables, invocation)];
             case "AddObject":
-                return Write(site, resolver, "Create", first, Privilege.Create);
+                return Write(site, resolver, Messages.Create, first, Privilege.Create);
             case "UpdateObject":
-                return Write(site, resolver, "Update", first, Privilege.Write);
+                return Write(site, resolver, Messages.Update, first, Privilege.Write);
             case "DeleteObject":
-                return [site.Access(Fires("Delete", resolver.Entity(first).OrUnresolved(NoEntityTable)), Privilege.Delete)];
+                return [site.Access(Fires(Messages.Delete, resolver.Entity(first).OrUnresolved(NoEntityTable)), Privilege.Delete)];
             case "AddLink":
             case "DeleteLink":
-                return Link(site, method == "AddLink" ? "Associate" : "Disassociate", resolver, first, target);
+                return Link(site, method == "AddLink" ? Messages.Associate : Messages.Disassociate, resolver, first, target);
             case "AddRelatedObject":
-                return [.. Write(site, resolver, "Create", target, Privilege.Create), .. Link(site, "Associate", resolver, first, target)];
+                return [.. Write(site, resolver, Messages.Create, target, Privilege.Create), .. Link(site, Messages.Associate, resolver, first, target)];
             case "LoadProperty":
                 return [site.Access(TableResolution.Unresolved("related records are read through a relationship, whose table isn't known"), Privilege.Read)];
-            case "Execute":
-                return Accesses(invocation, "Execute", root);
+            case Messages.Execute:
+                return Accesses(invocation, Messages.Execute, root);
             default:
                 return [];
         }
@@ -302,7 +302,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// another query, whose table it is linked to.
     /// </summary>
     private static AccessFact Query(Site site, TableResolution tables, IOperation query) =>
-        site.Access(IsJoined(query) ? tables : Fires("RetrieveMultiple", tables), Privilege.Read);
+        site.Access(IsJoined(query) ? tables : Fires(Messages.RetrieveMultiple, tables), Privilege.Read);
 
     /// <summary>
     /// Writing a record: the privileges on its table, firing <paramref name="message"/> with the columns it sets, and
@@ -343,7 +343,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     /// setting <paramref name="columns"/>.
     /// </summary>
     private static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null) =>
-        TableResolution.Empty.Add(tables).Add(TableResolution.Fires(message, tables, columns));
+        tables.Union(TableResolution.Fires(message, tables, columns));
 
     /// <summary>
     /// Append on an entity that gets a lookup, and AppendTo on the tables its lookups refer to.
@@ -571,7 +571,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
             // App code acting for a user: client.CallerId = userId
             var impersonates = body.DescendantsAndSelf().Any(node =>
-                node is ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: "CallerId" or "CallerAADObjectId" } property }
+                node is ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: SdkNames.CallerId or SdkNames.CallerAADObjectId } property }
                 && IsLocal(property.Instance, local));
             if (impersonates) return [new FixedOrigin(RunsAs.ImpersonatedCaller)];
 
@@ -617,7 +617,7 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     private IReadOnlyList<ServiceOrigin> ServiceFromInvocation(IInvocationOperation invocation, IMethodSymbol root)
     {
         var method = invocation.TargetMethod;
-        if (method.Name == "CreateOrganizationService" && XrmSymbols.Implements(method.ContainingType, symbols.OrganizationServiceFactory))
+        if (method.Name == SdkNames.CreateOrganizationService && XrmSymbols.Implements(method.ContainingType, symbols.OrganizationServiceFactory))
         {
             return UserArgument(Argument(invocation, 0), root, 0);
         }
@@ -648,9 +648,9 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
             case IDefaultValueOperation:
                 return [new FixedOrigin(RunsAs.System)];
 
-            case IPropertyReferenceOperation { Property.Name: "UserId" or "InitiatingUserId" } property
+            case IPropertyReferenceOperation { Property.Name: SdkNames.UserId or SdkNames.InitiatingUserId } property
                 when XrmSymbols.Implements(property.Property.ContainingType, symbols.ExecutionContext):
-                return [new FixedOrigin(RunsAs.Caller, property.Property.Name == "InitiatingUserId")];
+                return [new FixedOrigin(RunsAs.Caller, property.Property.Name == SdkNames.InitiatingUserId)];
 
             case IConditionalOperation { WhenFalse: { } whenFalse } conditional when depth < MaxConstantDepth:
                 return [.. UserArgument(conditional.WhenTrue, root, depth + 1), .. UserArgument(whenFalse, root, depth + 1)];

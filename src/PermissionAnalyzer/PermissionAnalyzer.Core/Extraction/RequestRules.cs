@@ -15,26 +15,26 @@ internal sealed class RequestRules
     /// </summary>
     public static IReadOnlyList<RequestRule> BuiltIn { get; } =
     [
-        Rule("Create", On("Target", Privilege.Create)),
-        Rule("Update", On("Target", Privilege.Write)),
-        Rule("Delete", On("Target", Privilege.Delete)),
-        Rule("Retrieve", On("Target", Privilege.Read)),
-        Rule("RetrieveMultiple", On("Query", Privilege.Read)),
-        Rule("Associate", On("Target", Privilege.Read, Privilege.AppendTo), On("RelatedEntities", Privilege.Read, Privilege.Append)),
-        Rule("Disassociate", On("Target", Privilege.Read, Privilege.AppendTo), On("RelatedEntities", Privilege.Read, Privilege.Append)),
-        new("Upsert") { As = ["Create", "Update"] },
-        new("CreateMultiple") { Targets = "Targets", As = ["Create"] },
-        new("UpdateMultiple") { Targets = "Targets", As = ["Update"] },
-        new("UpsertMultiple") { Targets = "Targets", As = ["Upsert"] },
-        new("DeleteMultiple") { Targets = "Targets", As = ["Delete"] },
+        Rule(Messages.Create, On(SdkNames.Target, Privilege.Create)),
+        Rule(Messages.Update, On(SdkNames.Target, Privilege.Write)),
+        Rule(Messages.Delete, On(SdkNames.Target, Privilege.Delete)),
+        Rule(Messages.Retrieve, On(SdkNames.Target, Privilege.Read)),
+        Rule(Messages.RetrieveMultiple, On(SdkNames.Query, Privilege.Read)),
+        Rule(Messages.Associate, On(SdkNames.Target, Privilege.Read, Privilege.AppendTo), On("RelatedEntities", Privilege.Read, Privilege.Append)),
+        Rule(Messages.Disassociate, On(SdkNames.Target, Privilege.Read, Privilege.AppendTo), On("RelatedEntities", Privilege.Read, Privilege.Append)),
+        new(Messages.Upsert) { As = [Messages.Create, Messages.Update] },
+        new("CreateMultiple") { Targets = "Targets", As = [Messages.Create] },
+        new("UpdateMultiple") { Targets = "Targets", As = [Messages.Update] },
+        new("UpsertMultiple") { Targets = "Targets", As = [Messages.Upsert] },
+        new("DeleteMultiple") { Targets = "Targets", As = [Messages.Delete] },
         new("ExecuteMultiple") { Requests = "Requests" },
         new("ExecuteTransaction") { Requests = "Requests" },
         Rule("SetState", On("EntityMoniker", Privilege.Write)) with { Enforced = false },
-        Rule("Assign", On("Target", Privilege.Assign, Privilege.Write)),
-        Rule("GrantAccess", On("Target", Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
-        Rule("ModifyAccess", On("Target", Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
-        Rule("RevokeAccess", On("Target", Privilege.Share)),
-        Rule("Merge", On("Target", Privilege.Read, Privilege.Write)) with { GlobalPrivileges = ["prvMerge"] },
+        Rule("Assign", On(SdkNames.Target, Privilege.Assign, Privilege.Write)),
+        Rule("GrantAccess", On(SdkNames.Target, Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
+        Rule("ModifyAccess", On(SdkNames.Target, Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
+        Rule("RevokeAccess", On(SdkNames.Target, Privilege.Share)),
+        Rule("Merge", On(SdkNames.Target, Privilege.Read, Privilege.Write)) with { GlobalPrivileges = ["prvMerge"] },
         Rule(
             "QualifyLead",
             On("LeadId", Privilege.Write),
@@ -51,8 +51,8 @@ internal sealed class RequestRules
         Rule("WinQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)),
         Rule("CloseQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)),
         Rule("ReviseQuote", OnTable("quote", Privilege.Read, Privilege.Create)),
-        Rule("InitializeFileBlocksUpload", On("Target", Privilege.Write)) with { Enforced = false },
-        Rule("InitializeFileBlocksDownload", On("Target", Privilege.Read)) with { Enforced = false },
+        Rule("InitializeFileBlocksUpload", On(SdkNames.Target, Privilege.Write)) with { Enforced = false },
+        Rule("InitializeFileBlocksDownload", On(SdkNames.Target, Privilege.Read)) with { Enforced = false },
 
         // Block transfers continue one that was initialized, and checked, above
         new("UploadBlock"),
@@ -165,7 +165,7 @@ internal sealed class RequestRules
                 continue;
             }
             messages.AddRange(expanded.Messages);
-            checks.AddRange(rule.Targets is { } targets ? expanded.Checks.Select(c => c.Member == "Target" ? c with { Member = targets } : c) : expanded.Checks);
+            checks.AddRange(rule.Targets is { } targets ? expanded.Checks.Select(c => c.Member == SdkNames.Target ? c with { Member = targets } : c) : expanded.Checks);
             requests.AddRange(expanded.Requests);
             missing.AddRange(expanded.Missing);
             globals.AddRange(expanded.GlobalPrivileges);

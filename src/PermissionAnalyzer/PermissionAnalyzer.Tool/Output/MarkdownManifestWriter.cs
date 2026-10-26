@@ -24,9 +24,9 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
         else
         {
             var missing = coverage.Summary.Missing;
-            writer.Write(missing > 0 ? $"### ✘ {TextManifestWriter.Count(missing, "missing privilege")}\n\n" : "### ✔ No missing privileges\n\n");
-            writer.Write(TextManifestWriter.Result(coverage.Summary) + "\n\n");
-            if (TextManifestWriter.NotChecked(coverage.Summary) is { } notChecked) writer.Write($"> [!WARNING]\n> {Text(notChecked)}\n\n");
+            writer.Write(missing > 0 ? $"### ✘ {ReportText.Count(missing, "missing privilege")}\n\n" : "### ✔ No missing privileges\n\n");
+            writer.Write(ReportText.Result(coverage.Summary) + "\n\n");
+            if (ReportText.NotChecked(coverage.Summary) is { } notChecked) writer.Write($"> [!WARNING]\n> {Text(notChecked)}\n\n");
         }
 
         foreach (var block in RoleChanges.Of(manifest, coverage, _filter))
@@ -49,7 +49,7 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
         var unresolved = UnresolvedSites.Of(manifest, _filter);
         if (unresolved.Count > 0)
         {
-            writer.Write($"<details><summary>{TextManifestWriter.Count(unresolved.Count, "unresolved operation")}</summary>\n\n");
+            writer.Write($"<details><summary>{ReportText.Count(unresolved.Count, "unresolved operation")}</summary>\n\n");
             writer.Write("| Operation | Runs as | Reason | Source |\n| --- | --- | --- | --- |\n");
             foreach (var site in unresolved)
             {
@@ -59,8 +59,8 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
             writer.Write("\n</details>\n\n");
         }
 
-        writer.Write(TextManifestWriter.Totals(manifest) + "\n");
-        if (!_filter.IsEmpty) writer.Write($"\n{Text(TextManifestWriter.Filtered(manifest, _filter))}\n");
+        writer.Write(ReportText.Totals(manifest) + "\n");
+        if (!_filter.IsEmpty) writer.Write($"\n{Text(ReportText.Filtered(manifest, _filter))}\n");
     }
 
     /// <summary>

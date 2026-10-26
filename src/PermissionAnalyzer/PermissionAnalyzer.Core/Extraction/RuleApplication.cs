@@ -60,7 +60,7 @@ internal static class RuleApplication
     /// </summary>
     public static TableResolution Apply(string message, ExpandedRule rule, IRequestMembers members, TableShape shape)
     {
-        var result = TableResolution.Empty;
+        var result = new List<TableResolution>();
         foreach (var missing in rule.Missing) result.Add(RequestShapes.Other(shape, RequestReasons.NoRule(missing)));
         foreach (var nested in rule.Requests) result.Add(members.Requests(nested, shape));
         if (shape == TableShape.RequestOther)
@@ -101,7 +101,7 @@ internal static class RuleApplication
                 result.Add(members.Tables(message, member));
             }
         }
-        return result;
+        return TableResolution.Union(result);
     }
 
     /// <summary>
@@ -120,14 +120,14 @@ internal static class RuleApplication
         TableResolution? columns = null;
         if (PrimaryMember(rule) is { } member)
         {
-            tables.Add(members.Tables(message, member));
+            tables = members.Tables(message, member);
             columns = members.Columns(member);
         }
         else if (rule.Checks.FirstOrDefault(c => c.Table is not null)?.Table is { } table)
         {
-            tables.Add(TableResolution.Table(table));
+            tables = TableResolution.Table(table);
         }
 
-        return rule.Messages.Aggregate(TableResolution.Empty, (result, fired) => result.Add(TableResolution.Fires(fired, tables, columns, bypass)));
+        return TableResolution.Union(rule.Messages.Select(fired => TableResolution.Fires(fired, tables, columns, bypass)));
     }
 }

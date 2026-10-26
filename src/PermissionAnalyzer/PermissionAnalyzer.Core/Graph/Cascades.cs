@@ -166,6 +166,7 @@ internal sealed class Cascades(CallGraph graph, IEnumerable<CascadeStep> steps, 
         foreach (var hit in from.Unresolved) to.Unresolved.Add(hit with { Source = Prefix(hit.Source, path) });
         foreach (var hit in from.Assumptions) to.Assumptions.Add(hit with { Source = Prefix(hit.Source, path) });
         foreach (var hit in from.Globals) to.Globals.Add(hit with { Basis = RequirementBases.Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
+        foreach (var hit in from.Triggers) to.Triggers.Add(hit with { Basis = RequirementBases.Max(hit.Basis, basis), Source = Prefix(hit.Source, path) });
         to.Reached.UnionWith(from.Reached);
     }
 

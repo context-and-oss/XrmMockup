@@ -51,7 +51,7 @@ internal sealed class PrivilegeResolver
         {
             if (RequestReasons.NoRuleMessage(hit.Reason) is { } message && IsKnownCustomApi(message))
             {
-                ExecuteResolvedHits(message, ExecutePrivilegeOf(message), hit.RunsAs, hit.Source, hits);
+                ExecutePrivilegeHits(message, ExecutePrivilegeOf(message), hit.RunsAs, hit.Source, hits);
 
                 // The code of a custom API runs as a cascade, so only a custom API without code stays unresolved
                 if (!_customApiCode.ContainsKey(message)) hits.Unresolved.Add(hit with { Reason = RequestReasons.CustomApiCode(message) });
@@ -61,11 +61,11 @@ internal sealed class PrivilegeResolver
         }
         foreach (var hit in results.SelectMany(r => r.Globals))
         {
-            NamedResolvedHits(hit.Operation, hit.Privilege, hit.RunsAs, hit.Basis, hit.Source, hits);
+            NamedPrivilegeHits(hit.Operation, hit.Privilege, hit.RunsAs, hit.Basis, hit.Source, hits);
         }
         if (customApi is { Trigger.Message: { } apiMessage, Declaration: { } declaration })
         {
-            ExecuteResolvedHits(apiMessage, ExecutePrivilegeOf(apiMessage), RunsAs.Caller, new RequirementSource(declaration, []), hits);
+            ExecutePrivilegeHits(apiMessage, ExecutePrivilegeOf(apiMessage), RunsAs.Caller, new RequirementSource(declaration, []), hits);
         }
         return hits;
     }
@@ -97,7 +97,7 @@ internal sealed class PrivilegeResolver
     /// privileges, a privilege not tied to a table, or an unresolved operation when the privilege can't be looked up.
     /// A privilege name is only looked up in the privilege catalog, never derived from its spelling.
     /// </summary>
-    private void ExecuteResolvedHits(string message, ExecutePrivilege? privilege, RunsAs runsAs, RequirementSource source, ResolvedHits hits)
+    private void ExecutePrivilegeHits(string message, ExecutePrivilege? privilege, RunsAs runsAs, RequirementSource source, ResolvedHits hits)
     {
         if (privilege is null) return;
         if (privilege is { Table: { } table, Privilege: { } tablePrivilege })
@@ -118,7 +118,7 @@ internal sealed class PrivilegeResolver
     /// Without a privilege catalog it is taken as a privilege not tied to a table; with one, it is looked up there,
     /// as it may be tied to tables instead.
     /// </summary>
-    private void NamedResolvedHits(string operation, string privilege, RunsAs runsAs, RequirementBasis basis, RequirementSource source, ResolvedHits hits)
+    private void NamedPrivilegeHits(string operation, string privilege, RunsAs runsAs, RequirementBasis basis, RequirementSource source, ResolvedHits hits)
     {
         void Unresolved(string reason) => hits.Unresolved.Add(new UnresolvedHit(operation, [], reason, runsAs, source));
         if (_catalog is null) hits.Globals.Add(new GlobalHit(privilege, runsAs, basis, source));

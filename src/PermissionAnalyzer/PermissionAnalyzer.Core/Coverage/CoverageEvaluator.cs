@@ -225,9 +225,8 @@ public static class CoverageEvaluator
         if (options.Roles is not null) return options.Roles;
         if (entryPoint?.Assembly is not { } assembly) return null;
 
-        const string functionPrefix = "function:";
-        if (entryPoint.Kind == EntryPointKind.Function && entryPoint.Id.StartsWith(functionPrefix, StringComparison.Ordinal)
-            && principals.TryGetValue($"{assembly}/{entryPoint.Id.Substring(functionPrefix.Length)}", out var function))
+        if (entryPoint.Kind == EntryPointKind.Function && EntryPointIds.FunctionName(entryPoint.Id) is { } name
+            && principals.TryGetValue($"{assembly}/{name}", out var function))
         {
             return function;
         }

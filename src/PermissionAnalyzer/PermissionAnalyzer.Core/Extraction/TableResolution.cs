@@ -14,6 +14,8 @@ namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
 /// returned by a method in the solution is kept as a <see cref="ReturnedTables"/>, resolved from the method's
 /// return values in the context of the call. The plugin steps an operation fires are kept per message in
 /// <see cref="Fired"/>, with the tables they fire on, bound the same way.
+/// <para>A resolution doesn't change once made, so resolutions can be shared; <see cref="Union(TableResolution)"/>
+/// makes a new one.</para>
 /// </remarks>
 internal sealed class TableResolution
 {
@@ -88,7 +90,7 @@ internal sealed class TableResolution
     public bool IsEmpty =>
         _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && _fired.Count == 0 && _globals.Count == 0 && _assumptions.Count == 0 && IsBound;
 
-    public static TableResolution Empty => new();
+    public static TableResolution Empty { get; } = new();
 
     public static TableResolution Table(string logicalName)
     {
@@ -145,15 +147,40 @@ internal sealed class TableResolution
     /// </summary>
     public static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null, PluginBypass bypass = PluginBypass.None)
     {
-        var fired = Empty.Add(tables);
-        fired._columns = Empty.Add(columns ?? Unresolved("the columns set aren't known"));
+        var fired = tables.Copy();
+        fired._columns = columns ?? Unresolved("the columns set aren't known");
         fired._bypass = bypass;
         var result = new TableResolution();
         result._fired.Add(message, fired);
         return result;
     }
 
-    public TableResolution Add(TableResolution other)
+    public TableResolution Union(TableResolution other) => Union([this, other]);
+
+    public static TableResolution Union(IEnumerable<TableResolution> parts)
+    {
+        // A single part with information is returned as is, so most unions make nothing new
+        TableResolution? first = null;
+        TableResolution? result = null;
+        foreach (var part in parts)
+        {
+            if (part.IsBlank) continue;
+            if (first is null)
+            {
+                first = part;
+                continue;
+            }
+            if (result is null)
+            {
+                result = first.Copy();
+            }
+            result.UnionWith(part);
+        }
+        return result ?? first ?? Empty;
+    }
+
+    // Only for a resolution being made, before anything else sees it
+    private void UnionWith(TableResolution other)
     {
         _tables.UnionWith(other._tables);
         _reasons.UnionWith(other._reasons);
@@ -164,14 +191,42 @@ internal sealed class TableResolution
         _assumptions.UnionWith(other._assumptions);
         foreach (var fired in other._fired)
         {
-            // Copied, as the resolutions added may be shared. A step is only known to be skipped when every request
-            // that fires the message skips it.
-            var merged = _fired.TryGetValue(fired.Key, out var existing) ? Empty.Add(existing).Add(fired.Value) : Empty.Add(fired.Value);
-            merged._bypass = existing is null ? fired.Value._bypass : existing._bypass & fired.Value._bypass;
+            // A step is only known to be skipped when every request that fires the message skips it
+            if (!_fired.TryGetValue(fired.Key, out var existing))
+            {
+                _fired[fired.Key] = fired.Value;
+                continue;
+            }
+            var merged = existing.Union(fired.Value).Copy();
+            merged._bypass = existing._bypass & fired.Value._bypass;
             _fired[fired.Key] = merged;
         }
-        if (other._columns is { } columns) (_columns ??= Empty).Add(columns);
-        return this;
+        if (other._columns is { } columns) _columns = _columns is null ? columns : _columns.Union(columns);
+    }
+
+    /// <summary>
+    /// The parts that don't depend on the call context: without <see cref="Slots"/>, <see cref="Returns"/> and
+    /// <see cref="Fired"/>, which are bound per call context.
+    /// </summary>
+    public TableResolution WithoutContext()
+    {
+        var result = new TableResolution();
+        result._tables.UnionWith(_tables);
+        result._reasons.UnionWith(_reasons);
+        result._lookupTargets.UnionWith(_lookupTargets);
+        result._globals.UnionWith(_globals);
+        result._assumptions.UnionWith(_assumptions);
+        return result;
+    }
+
+    private bool IsBlank => IsEmpty && _columns is null && _bypass == PluginBypass.None;
+
+    private TableResolution Copy()
+    {
+        var result = new TableResolution();
+        result.UnionWith(this);
+        result._bypass = _bypass;
+        return result;
     }
 
     /// <summary>
@@ -185,18 +240,22 @@ internal sealed class TableResolution
     /// </summary>
     public TableResolution WithinTargets(IReadOnlyCollection<string> targets)
     {
-        if (targets.Count == 1) return Table(targets.First());
-        if (_reasons.Count == 0) return this;
+        if (targets.Count != 1 && _reasons.Count == 0) return this;
 
-        var result = new TableResolution();
-        result._tables.UnionWith(_tables);
-        result._lookupTargets.UnionWith(_lookupTargets);
-        result._lookupTargets.UnionWith(targets.Select(t => t.ToLowerInvariant()));
-        result._slots.UnionWith(_slots);
-        result._returns.UnionWith(_returns);
-        result._globals.UnionWith(_globals);
-        result._assumptions.UnionWith(_assumptions);
-        foreach (var fired in _fired) result._fired.Add(fired.Key, fired.Value);
+        var result = Copy();
+        result._reasons.Clear();
+        if (targets.Count == 1)
+        {
+            result._tables.Clear();
+            result._lookupTargets.Clear();
+            result._slots.Clear();
+            result._returns.Clear();
+            result._tables.Add(targets.First().ToLowerInvariant());
+        }
+        else
+        {
+            result._lookupTargets.UnionWith(targets.Select(t => t.ToLowerInvariant()));
+        }
         return result;
     }
 

@@ -91,7 +91,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         }
 
         Entries.AddRange(steps);
-        var execute = symbols.Plugin?.GetMembers("Execute").OfType<IMethodSymbol>().FirstOrDefault() is { } member
+        var execute = symbols.Plugin?.GetMembers(SdkNames.Execute).OfType<IMethodSymbol>().FirstOrDefault() is { } member
             && type.FindImplementationForInterfaceMember(member) is IMethodSymbol implementation
             && IsInSource(implementation)
                 ? Nodes.Id(implementation)
@@ -121,7 +121,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         if (!isStep)
         {
             var api = arguments.FirstOrDefault()?.Value.ConstantValue is { HasValue: true, Value: string apiName } ? apiName : Unknown;
-            return new EntryCandidate($"custom-api:{api}", EntryPointKind.CustomApi, name, compilation.AssemblyName, new Trigger(Message: api), null, declaration, handlers, ExecutePrivilegeOf(invocation));
+            return new EntryCandidate(EntryPointIds.CustomApi(api), EntryPointKind.CustomApi, name, compilation.AssemblyName, new Trigger(Message: api), null, declaration, handlers, ExecutePrivilegeOf(invocation));
         }
 
         var message = Name(arguments.ElementAtOrDefault(0)?.Value) ?? Unknown;
@@ -131,7 +131,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         var filter = Trigger.Filters(message) ? FilteredAttributes(invocation) : null;
 
         return new EntryCandidate(
-            StepId(name, message, table, stage),
+            EntryPointIds.PluginStep(name, message, table, stage),
             EntryPointKind.PluginStep,
             name,
             compilation.AssemblyName,
@@ -140,9 +140,6 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
             declaration,
             handlers);
     }
-
-    public static string StepId(string type, string message, string? table, string stage) =>
-        $"plugin:{type}:{message}:{table ?? "any"}:{stage}";
 
     /// <summary>
     /// The code a registration runs: a lambda or method of the plugin, or a method of a service, by name or lambda.
@@ -290,13 +287,13 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
     {
         for (var current = type; current is not null; current = current.BaseType)
         {
-            var execute = current.GetMembers("Execute").OfType<IMethodSymbol>()
+            var execute = current.GetMembers(SdkNames.Execute).OfType<IMethodSymbol>()
                 .FirstOrDefault(m => m.IsOverride && m.Parameters.Length == 1 && IsInSource(m));
             if (execute is null) continue;
 
             var name = ReflectionName(type);
             Entries.Add(new EntryCandidate(
-                $"activity:{name}",
+                EntryPointIds.Activity(name),
                 EntryPointKind.CodeActivity,
                 name,
                 compilation.AssemblyName,
@@ -320,7 +317,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         if (binding is not null) binding = binding.Substring(0, binding.Length - "Attribute".Length);
 
         Entries.Add(new EntryCandidate(
-            $"function:{name}",
+            EntryPointIds.Function(name),
             EntryPointKind.Function,
             ReflectionName(method.ContainingType),
             compilation.AssemblyName,

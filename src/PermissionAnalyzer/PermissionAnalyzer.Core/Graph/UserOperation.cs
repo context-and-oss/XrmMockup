@@ -26,7 +26,7 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
         if (rules.Find(Message) is not { } rule)
         {
             // A message without a rule, such as a custom API, may fire steps on the table
-            node.Accesses.Add(Access(TableResolution.Unresolved(RequestReasons.NoRule(Message)).Add(TableResolution.Fires(Message, TableResolution.Table(Table), ColumnSet()))));
+            node.Accesses.Add(Access(TableResolution.Unresolved(RequestReasons.NoRule(Message)).Union(TableResolution.Fires(Message, TableResolution.Table(Table), ColumnSet()))));
             return node;
         }
 
@@ -39,7 +39,7 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
         return node;
     }
 
-    private TableResolution? ColumnSet() => Columns?.Aggregate(TableResolution.Empty, (result, column) => result.Add(TableResolution.Table(column)));
+    private TableResolution? ColumnSet() => Columns is null ? null : TableResolution.Union(Columns.Select(TableResolution.Table));
 
     private AccessFact Access(TableResolution tables, params Privilege[] privileges) => new(Message, Location, privileges, tables, "", Service);
 
@@ -71,18 +71,13 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
         /// </summary>
         public TableResolution Lookups(string member, TableShape shape)
         {
-            var result = TableResolution.Empty;
-            if (member != primary || operation.Columns is null) return result;
+            if (member != primary || operation.Columns is null) return TableResolution.Empty;
 
             var targets = operation.Columns.Select(c => lookups.TargetsOf(operation.Table, c)).Where(t => t.Count > 0).ToList();
-            if (targets.Count == 0) return result;
+            if (targets.Count == 0) return TableResolution.Empty;
             if (shape == TableShape.LookupHolder) return TableResolution.Table(operation.Table);
 
-            foreach (var target in targets)
-            {
-                foreach (var name in target) result.Add(target.Count == 1 ? TableResolution.Table(name) : TableResolution.LookupTarget(name));
-            }
-            return result;
+            return TableResolution.Union(targets.SelectMany(target => target.Select(name => target.Count == 1 ? TableResolution.Table(name) : TableResolution.LookupTarget(name))));
         }
 
         public TableResolution Requests(string member, TableShape shape) =>

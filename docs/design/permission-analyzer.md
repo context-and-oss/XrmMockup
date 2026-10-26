@@ -569,7 +569,9 @@ xrmmockup-permissions check --role "Integration App" --function ProcessOrder
   impersonated user, so its requirements are checked against `--caller-role`. The identity that
   sets `CallerId` (the application user, for app code) must also hold
   `prvActOnBehalfOfAnotherUser`. Every operation that runs as `ImpersonatedCaller` adds it as a
-  global requirement of that identity, with the same sources.
+  global requirement of that identity, with the same sources. Without `--caller-role`, the idea of
+  stopping at the impersonated call and listing it for a separate check of the calling user is
+  described in §10.
 - **Privileges not tied to a table** (§5.7) are checked by name against the roles' global
   privileges. In order: SYSTEM needs nothing, an identity without roles is not checked, roles
   from metadata without global privileges make it `unverifiable` (only `--strict` fails on that),
@@ -784,7 +786,7 @@ results point at the source location of each missing privilege; see phase 6 in �
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
 | 5.5 | Output clean-up (below, done): filtering, and verbosity levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output (below, done), docs, NuGet tool packaging alongside `xrmmockup-metadata` (done: `XrmMockup.PermissionAnalyzer`, versioned from its CHANGELOG by CI and `release.yml`, first version `1.0.0-rc.1`) | Release |
-| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth, roles from a user's assignments and privileges the roles grant but nothing uses (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
+| Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth, stopping at impersonated calls without `--caller-role`, roles from a user's assignments and privileges the roles grant but nothing uses (see below), IDE `DiagnosticAnalyzer` package on Core, real-time workflow support | |
 
 **Output clean-up (phase 5.5, done).** On a real solution the output is long, and most of it is
 requirements the roles already grant. That is rarely what a reader needs, but it must stay
@@ -863,6 +865,46 @@ built: whether the minimum applies globally, per table, per privilege or per ent
 how it interacts with combined roles and with tables no role governs; how it relates to the
 ownership XrmMockup actually checks at runtime (owner, business unit, sharing); and how it is
 configured in `XrmMockup:Permissions`. Deferred until then.
+
+**Idea: stop at impersonated calls without `--caller-role`.** Today a call made with `CallerId`
+set is analyzed like any other: its requirements and the plugins it fires (§5.6) are listed as
+"not checked" when no `--caller-role` is given. Those requirements depend on the user the app
+acts for, not on the application user, so a run that only has the application user's roles can't
+say anything about them, and the cascade they fire makes the report longer without making it
+more useful. The proposal: without `--caller-role`, stop following the chain at the impersonated
+call, and report in the output that it was detected and what it does. That splits the check in
+two:
+
+1. Check the application user alone: `check --function ProcessOrder --role "Integration App"`
+   covers what the function does as itself, plus `prvActOnBehalfOfAnotherUser` for the
+   impersonation (§6.2), which stays a requirement of the impersonating identity.
+2. Check the calling user independently, from the impersonated operations the first run lists,
+   for example `Create account` and `Update contact`: `check --operation "Create account" --role
+   Salesperson`, which fires the same plugins as the impersonated call would.
+
+What the output shows of the impersonated calls, by verbosity (§10, phase 5.5):
+
+- `minimal`: one line with the number of impersonated operations not followed, and the
+  verbosity that lists them, like the hint for assumptions.
+- `compact`: the operations, merged per message and table with the columns set when they are
+  known, written so they can be used as `--operation` (and `--attributes`) values for the second
+  check.
+- `normal`: each operation with the sources where it is made and where `CallerId` is set.
+- `detailed` and `full`: the call paths as well.
+- JSON lists them in full, whatever the verbosity; Markdown lists them like `compact`, and SARIF
+  perhaps as `note` results.
+
+Things to settle before it is built:
+
+- Whether it replaces today's behavior or is opt-in, and whether `--strict` fails on it. It
+  shouldn't fail `check` otherwise, since nothing is known to be missing.
+- An operation whose table can't be resolved stays unresolved; whether it is also listed as an
+  impersonated call.
+- Calls the plugins make with `CallerId`, which are rarer: whether the same applies to them, and
+  how a step's own impersonation (`ImpersonatingUserId`) interacts with it.
+- `--operation` takes one operation per run (§6.1), so the second check needs a run per
+  operation unless it becomes repeatable, which would let the `compact` list be passed as is.
+- With `--caller-user` (below), the second check could run in the same invocation instead.
 
 **Idea: privileges the roles grant but nothing uses.** The reverse of `check`: list the
 privileges in the `--role` roles that none of the selected entry points needs, so a role can be

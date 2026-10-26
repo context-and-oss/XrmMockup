@@ -93,7 +93,11 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     private static readonly IReadOnlyDictionary<(string, int), Binding> NoBindings = new Dictionary<(string, int), Binding>();
 
     private readonly Dictionary<string, ObjectState> _defaultObjects = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _constructing = new(StringComparer.Ordinal);
+    private readonly List<string> _constructing = [];
+
+    // The lowest position in _constructing whose default object is missing a part, cut off by a cycle or the depth
+    // limit, so it isn't memoized
+    private int _cutAt = int.MaxValue;
     private readonly HashSet<string> _returning = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -241,7 +245,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 if (fired.Value.Tables.Count == 0 && fired.Value.LookupTargets.Count == 0 && fired.Value.Reasons.Count == 0) result.Triggers.Add(new TriggerHit(fired.Key, null, identity.RunsAs, frame.Basis, source, columns, bypass));
 
                 // A record created with another creation date, whichever way the date is set
-                if (fired.Key.Equals("Create", StringComparison.OrdinalIgnoreCase) && fired.Value.Columns?.Tables.Contains(OverriddenCreatedOn) == true)
+                if (fired.Key.Equals(Messages.Create, StringComparison.OrdinalIgnoreCase) && fired.Value.Columns?.Tables.Contains(OverriddenCreatedOn) == true)
                 {
                     result.Globals.Add(new GlobalPrivilegeHit(fired.Key, GlobalRequirement.OverrideCreatedOnCreatedBy, identity.RunsAs, frame.Basis, source));
                 }
@@ -362,12 +366,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     {
         if (tables.IsBound) return tables;
 
-        var result = TableResolution.Empty;
-        foreach (var table in tables.Tables) result.Add(TableResolution.Table(table));
-        foreach (var reason in tables.Reasons) result.Add(TableResolution.Unresolved(reason));
-        foreach (var target in tables.LookupTargets) result.Add(TableResolution.LookupTarget(target));
-        foreach (var global in tables.Globals) result.Add(TableResolution.Global(global.Privilege, global.Message));
-        foreach (var assumption in tables.Assumptions) result.Add(TableResolution.Assumed(assumption));
+        var result = new List<TableResolution> { tables.WithoutContext() };
         foreach (var slot in tables.Slots)
         {
             if (slot.Method == TableSlot.PrimaryEntity) result.Add(entry.PrimaryTable is { } primary ? TableResolution.Table(primary) : TableResolution.Unresolved(slot.Reason));
@@ -380,14 +379,18 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             var columns = fired.Value.Columns is { } set ? BindTables(set, frame, depth) : null;
             result.Add(TableResolution.Fires(fired.Key, BindTables(fired.Value, frame, depth), columns, fired.Value.Bypass));
         }
-        return result;
+        return TableResolution.Union(result);
     }
 
     private TableResolution Returned(ReturnedTables returned, Frame frame, int depth)
     {
-        if (depth > MaxDepth) return returned.Reason.Length > 0 ? TableResolution.Unresolved($"{returned.Reason}, through too many calls") : TableResolution.Empty;
+        if (depth > MaxDepth)
+        {
+            CutOff();
+            return returned.Reason.Length > 0 ? TableResolution.Unresolved($"{returned.Reason}, through too many calls") : TableResolution.Empty;
+        }
 
-        var result = TableResolution.Empty;
+        var results = new List<TableResolution>();
         var cyclic = false;
         var found = false;
         foreach (var (target, state, _) in Dispatch(returned.Call, frame, depth))
@@ -405,13 +408,15 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             try
             {
                 var calleeFrame = new Frame(target, state, Bind(returned.Call, frame, callee, depth), frame.Basis, frame.Path, frame.Injected);
-                result.Add(BindTables(tables, calleeFrame, depth));
+                results.Add(BindTables(tables, calleeFrame, depth));
             }
             finally
             {
                 _returning.Remove(key);
             }
         }
+        var result = TableResolution.Union(results);
+
         // Requests that need nothing resolve to nothing, so for them only a method that returns none is unknown
         if (cyclic || returned.Reason.Length == 0) return result;
         if (RequestShapes.IsRequest(returned.Shape)) return found ? result : TableResolution.Unresolved(returned.Reason);
@@ -427,7 +432,11 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
     private IEnumerable<Identity> Resolve(ServiceOrigin origin, Frame frame, int depth)
     {
-        if (depth > MaxDepth) return [Unknown("service is passed through too many calls")];
+        if (depth > MaxDepth)
+        {
+            CutOff();
+            return [Unknown("service is passed through too many calls")];
+        }
 
         switch (origin)
         {
@@ -483,7 +492,8 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     private ObjectState Construct(CallFact constructor, Frame caller, int depth)
     {
         var state = new ObjectState(constructor.ReceiverType);
-        if (depth <= MaxDepth && graph.Nodes.TryGetValue(constructor.Target, out var node))
+        if (depth > MaxDepth) CutOff();
+        else if (graph.Nodes.TryGetValue(constructor.Target, out var node))
         {
             RunConstructor(node, Bind(constructor, caller, node, depth), state, caller.Injected, depth + 1);
         }
@@ -492,13 +502,28 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
     /// <summary>
     /// An object made by the host or a dependency injection container: every constructor, with injected
-    /// parameters. Memoized per type.
+    /// parameters. Memoized per type, unless a part of it was cut off.
     /// </summary>
     private ObjectState DefaultObject(string type, int depth)
     {
         if (_defaultObjects.TryGetValue(type, out var known)) return known;
-        if (depth > MaxDepth || !_constructing.Add(type)) return new ObjectState(type).Freeze();
+        if (depth > MaxDepth)
+        {
+            CutOff();
+            return new ObjectState(type).Freeze();
+        }
 
+        // An object that needs itself gets an empty one; that is the whole of it for the outer one, but not for the
+        // objects in between, which only saw the empty one
+        var cycle = _constructing.IndexOf(type);
+        if (cycle >= 0)
+        {
+            _cutAt = Math.Min(_cutAt, cycle + 1);
+            return new ObjectState(type).Freeze();
+        }
+
+        var level = _constructing.Count;
+        _constructing.Add(type);
         try
         {
             var state = new ObjectState(type);
@@ -517,18 +542,31 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
             }
 
             var result = state.Freeze();
-            _defaultObjects[type] = result;
+            if (_cutAt > level) _defaultObjects[type] = result;
             return result;
         }
         finally
         {
-            _constructing.Remove(type);
+            _constructing.RemoveAt(level);
+            if (_cutAt >= level) _cutAt = int.MaxValue;
         }
+    }
+
+    /// <summary>
+    /// Something was left out at the depth limit, so no default object being made is complete.
+    /// </summary>
+    private void CutOff()
+    {
+        if (_constructing.Count > 0) _cutAt = 0;
     }
 
     private void RunConstructor(NodeSummary constructor, IReadOnlyDictionary<(string, int), Binding> bindings, ObjectState state, bool injected, int depth)
     {
-        if (depth > MaxDepth) return;
+        if (depth > MaxDepth)
+        {
+            CutOff();
+            return;
+        }
         var frame = new Frame(constructor.Id, state, bindings, RequirementBasis.Direct, [], injected);
 
         if (constructor.Type is { } type) Initialize(type, frame, state, depth);

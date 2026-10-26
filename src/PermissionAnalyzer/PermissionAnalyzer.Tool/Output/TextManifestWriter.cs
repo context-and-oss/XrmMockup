@@ -26,84 +26,128 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     /// </summary>
     private const string GlobalColumn = "global";
 
-    public void Write(Manifest manifest, CoverageReport? coverage, TextWriter writer)
-    {
-        var filter = _options.Filter;
-        var verbosity = _options.Verbosity;
-        var hiddenRows = 0;
-        var hiddenAssumptions = 0;
-        var trimmed = false;
+    public void Write(Manifest manifest, CoverageReport? coverage, TextWriter writer) => new Report(_options, manifest, coverage, writer).Write();
 
-        bool Shown(RequirementCoverage? result)
+    /// <summary>
+    /// One report being written, with what it has left out so far.
+    /// </summary>
+    private sealed class Report(ReportOptions options, Manifest manifest, CoverageReport? coverage, TextWriter writer)
+    {
+        private readonly ReportFilter _filter = options.Filter;
+        private readonly Verbosity _verbosity = options.Verbosity;
+        private int _hiddenRows;
+        private int _hiddenAssumptions;
+        private bool _trimmed;
+        private int _tableWidth;
+        private int _privilegeWidth;
+        private int _runsAsWidth;
+        private int _coverageWidth;
+
+        public void Write()
         {
-            var shown = verbosity > Verbosity.Normal || result is null
-                || result.Status is CoverageStatus.Missing or CoverageStatus.NotChecked or CoverageStatus.Unverifiable;
-            if (!shown) hiddenRows++;
-            return shown;
+            if (_verbosity <= Verbosity.Compact) Needs(manifest, coverage, _filter, _verbosity == Verbosity.Compact, writer);
+            else Sections();
+
+            // With roles, the missing privileges below say what to change, so the summary of everything needed is detail
+            if (_verbosity > Verbosity.Normal || (coverage is null && _verbosity == Verbosity.Normal)) PrivilegesPerTable();
+
+            if (_verbosity > Verbosity.Compact && manifest.NotRoleGoverned?.Where(_filter.MatchesTable).ToList() is { Count: > 0 } notGoverned)
+            {
+                writer.Write($"Not in any security role, so XrmMockup allows every operation: {string.Join(", ", notGoverned)}\n\n");
+            }
+
+            writer.Write(ReportText.Totals(manifest) + "\n");
+
+            if (!_filter.IsEmpty)
+            {
+                writer.Write(ReportText.Filtered(manifest, _filter) + "\n");
+            }
+
+            if (coverage is not null)
+            {
+                writer.Write(ReportText.Result(coverage.Summary) + "\n");
+                var (missing, missingGlobal) = _filter.Missing(manifest, coverage);
+                // Below normal, the blocks above already say what to change
+                if (_verbosity > Verbosity.Compact) Missing(missing, missingGlobal, writer);
+                if (ReportText.NotChecked(coverage.Summary) is { } notChecked) writer.Write(notChecked + "\n");
+            }
+
+            if (_verbosity <= Verbosity.Compact)
+            {
+                var which = _verbosity == Verbosity.Minimal ? "entry points, " : "";
+                var adds = _verbosity == Verbosity.Minimal ? $"{Name(Verbosity.Compact)} adds the entry points, {Name(Verbosity.Normal)} the sources" : $"{Name(Verbosity.Normal)} adds the sources";
+                writer.Write($"Not shown: {which}sources and requirements with nothing to fix. {CliOptions.Verbosity.Primary} {adds}, {Name(Verbosity.Detailed)} everything\n");
+            }
+            else if (NotShown(_hiddenRows, _hiddenAssumptions, _trimmed) is { } notShown)
+            {
+                writer.Write(notShown + "\n");
+            }
         }
 
-        SectionView View(string header, IReadOnlyList<string> triggers, IManifestSection section)
+        /// <summary>
+        /// The entry points, then the methods no entry point reaches.
+        /// </summary>
+        private void Sections()
+        {
+            var entryPoints = manifest.EntryPoints.Select(entryPoint =>
+            {
+                var header = entryPoint.Declaration is { } declaration ? $"{entryPoint.Id}  {declaration}" : entryPoint.Id;
+                if (entryPoint.ImpersonatingUserId is { } user) header += $"  (runs as user {user})";
+                return View(header, entryPoint.Triggers, entryPoint);
+            }).Where(s => s.Shown).ToList();
+            var unreached = manifest.Unreached.Select(method =>
+            {
+                var header = method.Declaration is { } declaration ? $"{method.Id}  {declaration}" : method.Id;
+                return View(header, [], method);
+            }).Where(s => s.Shown).ToList();
+
+            var rows = entryPoints.Concat(unreached).SelectMany(s => s.Rows).ToList();
+            _tableWidth = rows.Select(r => r.Table.Length).DefaultIfEmpty(0).Max();
+            _privilegeWidth = Enum.GetNames<Privilege>().Append(GlobalColumn).Max(n => n.Length);
+            _runsAsWidth = rows.Select(r => r.RunsAs.ToString().Length).DefaultIfEmpty(0).Max();
+            _coverageWidth = rows.Select(r => r.Coverage is { } result ? Label(result).Length : 0).DefaultIfEmpty(0).Max();
+
+            foreach (var section in entryPoints)
+            {
+                Section(section);
+            }
+
+            if (unreached.Count > 0)
+            {
+                writer.Write("Not reached from any entry point\n\n");
+                foreach (var section in unreached)
+                {
+                    Section(section);
+                }
+            }
+        }
+
+        private SectionView View(string header, IReadOnlyList<string> triggers, IManifestSection section)
         {
             var sectionCoverage = coverage?.For(section);
-            var rows = PrivilegeNeed.Of(section, sectionCoverage, filter)
+            var rows = PrivilegeNeed.Of(section, sectionCoverage, _filter)
                 .Select(n => new RowView(n.Name, n.TablePrivilege?.ToString() ?? GlobalColumn, n.RunsAs, n.Basis, n.Sources, n.Coverage))
                 .Where(r => Shown(r.Coverage))
                 .ToList();
             var assumptions = section.Assumptions;
-            var shownUnresolved = section.Unresolved.Where(filter.Matches).ToList();
-            var detailed = verbosity > Verbosity.Normal;
+            var shownUnresolved = section.Unresolved.Where(_filter.Matches).ToList();
+            var detailed = _verbosity > Verbosity.Normal;
             // Every section is listed, as before, unless only what needs attention or matches a filter is shown
-            var shown = (detailed && filter.IsEmpty) || rows.Count + shownUnresolved.Count > 0;
-            if (!detailed && (shown || filter.IsEmpty)) hiddenAssumptions += assumptions.Count;
+            var shown = (detailed && _filter.IsEmpty) || rows.Count + shownUnresolved.Count > 0;
+            if (!detailed && (shown || _filter.IsEmpty)) _hiddenAssumptions += assumptions.Count;
             if (detailed && triggers.Count > 0) header += $"\n  fires: {string.Join(", ", triggers)}";
             return new SectionView(header, rows, shownUnresolved, detailed ? assumptions : [], sectionCoverage, shown);
         }
 
-        var entryPoints = manifest.EntryPoints.Select(entryPoint =>
+        private bool Shown(RequirementCoverage? result)
         {
-            var header = entryPoint.Declaration is { } declaration ? $"{entryPoint.Id}  {declaration}" : entryPoint.Id;
-            if (entryPoint.ImpersonatingUserId is { } user) header += $"  (runs as user {user})";
-            return View(header, entryPoint.Triggers, entryPoint);
-        }).Where(s => s.Shown).ToList();
-        var unreached = manifest.Unreached.Select(method =>
-        {
-            var header = method.Declaration is { } declaration ? $"{method.Id}  {declaration}" : method.Id;
-            return View(header, [], method);
-        }).Where(s => s.Shown).ToList();
-
-        var rows = entryPoints.Concat(unreached).SelectMany(s => s.Rows).ToList();
-        var tableWidth = rows.Select(r => r.Table.Length).DefaultIfEmpty(0).Max();
-        var privilegeWidth = Enum.GetNames<Privilege>().Append(GlobalColumn).Max(n => n.Length);
-        var runsAsWidth = rows.Select(r => r.RunsAs.ToString().Length).DefaultIfEmpty(0).Max();
-        var coverageWidth = rows.Select(r => r.Coverage is { } result ? Label(result).Length : 0).DefaultIfEmpty(0).Max();
-
-        string Sources(IReadOnlyList<RequirementSource> sources)
-        {
-            if (verbosity == Verbosity.Full) return string.Join(", ", sources.Select(Source));
-
-            var locations = sources.Select(s => s.Location).Distinct().ToList();
-            if (locations.Count > ShortSources || sources.Any(s => s.Path.Count > 1)) trimmed = true;
-            var text = string.Join(", ", locations.Take(ShortSources));
-            return locations.Count > ShortSources ? $"{text} and {locations.Count - ShortSources} more" : text;
+            var shown = _verbosity > Verbosity.Normal || result is null
+                || result.Status is CoverageStatus.Missing or CoverageStatus.NotChecked or CoverageStatus.Unverifiable;
+            if (!shown) _hiddenRows++;
+            return shown;
         }
 
-        void Row(RowView row)
-        {
-            var basis = row.Basis == RequirementBasis.Direct ? "" : $"  ({BasisNames.Of(row.Basis)})";
-            var sources = Sources(row.Sources);
-            var text = $"{row.Table.PadRight(tableWidth)}  {row.Privilege.PadRight(privilegeWidth)}  {row.RunsAs.ToString().PadRight(runsAsWidth)}  ";
-            if (row.Coverage is { } result)
-            {
-                var reason = result.Status == CoverageStatus.Suppressed && result.Reason is { } why ? $"  suppressed: {why}" : "";
-                writer.Write($"  {Mark(result.Status)} {text}{Label(result).PadRight(coverageWidth)}  {sources}{basis}{reason}\n");
-            }
-            else
-            {
-                writer.Write($"  {text}{sources}{basis}\n");
-            }
-        }
-
-        void Section(SectionView section)
+        private void Section(SectionView section)
         {
             writer.Write(section.Header + "\n");
             if (section.Coverage is not null)
@@ -132,32 +176,36 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
             writer.Write('\n');
         }
 
-        if (verbosity <= Verbosity.Compact)
+        private void Row(RowView row)
         {
-            Needs(manifest, coverage, filter, verbosity == Verbosity.Compact, writer);
-            entryPoints = [];
-            unreached = [];
-        }
-
-        foreach (var section in entryPoints)
-        {
-            Section(section);
-        }
-
-        if (unreached.Count > 0)
-        {
-            writer.Write("Not reached from any entry point\n\n");
-            foreach (var section in unreached)
+            var basis = row.Basis == RequirementBasis.Direct ? "" : $"  ({BasisNames.Of(row.Basis)})";
+            var sources = Sources(row.Sources);
+            var text = $"{row.Table.PadRight(_tableWidth)}  {row.Privilege.PadRight(_privilegeWidth)}  {row.RunsAs.ToString().PadRight(_runsAsWidth)}  ";
+            if (row.Coverage is { } result)
             {
-                Section(section);
+                var reason = result.Status == CoverageStatus.Suppressed && result.Reason is { } why ? $"  suppressed: {why}" : "";
+                writer.Write($"  {Mark(result.Status)} {text}{Label(result).PadRight(_coverageWidth)}  {sources}{basis}{reason}\n");
+            }
+            else
+            {
+                writer.Write($"  {text}{sources}{basis}\n");
             }
         }
 
-        // With roles, the missing privileges below say what to change, so the summary of everything needed is detail
-        if (verbosity > Verbosity.Normal || (coverage is null && verbosity == Verbosity.Normal))
+        private string Sources(IReadOnlyList<RequirementSource> sources)
+        {
+            if (_verbosity == Verbosity.Full) return string.Join(", ", sources.Select(Source));
+
+            var locations = sources.Select(s => s.Location).Distinct().ToList();
+            if (locations.Count > ShortSources || sources.Any(s => s.Path.Count > 1)) _trimmed = true;
+            var text = string.Join(", ", locations.Take(ShortSources));
+            return locations.Count > ShortSources ? $"{text} and {locations.Count - ShortSources} more" : text;
+        }
+
+        private void PrivilegesPerTable()
         {
             var byTable = manifest.AllRequirements
-                .Where(filter.Matches)
+                .Where(_filter.Matches)
                 .GroupBy(r => r.Table)
                 .OrderBy(g => g.Key, StringComparer.Ordinal)
                 .ToList();
@@ -167,48 +215,16 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
                 foreach (var table in byTable)
                 {
                     var privileges = table.Select(r => r.Privilege).Distinct().OrderBy(p => p);
-                    writer.Write($"  {table.Key.PadRight(tableWidth)}  {string.Join(", ", privileges)}\n");
+                    writer.Write($"  {table.Key.PadRight(_tableWidth)}  {string.Join(", ", privileges)}\n");
                 }
                 writer.Write('\n');
             }
 
-            var shownGlobal = manifest.AllGlobalRequirements.Where(filter.Matches).Select(r => r.Privilege).Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
+            var shownGlobal = manifest.AllGlobalRequirements.Where(_filter.Matches).Select(r => r.Privilege).Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
             if (shownGlobal.Count > 0)
             {
                 writer.Write($"Privileges not tied to a table: {string.Join(", ", shownGlobal)}\n\n");
             }
-        }
-
-        if (verbosity > Verbosity.Compact && manifest.NotRoleGoverned?.Where(filter.MatchesTable).ToList() is { Count: > 0 } notGoverned)
-        {
-            writer.Write($"Not in any security role, so XrmMockup allows every operation: {string.Join(", ", notGoverned)}\n\n");
-        }
-
-        writer.Write(Totals(manifest) + "\n");
-
-        if (!filter.IsEmpty)
-        {
-            writer.Write(Filtered(manifest, filter) + "\n");
-        }
-
-        if (coverage is not null)
-        {
-            writer.Write(Result(coverage.Summary) + "\n");
-            var (missing, missingGlobal) = filter.Missing(manifest, coverage);
-            // Below normal, the blocks above already say what to change
-            if (verbosity > Verbosity.Compact) Missing(missing, missingGlobal, writer);
-            if (NotChecked(coverage.Summary) is { } notChecked) writer.Write(notChecked + "\n");
-        }
-
-        if (verbosity <= Verbosity.Compact)
-        {
-            var which = verbosity == Verbosity.Minimal ? "entry points, " : "";
-            var adds = verbosity == Verbosity.Minimal ? $"{Name(Verbosity.Compact)} adds the entry points, {Name(Verbosity.Normal)} the sources" : $"{Name(Verbosity.Normal)} adds the sources";
-            writer.Write($"Not shown: {which}sources and requirements with nothing to fix. {CliOptions.Verbosity.Primary} {adds}, {Name(Verbosity.Detailed)} everything\n");
-        }
-        else if (NotShown(hiddenRows, hiddenAssumptions, trimmed) is { } notShown)
-        {
-            writer.Write(notShown + "\n");
         }
     }
 
@@ -248,36 +264,6 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
         }
     }
 
-    /// <summary>
-    /// What was analyzed. A requirement is counted once per entry point or method that needs it; the tables merge
-    /// them. The counts are of the whole analysis, whatever is shown.
-    /// </summary>
-    internal static string Totals(Manifest manifest)
-    {
-        var requirements = manifest.AllRequirements.ToList();
-        var globalRequirements = manifest.AllGlobalRequirements.ToList();
-        var unresolvedCount = manifest.EntryPoints.Sum(e => e.Unresolved.Count) + manifest.Unreached.Sum(m => m.Unresolved.Count);
-        var tables = requirements.Select(r => r.Table).Distinct(StringComparer.Ordinal).Count();
-        var tablePrivileges = requirements.Select(r => (r.Table, r.Privilege)).Distinct().Count();
-        var globalPrivileges = globalRequirements.Select(r => r.Privilege).Distinct(StringComparer.Ordinal).Count();
-        return
-            $"{Count(manifest.EntryPoints.Count, "entry point")}, {Count(manifest.Unreached.Count, "unreached method")}, " +
-            $"{Count(tables, "table")}, {Count(tablePrivileges, "table privilege")} " +
-            $"({Count(requirements.Count, "requirement")} counted per entry point and method), " +
-            (globalPrivileges > 0 ? $"{Count(globalPrivileges, "privilege")} not tied to a table, " : "") +
-            $"{unresolvedCount} unresolved";
-    }
-
-    /// <summary>
-    /// What the filter matches, of every requirement.
-    /// </summary>
-    internal static string Filtered(Manifest manifest, ReportFilter filter)
-    {
-        var all = manifest.AllRequirements.Count() + manifest.AllGlobalRequirements.Count();
-        var matching = manifest.AllRequirements.Count(filter.Matches) + manifest.AllGlobalRequirements.Count(filter.Matches);
-        return $"Filtered by {filter}: {matching} of {Count(all, "requirement")} match";
-    }
-
     private static string Name(Verbosity verbosity) => verbosity.ToString().ToLowerInvariant();
 
     /// <summary>
@@ -286,8 +272,8 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     private static string? NotShown(int requirements, int assumptions, bool trimmed)
     {
         var parts = new List<string>();
-        if (requirements > 0) parts.Add($"{Count(requirements, "requirement")} with nothing to fix");
-        if (assumptions > 0) parts.Add(Count(assumptions, "assumption"));
+        if (requirements > 0) parts.Add($"{ReportText.Count(requirements, "requirement")} with nothing to fix");
+        if (assumptions > 0) parts.Add(ReportText.Count(assumptions, "assumption"));
         if (parts.Count > 0)
         {
             var full = trimmed ? $", {Name(Verbosity.Full)} also adds every source and call path" : "";
@@ -338,46 +324,6 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
         }
     }
 
-    /// <summary>
-    /// What became of each requirement.
-    /// </summary>
-    internal static string Result(CoverageSummary summary)
-    {
-        var parts = new List<string> { $"{summary.Granted} granted", $"{summary.Missing} missing" };
-        void Add(int count, string text)
-        {
-            if (count > 0) parts.Add($"{count} {text}");
-        }
-        Add(summary.NotGoverned, "not governed");
-        Add(summary.Suppressed, "suppressed");
-        Add(summary.System, "as SYSTEM");
-        return "Result: " + string.Join(", ", parts);
-    }
-
-    /// <summary>
-    /// What the result doesn't cover, so a pass isn't read as proof that the roles are enough; <c>null</c> when
-    /// everything was checked.
-    /// </summary>
-    internal static string? NotChecked(CoverageSummary summary)
-    {
-        var parts = new List<string>();
-        if (summary.NotChecked > 0) parts.Add($"{Count(summary.NotChecked, "requirement")} without roles");
-        if (summary.Unresolved > 0)
-        {
-            var details = new List<string>();
-            if (summary.UnresolvedNoRule > 0) details.Add($"{Count(summary.UnresolvedNoRule, "request")} without a rule");
-            if (summary.UnresolvedCustomApi > 0) details.Add($"{Count(summary.UnresolvedCustomApi, "custom API call")}");
-            var other = summary.Unresolved - summary.UnresolvedNoRule - summary.UnresolvedCustomApi;
-            if (other > 0) details.Add($"{other} with an unknown table or request");
-            parts.Add($"{Count(summary.Unresolved, "unresolved operation")} ({string.Join(", ", details)})");
-        }
-        if (summary.Unverifiable > 0)
-        {
-            parts.Add($"{Count(summary.Unverifiable, "privilege")} not tied to a table (the role metadata predates them; regenerate it)");
-        }
-        return parts.Count > 0 ? "Not checked: " + string.Join(", ", parts) : null;
-    }
-
     private static string Mark(CoverageStatus status) => status switch
     {
         CoverageStatus.Granted or CoverageStatus.NotGoverned => "✔",
@@ -405,6 +351,4 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
     /// </summary>
     private static string Source(RequirementSource source) =>
         source.Path.Count > 1 ? $"{source.Location} ({string.Join(" → ", source.Path)})" : source.Location.ToString();
-
-    internal static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 }

@@ -130,7 +130,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .OrderBy(c => c, StringComparer.Ordinal)
             .ToList();
         var operation = new UserOperation(_rules.MessageNamed(message.Trim()), table.Trim().ToLowerInvariant(), set is { Count: > 0 } ? set : null);
-        var id = $"operation:{operation.Display}" + (operation.Columns is { } known ? $"({string.Join(",", known)})" : "");
+        var id = EntryPointIds.Operation(operation.Display, operation.Columns);
         _operations[id] = operation;
     }
 
@@ -247,7 +247,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             if (matches.Count == 0 && !string.IsNullOrEmpty(step.Message))
             {
                 var table = Lower(step.Table);
-                var id = EntryPointDiscovery.StepId(step.TypeName, step.Message, table, EntryPointDiscovery.StageName(step.Stage));
+                var id = EntryPointIds.PluginStep(step.TypeName, step.Message, table, EntryPointDiscovery.StageName(step.Stage));
                 codeless.Add(new CascadeStep(id, step.Message, table, Lower(step.ImpersonatingUserId), Filter(step), null, step.Asynchronous));
             }
             foreach (var match in matches)
@@ -277,7 +277,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 // A base class of other plugins, such as a DAXIF Plugin class, isn't registered itself
                 if (!plugin.HasCodeSteps && !bases.Contains(plugin.TypeId))
                 {
-                    var id = $"plugin:{plugin.Type}";
+                    var id = EntryPointIds.Plugin(plugin.Type);
                     if (!candidates.ContainsKey(id))
                     {
                         candidates.Add(id, new EntryCandidate(id, EntryPointKind.Plugin, plugin.Type, plugin.Assembly, null, null, plugin.Declaration, handlers));
@@ -301,7 +301,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                         && string.Equals(c.Trigger?.Stage, stage, StringComparison.OrdinalIgnoreCase))
                     : null;
 
-                var id = EntryPointDiscovery.StepId(plugin.Type, step.Message, table, stage);
+                var id = EntryPointIds.PluginStep(plugin.Type, step.Message, table, stage);
                 if ((code ?? (candidates.TryGetValue(id, out var existing) ? existing : null)) is { } registered)
                 {
                     candidates[registered.Id] = Registered(registered, user, filter, step.Asynchronous);
@@ -361,7 +361,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 .OrderBy(n => n.Id, StringComparer.Ordinal);
             foreach (var node in matches)
             {
-                var id = $"method:{node.Id}";
+                var id = EntryPointIds.Method(node.Id);
                 if (candidates.ContainsKey(id)) continue;
                 var type = node.Type is { } typeId ? typeId : "";
                 candidates.Add(id, new EntryCandidate(id, EntryPointKind.Method, type, null, null, null, node.Declaration, [new Handler(node.Id, null)]));

@@ -1,3 +1,4 @@
+using XrmMockup.PermissionAnalyzer.Core.Extraction;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
@@ -9,8 +10,6 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// </summary>
 public sealed class EntryPointSelector
 {
-    private const string MethodPrefix = "method:";
-
     private readonly Func<EntryPoint, bool> _matches;
     private readonly string _text;
 
@@ -41,7 +40,7 @@ public sealed class EntryPointSelector
         new($"--custom-api {name}", e => e.Kind == EntryPointKind.CustomApi && Same(e.Trigger?.Message, name));
 
     public static EntryPointSelector Function(string name) =>
-        new($"--function {name}", e => e.Kind == EntryPointKind.Function && Same(e.Id.Substring("function:".Length), name));
+        new($"--function {name}", e => e.Kind == EntryPointKind.Function && Same(EntryPointIds.FunctionName(e.Id), name));
 
     /// <summary>
     /// Methods added with <see cref="ManifestBuilder.AddEntryMethods"/>, by the same names.
@@ -49,14 +48,23 @@ public sealed class EntryPointSelector
     public static EntryPointSelector Methods(IReadOnlyList<string> methods) =>
         new($"--entry {string.Join(" --entry ", methods)}", e =>
             e.Kind == EntryPointKind.Method
-            && e.Id.StartsWith(MethodPrefix, StringComparison.Ordinal)
-            && methods.Any(m => ManifestBuilder.MatchesMethod(e.Id.Substring(MethodPrefix.Length), m)));
+            && EntryPointIds.MethodId(e.Id) is { } id
+            && methods.Any(m => ManifestBuilder.MatchesMethod(id, m)));
 
     /// <summary>
-    /// Operations added with <see cref="ManifestBuilder.AddOperation"/>.
+    /// The operation added with <see cref="ManifestBuilder.AddOperation"/> for <paramref name="message"/> on
+    /// <paramref name="table"/>, by the same names: the message or its request type, such as <c>CreateRequest</c>.
     /// </summary>
-    public static EntryPointSelector Operation(string text) =>
-        new($"--operation {text}", e => e.Kind == EntryPointKind.Operation);
+    public static EntryPointSelector Operation(string message, string table)
+    {
+        message = message.Trim();
+        table = table.Trim();
+        var ofType = RequestRules.MessageOfType(message);
+        return new($"--operation {message} {table}", e =>
+            e.Kind == EntryPointKind.Operation
+            && Same(e.Trigger?.Table, table)
+            && (Same(e.Trigger?.Message, message) || Same(e.Trigger?.Message, ofType)));
+    }
 
     public bool Matches(EntryPoint entryPoint) => _matches(entryPoint);
 

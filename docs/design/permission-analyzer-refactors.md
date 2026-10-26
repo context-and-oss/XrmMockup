@@ -42,19 +42,15 @@ The simple fixes from that review are already in. Paths are relative to
    the builder no longer keeps custom API state between builds, and it collects into one `ResolvedHits`
    instead of passing three lists around. `Aggregate` only merges and sorts. `AddMetadataSteps` indexes
    the plugin classes and the code steps by type, so matching metadata steps is no longer quadratic.
-
-## 7. Smaller structural items
-
-- Constants for message and SDK member names (a `Messages`/`SdkNames` class), so a typo fails to
-  compile instead of never matching.
-- Entry point ids built and parsed in one place (an `EntryPointIds` builder/parser).
-- `DefaultObject` caches results that were cut off by the depth limit or a cycle, which can
-  under-report.
-- An immutable `TableResolution` (today `Empty` returns a new mutable instance and `Add` mutates it).
-- Split the ~190-line `TextManifestWriter.Write`, move the shared report text helpers into a
-  `ReportText` class, and add a `ManifestWriters.Create` factory.
-- One collection-reading strategy for requests, records, lookups and entity references in
-  `TableResolver` (about 150 lines less); it would also expose the `AddRange`/`Insert` inconsistency.
-- Loose ends: `Cascades.Expand` drops triggers, `EntryPointSelector.Operation` matches every
-  operation, `ShapesOf` gives entity shapes to any type parameter, and `WithinTargets` drops
-  `_columns` and narrowed targets.
+7. **Smaller structural items.** Message names are constants in `Model/Messages.cs`, and the SDK member
+   names the extraction reads in `Extraction/SdkNames.cs`. `Model/EntryPointIds.cs` builds every entry
+   point id and reads the function name and method id back out. `TableResolution` no longer changes once
+   made: `Union` returns a new one, so `Empty` is shared, and the one place that merged into a resolution
+   another node still held (a method's return tables) no longer does. `TableResolver` reads collections of
+   requests, records, entity references and lookups one way (`Filled` and `Added`), so a local
+   `EntityReferenceCollection` filled with `AddRange` or `Insert` is now read instead of unresolved. The text
+   writer's `Write` is split into a per-report class, the lines the text and Markdown reports share are in
+   `ReportText`, and `ManifestWriters.Create` picks the writer. Fixed on the way: a default object cut off
+   by the depth limit or a cycle is no longer memoized, `Cascades.Expand` keeps the steps a cascade fires,
+   `--operation` selects only its own operation, a type parameter is read as its constraints allow, and
+   `WithinTargets` keeps the columns, bypass and other parts of a value.
