@@ -37,13 +37,11 @@ The simple fixes from that review are already in. Paths are relative to
    them in source order, so the output is unchanged. The tool uses server GC. FetchXML parsing turns away
    text that can't be XML before it throws (every string argument is read as FetchXML), and member and type
    ids, relative paths and logical names are cached. On the sample, extraction went from about 24s to 9s.
-
-## 6. Split up `ManifestBuilder`
-
-`Analysis/ManifestBuilder.cs` (about 670 lines) holds custom API state that `Build` resets, and three
-privilege methods pass the same three output lists through 7-8 parameters. Extract a
-`PrivilegeResolver`. Matching the metadata plugin steps (`AddMetadataSteps`) is quadratic and could
-use an index.
+6. **`ManifestBuilder` split up.** `Analysis/PrivilegeResolver.cs` resolves the execute privileges of
+   custom API calls and the privileges request rules name. `Build` creates one from the entry points, so
+   the builder no longer keeps custom API state between builds, and it collects into one `ResolvedHits`
+   instead of passing three lists around. `Aggregate` only merges and sorts. `AddMetadataSteps` indexes
+   the plugin classes and the code steps by type, so matching metadata steps is no longer quadratic.
 
 ## 7. Smaller structural items
 
