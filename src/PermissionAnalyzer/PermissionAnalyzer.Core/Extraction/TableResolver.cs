@@ -1,0 +1,1278 @@
+using System.Text;
+using System.Xml;
+using System.Xml.Linq;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Operations;
+using XrmMockup.PermissionAnalyzer.Core.Graph;
+using XrmMockup.PermissionAnalyzer.Core.Model;
+using static XrmMockup.PermissionAnalyzer.Core.Extraction.Operations;
+
+namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
+
+/// <summary>
+/// Works out which tables a value refers to: early-bound types, constants, FetchXML and assignments to locals
+/// in the same method. Anything else becomes a reason in the resolution, never a guess.
+/// </summary>
+/// <remarks>
+/// Parameters and type parameters of the method become slots, filled in per call site. <paramref name="calls"/>
+/// turns a call to a method in the solution into the call graph's view of it, so the tables of its return value
+/// are resolved per call context too; without it such a value is unresolved. Requests are read through
+/// <paramref name="rules"/>, and the tables a lookup refers to are narrowed by <paramref name="lookups"/>. A type
+/// parameter of the type of <paramref name="method"/> becomes a slot of it, filled in from the call's receiver.
+/// </remarks>
+internal sealed class TableResolver(
+    XrmSymbols symbols,
+    RequestRules? rules = null,
+    Func<IInvocationOperation, CallFact?>? calls = null,
+    LookupColumns? lookups = null,
+    IMethodSymbol? method = null)
+{
+    // The access rights of AccessRights, as in PrincipalAccess.AccessMask
+    private static readonly (int Bit, Privilege Privilege)[] AccessRights =
+    [
+        (1, Privilege.Read), (2, Privilege.Write), (4, Privilege.Append), (16, Privilege.AppendTo),
+        (32, Privilege.Create), (65536, Privilege.Delete), (262144, Privilege.Share), (524288, Privilege.Assign),
+    ];
+
+    private readonly RequestRules _rules = rules ?? new RequestRules();
+
+    // Stands in for runtime text inside a FetchXML template. Private use area, so real FetchXML never contains it.
+    private const char Hole = '';
+
+    // Concatenating locals with several assignments multiplies the variants; stop before that gets out of hand.
+    private const int MaxTemplates = 64;
+
+    private const int MaxNesting = 4;
+    private const string NotFetch = "FetchXML could not be parsed";
+    private static readonly char[] XmlWhitespace = [' ', '\t', '\r', '\n'];
+    private const string NestedLinksReason = "tables linked through LinkEntities, LinkEntity.AddLink or new LinkEntity are not analyzed yet";
+
+    private readonly HashSet<ILocalSymbol> _visiting = new(SymbolEqualityComparer.Default);
+
+    /// <summary>
+    /// A table logical name, such as the <c>entityName</c> argument of <c>Retrieve</c>.
+    /// </summary>
+    public TableResolution Name(IOperation? operation)
+    {
+        var op = Unwrap(operation);
+        if (op is null) return TableResolution.Unresolved("table name argument is missing");
+
+        if (op.ConstantValue.HasValue)
+        {
+            return op.ConstantValue.Value is string { Length: > 0 } name
+                ? TableResolution.Table(name)
+                : TableResolution.Unresolved("table name is null or empty");
+        }
+
+        return op switch
+        {
+            ILocalReferenceOperation local => FromLocal(local, Name),
+            IPropertyReferenceOperation { Property.Name: SdkNames.LogicalName, Instance: { } instance } property
+                when IsEntityOrReference(property.Property.ContainingType) => Entity(instance),
+            IPropertyReferenceOperation { Property.Name: SdkNames.PrimaryEntityName } property
+                when symbols.Is(property.Property.ContainingType, symbols.ExecutionContext) =>
+                TableResolution.Slot(new TableSlot(TableSlot.PrimaryEntity, 0, TableShape.Name, Describe(op, "table name"))),
+            _ when Branches(op) is { } branches => Union(branches, Name),
+            _ => Unknown(op, "table name", TableShape.Name),
+        };
+    }
+
+    /// <summary>
+    /// The table of an <c>Entity</c> or <c>EntityReference</c> value.
+    /// </summary>
+    public TableResolution Entity(IOperation? operation)
+    {
+        var op = operation;
+        while (true)
+        {
+            if (op is null) return TableResolution.Unresolved("entity argument is missing");
+            if (symbols.LogicalNameOf(op.Type) is { } logicalName) return TableResolution.Table(logicalName);
+            if (op.Type is ITypeParameterSymbol typeParameter) return TypeParameter(typeParameter);
+
+            var inner = UnwrapOnce(op);
+            if (inner is null) break;
+            op = inner;
+        }
+
+        switch (op)
+        {
+            // Writing a null entity throws, and a null lookup refers to nothing, so such a value needs nothing
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
+            case IObjectCreationOperation creation:
+                return AssignedMember(creation.Initializer, SdkNames.LogicalName, Name)
+                    ?? (FirstStringArgument(creation) is { } nameArgument ? Name(nameArgument.Value) : TableResolution.Empty);
+
+            case ILocalReferenceOperation local:
+                return FromLocal(local, Entity, EntityElements, (node, symbol) =>
+                    node is ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: SdkNames.LogicalName } property } assignment
+                    && IsLocal(property.Instance, symbol)
+                        ? Name(assignment.Value)
+                        : null);
+
+            case IInvocationOperation { TargetMethod.Name: SdkNames.ToEntityReference, Instance: { } instance }:
+                return Entity(instance);
+
+            case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
+                return Records(records);
+
+            case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
+                return EntityElements(source);
+
+            case { } when Branches(op) is { } branches:
+                return Union(branches, Entity);
+
+            // The record Retrieve returns is of the table it is asked for
+            case IInvocationOperation retrieve when symbols.ServiceOperation(retrieve.TargetMethod) == Messages.Retrieve:
+                return Name(Argument(retrieve, 0));
+
+            case IPropertyReferenceOperation { Property.IsIndexer: false } property when LookupTargets(property) is { Count: > 0 } targets:
+                return Unknown(op, "entity", TableShape.Entity).WithinTargets(targets);
+
+            default:
+                return Unknown(op, "entity", TableShape.Entity);
+        }
+    }
+
+    /// <summary>
+    /// The tables a <c>QueryBase</c> value reads: the main table plus, with <paramref name="includeLinks"/>,
+    /// every linked table. The records a query returns belong to the main table only.
+    /// </summary>
+    public TableResolution Query(IOperation? operation, bool includeLinks = true)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+                return TableResolution.Unresolved("query argument is missing");
+
+            case IObjectCreationOperation creation when symbols.Is(creation.Type, symbols.FetchExpression):
+                return AssignedMember(creation.Initializer, SdkNames.Query, v => Fetch(v, includeLinks))
+                    ?? (FirstStringArgument(creation) is { } fetchArgument ? Fetch(fetchArgument.Value, includeLinks) : TableResolution.Empty);
+
+            case IObjectCreationOperation creation when IsTableQuery(creation.Type):
+            {
+                var result = AssignedMember(creation.Initializer, SdkNames.EntityName, Name)
+                    ?? (FirstStringArgument(creation) is { } nameArgument ? Name(nameArgument.Value) : TableResolution.Empty);
+                return includeLinks && symbols.Is(creation.Type, symbols.QueryExpression) ? result.Union(NestedLinks(creation)) : result;
+            }
+
+            case ILocalReferenceOperation local:
+            {
+                var result = FromLocal(local, v => Query(v, includeLinks), null, (node, symbol) => node switch
+                {
+                    ISimpleAssignmentOperation { Target: IPropertyReferenceOperation property } assignment when IsLocal(property.Instance, symbol) =>
+                        property.Property.Name switch
+                        {
+                            SdkNames.EntityName => Name(assignment.Value),
+                            SdkNames.Query when symbols.Is(property.Property.ContainingType, symbols.FetchExpression) => Fetch(assignment.Value, includeLinks),
+                            _ => null,
+                        },
+                    IInvocationOperation { TargetMethod.Name: SdkNames.AddLink } addLink
+                        when includeLinks && IsLocal(addLink.Instance, symbol) && symbols.Is(addLink.TargetMethod.ContainingType, symbols.QueryExpression) =>
+                        FirstStringArgument(addLink) is { } linkArgument ? Name(linkArgument.Value) : null,
+                    _ => null,
+                });
+                return includeLinks && symbols.Is(local.Type, symbols.QueryExpression) ? result.Union(NestedLinks(local)) : result;
+            }
+
+            case { } when Branches(op) is { } branches:
+                return Union(branches, v => Query(v, includeLinks));
+
+            default:
+                return Unknown(op, "query", includeLinks ? TableShape.Query : TableShape.QueryMainTable);
+        }
+    }
+
+    /// <summary>
+    /// The tables of the records in an <c>EntityReferenceCollection</c>, such as the related records of <c>Associate</c>.
+    /// </summary>
+    public TableResolution EntityReferences(IOperation? operation)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+                return TableResolution.Unresolved("related records argument is missing");
+
+            case IObjectCreationOperation creation when symbols.Is(creation.Type, symbols.EntityReferenceCollection):
+                return Filled(creation, IsEntityOrRecords, EntityOrReferences);
+
+            case ILocalReferenceOperation local:
+                return FromLocal(local, EntityReferences, null, (node, symbol) => Added(node, symbol, IsEntityOrRecords, EntityOrReferences));
+
+            default:
+                return Elements(op);
+        }
+    }
+
+    /// <summary>
+    /// The tables named in FetchXML: the <c>entity</c> element plus, with <paramref name="includeLinks"/>,
+    /// every <c>link-entity</c>.
+    /// </summary>
+    public TableResolution Fetch(IOperation? operation, bool includeLinks = true)
+    {
+        var result = new List<TableResolution>();
+        foreach (var template in Templates(operation, topLevel: true, result, includeLinks))
+        {
+            result.Add(ParseFetch(template, includeLinks));
+        }
+        return TableResolution.Union(result);
+    }
+
+    /// <summary>
+    /// The tables of a value read as <paramref name="shape"/>, such as an argument bound to a parameter slot.
+    /// </summary>
+    public TableResolution Resolve(IOperation? operation, TableShape shape) => shape switch
+    {
+        TableShape.Name => Name(operation),
+        TableShape.Entity => Entity(operation),
+        TableShape.Query => Query(operation),
+        TableShape.QueryMainTable => Query(operation, includeLinks: false),
+        TableShape.Fetch => Fetch(operation),
+        TableShape.FetchMainTable => Fetch(operation, includeLinks: false),
+        TableShape.EntityReferences => EntityReferences(operation),
+        TableShape.Records => Records(operation),
+        TableShape.LookupHolder or TableShape.LookupTarget => Lookups(operation, shape),
+        TableShape.Columns => Columns(operation),
+        _ => Requests(operation, shape),
+    };
+
+    /// <summary>
+    /// The table of a type argument, such as <c>Account</c> in <c>repository.Retrieve&lt;Account&gt;()</c>.
+    /// </summary>
+    public TableResolution TypeArgument(ITypeSymbol type) =>
+        symbols.LogicalNameOf(type) is { } logicalName ? TableResolution.Table(logicalName)
+        : type is ITypeParameterSymbol typeParameter ? TypeParameter(typeParameter)
+        : TableResolution.Unresolved($"type '{type.Name}' has no table");
+
+    /// <summary>
+    /// The shapes a parameter of <paramref name="type"/> can be read as; empty when it can't name a table. A type
+    /// parameter is read as its constraints allow, so an unconstrained one names no table.
+    /// </summary>
+    public IReadOnlyList<TableShape> ShapesOf(ITypeSymbol type)
+    {
+        if (type is ITypeParameterSymbol typeParameter) return typeParameter.ConstraintTypes.Select(ShapesOf).FirstOrDefault(s => s.Count > 0) ?? [];
+        if (type.SpecialType == SpecialType.System_String) return [TableShape.Name, TableShape.Fetch, TableShape.FetchMainTable];
+        if (symbols.Is(type, symbols.EntityReference)) return [TableShape.Entity];
+        if (symbols.Is(type, symbols.Entity)) return [TableShape.Entity, TableShape.LookupHolder, TableShape.LookupTarget, TableShape.Columns];
+        if (symbols.Is(type, symbols.QueryBase)) return [TableShape.Query, TableShape.QueryMainTable];
+        if (symbols.Is(type, symbols.EntityReferenceCollection)) return [TableShape.EntityReferences];
+        if (symbols.Is(type, symbols.EntityCollection)) return [TableShape.Records, TableShape.LookupHolder, TableShape.LookupTarget];
+        if (IsRequestLike(type)) return RequestShapes.All;
+        if (ElementType(type) is { } element && IsEntityLike(element))
+        {
+            return symbols.Is(element, symbols.EntityReference) ? [TableShape.Records] : [TableShape.Records, TableShape.LookupHolder, TableShape.LookupTarget];
+        }
+        return [];
+    }
+
+    /// <summary>
+    /// The tables a request, or every request in a collection of them, needs the privilege of
+    /// <paramref name="shape"/> on, by the request's rule. Read as <see cref="TableShape.RequestOther"/>, it gives
+    /// what can't be tied to a privilege instead: requests without a rule, and requests that can't be followed.
+    /// </summary>
+    public TableResolution Requests(IOperation? operation, TableShape shape)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+                return RequestShapes.Other(shape, "request argument is missing");
+
+            // Executing null throws, so such a branch, usually one the caller guards against, needs nothing
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
+            case IObjectCreationOperation creation when symbols.Is(creation.Type, symbols.OrganizationRequest):
+                return Request(creation, null, shape);
+
+            // A collection of requests, such as OrganizationRequestCollection or List<OrganizationRequest>
+            case IObjectCreationOperation creation:
+                return Filled(creation, t => IsRequestLike(t), value => Requests(value, shape));
+
+            case IArrayCreationOperation or ICollectionExpressionOperation:
+                return Union(CollectionElements(op), element => Requests(element, shape));
+
+            case ILocalReferenceOperation local:
+                return FromLocal(
+                    local,
+                    value => Unwrap(value) is IObjectCreationOperation creation && symbols.Is(creation.Type, symbols.OrganizationRequest)
+                        ? Request(creation, local.Local, shape)
+                        : Requests(value, shape),
+                    collection => Requests(collection, shape),
+                    (node, symbol) => Added(node, symbol, t => IsRequestLike(t), value => Requests(value, shape)));
+
+            case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
+                return Requests(source, shape);
+
+            case IInvocationOperation invocation when IsSystemCall(invocation):
+                return Passthrough(invocation, t => IsRequestLike(t), value => Requests(value, shape), value => Requests(value, shape)) ?? UnknownRequest(op, shape);
+
+            case { } when Branches(op) is { } branches:
+                return Union(branches, v => Requests(v, shape));
+
+            default:
+                return UnknownRequest(op, shape);
+        }
+    }
+
+    /// <summary>
+    /// A created request, read by the rule for its type, or for its <c>RequestName</c> when it is an
+    /// <c>OrganizationRequest</c>. Its members are set in its initializer or, for <paramref name="owner"/>, through
+    /// the local it is assigned to.
+    /// </summary>
+    private TableResolution Request(IObjectCreationOperation creation, ILocalSymbol? owner, TableShape shape)
+    {
+        List<IOperation> Members(string member) => MemberValues(creation, owner, member);
+
+        if (!SymbolEqualityComparer.Default.Equals(creation.Type?.OriginalDefinition, symbols.OrganizationRequest))
+        {
+            return Apply(RequestRules.MessageOfType(creation.Type!.Name), Members, shape);
+        }
+
+        var names = Members(SdkNames.RequestName);
+        if (FirstStringArgument(creation) is { } nameArgument) names.Add(nameArgument.Value);
+        if (names.Count == 0) return RequestShapes.Other(shape, "request has no name");
+
+        return TableResolution.Union(names.Select(name => Unwrap(name)?.ConstantValue is { HasValue: true, Value: string { Length: > 0 } message }
+            ? Apply(message, Members, shape)
+            : RequestShapes.Other(shape, "request name is computed at runtime")));
+    }
+
+    /// <summary>
+    /// The tables <paramref name="message"/> needs the privilege of <paramref name="shape"/> on, by its rule, with the
+    /// values of the request's members from <paramref name="members"/>.
+    /// </summary>
+    private TableResolution Apply(string message, Func<string, List<IOperation>> members, TableShape shape)
+    {
+        var request = new CodeMembers(this, members);
+        if (_rules.Find(message) is not { } rule)
+        {
+            // Steps registered on a message without a rule, such as a custom action, fire on no table
+            var unknown = RequestShapes.Other(shape, RequestReasons.NoRule(message));
+            if (shape != TableShape.RequestOther) return unknown;
+            var bypassed = request.Bypass(message, out var unknownBypass);
+            return TableResolution.Union([unknown, bypassed, TableResolution.Fires(message, TableResolution.Empty, bypass: unknownBypass)]);
+        }
+        return RuleApplication.Apply(message, rule, request, shape);
+    }
+
+    /// <summary>
+    /// The members of a request created in code, read from the values they are set to.
+    /// </summary>
+    private sealed class CodeMembers(TableResolver resolver, Func<string, List<IOperation>> values) : IRequestMembers
+    {
+        public TableResolution Tables(string message, string member) => resolver.MemberTables(message, member, values(member));
+
+        public TableResolution? Columns(string member)
+        {
+            var written = values(member);
+            return written.Count > 0 && written.All(resolver.IsEntity)
+                ? Union(written, resolver.Columns)
+                : null;
+        }
+
+        public bool MayBeSet(string member) => values(member).Any(MayBeTrue);
+
+        public IReadOnlyList<Privilege> Rights(string path, out TableResolution reasons) => resolver.Rights(path, values, out reasons);
+
+        public TableResolution Lookups(string member, TableShape shape) => Union(values(member), value => resolver.Lookups(value, shape));
+
+        public TableResolution Requests(string member, TableShape shape) => Union(values(member), value => resolver.Requests(value, shape));
+
+        public TableResolution Bypass(string message, out PluginBypass bypass) => TableResolver.Bypass(message, values, out bypass);
+    }
+
+    /// <summary>
+    /// The privileges the bypass parameters of a request need, and in <paramref name="bypass"/> the plugin steps
+    /// they certainly skip. <c>BypassCustomPluginExecution</c> skips synchronous steps and needs
+    /// prvBypassCustomPlugins; <c>BypassBusinessLogicExecution</c> skips the synchronous steps for <c>CustomSync</c>
+    /// and the asynchronous ones for <c>CustomAsync</c>, and needs prvBypassCustomBusinessLogic, as does
+    /// <c>BypassBusinessLogicExecutionStepIds</c>. The steps that one skips aren't known, as the analysis doesn't
+    /// know step ids, so they are taken to run. A value set at runtime needs the privilege but skips no step.
+    /// </summary>
+    private static TableResolution Bypass(string message, Func<string, List<IOperation>> members, out PluginBypass bypass)
+    {
+        var result = new List<TableResolution>();
+        bypass = PluginBypass.None;
+
+        var plugins = members(BypassCustomPluginExecution);
+        if (plugins.Any(MayBeTrue))
+        {
+            result.Add(TableResolution.Global(GlobalRequirement.BypassCustomPlugins, message));
+        }
+        if (plugins.Count > 0 && plugins.All(v => Unwrap(v)?.ConstantValue is { HasValue: true, Value: true }))
+        {
+            bypass |= PluginBypass.Synchronous;
+        }
+
+        var logic = members(BypassBusinessLogicExecution);
+        var stepIds = members(BypassBusinessLogicExecutionStepIds);
+        if (logic.Concat(stepIds).Any(v => !IsEmptyConstant(v)))
+        {
+            result.Add(TableResolution.Global(GlobalRequirement.BypassCustomBusinessLogic, message));
+        }
+        if (logic.Count > 0)
+        {
+            // Only what every value set skips is certain
+            bypass |= logic.Aggregate(PluginBypass.Synchronous | PluginBypass.Asynchronous, (skipped, value) => skipped & Skipped(value));
+        }
+        return TableResolution.Union(result);
+    }
+
+    private const string BypassCustomPluginExecution = "BypassCustomPluginExecution";
+    private const string BypassBusinessLogicExecution = "BypassBusinessLogicExecution";
+    private const string BypassBusinessLogicExecutionStepIds = "BypassBusinessLogicExecutionStepIds";
+
+    private static bool IsEmptyConstant(IOperation value) =>
+        Unwrap(value)?.ConstantValue is { HasValue: true, Value: null or "" };
+
+    /// <summary>
+    /// The steps a <c>BypassBusinessLogicExecution</c> value skips: <c>CustomSync</c>, <c>CustomAsync</c>, or both,
+    /// separated by commas. None when it is set at runtime.
+    /// </summary>
+    private static PluginBypass Skipped(IOperation value)
+    {
+        if (Unwrap(value)?.ConstantValue is not { HasValue: true, Value: string text }) return PluginBypass.None;
+        var skipped = PluginBypass.None;
+        foreach (var part in text.Split(','))
+        {
+            if (part.Trim().Equals("CustomSync", StringComparison.OrdinalIgnoreCase)) skipped |= PluginBypass.Synchronous;
+            else if (part.Trim().Equals("CustomAsync", StringComparison.OrdinalIgnoreCase)) skipped |= PluginBypass.Asynchronous;
+        }
+        return skipped;
+    }
+
+    /// <summary>
+    /// The tables of a request member's value, read by its type: an entity or reference, a table name, a query, or
+    /// a collection of records.
+    /// </summary>
+    private TableResolution MemberTables(IOperation value)
+    {
+        var op = Unwrap(value);
+        var shapes = op?.Type is { } type ? ShapesOf(type).Where(s => !RequestShapes.IsRequest(s)).ToList() : [];
+        return shapes.Count > 0 ? Resolve(op, shapes[0]) : TableResolution.Unresolved(Describe(op, "request member"));
+    }
+
+    private TableResolution MemberTables(string message, string member, List<IOperation> values)
+    {
+        if (values.Count == 0) return TableResolution.Unresolved($"{member} of the {message} request isn't set where the request is created");
+        return Union(values, MemberTables);
+    }
+
+    /// <summary>
+    /// Whether a flag can be set: anything but the constant <c>false</c>.
+    /// </summary>
+    private static bool MayBeTrue(IOperation value) => Unwrap(value)?.ConstantValue is not { HasValue: true, Value: false };
+
+    /// <summary>
+    /// The privileges of the access rights in the member at <paramref name="path"/>, such as
+    /// <c>PrincipalAccess.AccessMask</c>.
+    /// </summary>
+    private List<Privilege> Rights(string path, Func<string, List<IOperation>> members, out TableResolution reasons)
+    {
+        var segments = path.Split('.');
+        var values = members(segments[0]);
+        foreach (var segment in segments.Skip(1)) values = values.SelectMany(v => ObjectMemberValues(v, segment)).ToList();
+
+        var failures = new List<TableResolution>();
+        if (values.Count == 0) failures.Add(TableResolution.Unresolved($"{path} isn't set where the request is created"));
+
+        var privileges = new List<Privilege>();
+        foreach (var value in values)
+        {
+            if (Unwrap(value)?.ConstantValue is { HasValue: true, Value: { } constant } && constant is int or uint or long)
+            {
+                var mask = Convert.ToInt64(constant);
+                privileges.AddRange(AccessRights.Where(r => (mask & r.Bit) != 0).Select(r => r.Privilege));
+            }
+            else
+            {
+                failures.Add(TableResolution.Unresolved($"{path} is computed at runtime"));
+            }
+        }
+        reasons = TableResolution.Union(failures);
+        return privileges;
+    }
+
+    /// <summary>
+    /// The values a member of a created object is set to: by its constructor argument of the same name, in its
+    /// initializer, and, for <paramref name="owner"/>, through the local that holds it. A <c>Parameters</c>
+    /// entry or indexer with the member's name counts as the member.
+    /// </summary>
+    private List<IOperation> MemberValues(IObjectCreationOperation creation, ILocalSymbol? owner, string member)
+    {
+        var values = creation.Arguments
+            .Where(a => string.Equals(a.Parameter?.Name, member, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Value)
+            .ToList();
+        if (creation.Initializer is { } initializer) values.AddRange(Inside(initializer).SelectMany(node => SetMember(node, IsImplicitReceiver, member)));
+        if (owner is not null) values.AddRange(Root(creation).DescendantsAndSelf().SelectMany(node => SetMember(node, instance => IsLocal(instance, owner), member)));
+        return values;
+    }
+
+    /// <summary>
+    /// The values a member is set to on an object that is created here or held in a local.
+    /// </summary>
+    private List<IOperation> ObjectMemberValues(IOperation value, string member) => Unwrap(value) switch
+    {
+        IObjectCreationOperation creation => MemberValues(creation, null, member),
+        ILocalReferenceOperation local => LocalValues(local.Local, Root(local), null)
+            .Where(v => !v.IsLoopCollection)
+            .SelectMany(v => Unwrap(v.Operation) is IObjectCreationOperation creation ? MemberValues(creation, null, member) : [])
+            .Concat(Root(local).DescendantsAndSelf().SelectMany(node => SetMember(node, instance => IsLocal(instance, local.Local), member)))
+            .ToList(),
+        _ => [],
+    };
+
+    /// <summary>
+    /// The value <paramref name="node"/> sets <paramref name="member"/> to on an object <paramref name="isObject"/>
+    /// accepts: <c>o.Member = x</c>, <c>o["Member"] = x</c>, <c>o.Parameters["Member"] = x</c>,
+    /// <c>o.Parameters.Add("Member", x)</c>, or what <c>o.Member.Add(x)</c> adds to a collection member.
+    /// </summary>
+    private static IEnumerable<IOperation> SetMember(IOperation node, Func<IOperation?, bool> isObject, string member)
+    {
+        bool IsOwnedBy(IOperation? instance) =>
+            isObject(instance) || (Unwrap(instance) is IPropertyReferenceOperation { Property.Name: SdkNames.Parameters } parameters && isObject(parameters.Instance));
+
+        switch (node)
+        {
+            case ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: false } property } assignment
+                when property.Property.Name == member && isObject(property.Instance):
+                return [assignment.Value];
+
+            case ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: true } indexer } assignment
+                when IsOwnedBy(indexer.Instance) && indexer.Arguments.Length == 1 && Key(indexer.Arguments[0].Value) == member:
+                return [assignment.Value];
+
+            case IInvocationOperation { TargetMethod.Name: "Add", Arguments.Length: 2 } add
+                when IsOwnedBy(add.Instance) && Key(add.Arguments[0].Value) == member:
+                return [add.Arguments[1].Value];
+
+            case IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" } add
+                when Unwrap(add.Instance) is IPropertyReferenceOperation collection && collection.Property.Name == member && isObject(collection.Instance):
+                return add.Arguments.Select(a => a.Value);
+
+            case IMemberInitializerOperation { InitializedMember: IPropertyReferenceOperation property, Initializer: { } initializer }
+                when property.Property.Name == member && isObject(property.Instance):
+                return initializer.Initializers.OfType<IInvocationOperation>().SelectMany(add => add.Arguments.Select(a => a.Value));
+
+            default:
+                return [];
+        }
+    }
+
+    /// <summary>
+    /// The operations of an object initializer, without those of objects created inside it, whose members are
+    /// their own.
+    /// </summary>
+    private static IEnumerable<IOperation> Inside(IOperation initializer)
+    {
+        var pending = new Stack<IOperation>([initializer]);
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            yield return node;
+            foreach (var child in node.ChildOperations.Reverse())
+            {
+                if (child is not (IObjectCreationOperation or IAnonymousObjectCreationOperation or IAnonymousFunctionOperation)) pending.Push(child);
+            }
+        }
+    }
+
+    private static bool IsImplicitReceiver(IOperation? operation) => operation is IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ImplicitReceiver };
+
+    /// <summary>
+    /// The table of the records in an <c>EntityCollection</c>, such as the result of <c>RetrieveMultiple</c>.
+    /// </summary>
+    /// <remarks>
+    /// Any collection of entities is read the same way: a list or array of early-bound entities by its element
+    /// type, and other collections by what is put in them.
+    /// </remarks>
+    private TableResolution Records(IOperation? operation)
+    {
+        var op = Unwrap(operation);
+        if (symbols.Is(op?.Type, symbols.EntityReferenceCollection)) return EntityReferences(op);
+        if (ElementType(op?.Type) is { } elementType && (symbols.LogicalNameOf(elementType) is not null || (elementType is ITypeParameterSymbol && IsEntityLike(elementType))))
+        {
+            return TypeArgument(elementType);
+        }
+
+        switch (op)
+        {
+            case null:
+                return TableResolution.Unresolved("records argument is missing");
+
+            case IInvocationOperation invocation when symbols.ServiceOperation(invocation.TargetMethod) == Messages.RetrieveMultiple:
+                return Query(Argument(invocation, 0), includeLinks: false).OrUnresolved("query has no table name");
+
+            case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
+                return Records(records);
+
+            case IObjectCreationOperation creation:
+                return Filled(creation, IsEntityOrRecords, EntityOrRecords).Union(AssignedMember(creation.Initializer, SdkNames.EntityName, Name) ?? TableResolution.Empty);
+
+            case IArrayCreationOperation or ICollectionExpressionOperation:
+                return Union(CollectionElements(op), EntityOrRecords);
+
+            case ILocalReferenceOperation local:
+                return FromLocal(local, Records, Records, (node, symbol) => node switch
+                {
+                    _ when Added(node, symbol, IsEntityOrRecords, EntityOrRecords) is { } added => added,
+                    ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: SdkNames.EntityName } property } assignment when IsLocal(property.Instance, symbol) =>
+                        Name(assignment.Value),
+                    _ => null,
+                });
+
+            case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
+                return Records(source);
+
+            case IInvocationOperation invocation when IsSystemCall(invocation):
+                return Passthrough(invocation, IsEntityOrRecords, Records, EntityOrRecords) ?? Unknown(op, "records", TableShape.Records);
+
+            case { } when Branches(op) is { } branches:
+                return Union(branches, Records);
+
+            default:
+                return Unknown(op, "records", TableShape.Records);
+        }
+    }
+
+    /// <summary>
+    /// What the lookups set on an entity, or on every entity in a collection of them, need. Read as
+    /// <see cref="TableShape.LookupHolder"/>: the tables of the entities that get a lookup, which need Append. Read
+    /// as <see cref="TableShape.LookupTarget"/>: the tables the lookups refer to, which need AppendTo.
+    /// </summary>
+    /// <remarks>
+    /// Only lookups set in the code are seen, and an entity from elsewhere, such as one that is retrieved, adds
+    /// nothing for those it already holds. Nothing is reported for such an entity here: its table is reported where
+    /// that can't be resolved. <c>ownerid</c> is left out, as XrmMockup leaves it out.
+    /// </remarks>
+    public TableResolution Lookups(IOperation? operation, TableShape shape)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
+            case { Type: var type } when symbols.Is(type, symbols.EntityReference) || symbols.Is(type, symbols.EntityReferenceCollection):
+                return TableResolution.Empty;
+
+            case IObjectCreationOperation creation when IsEntityLike(creation.Type):
+                return Set(creation, creation.Initializer is { } members ? Inside(members).SelectMany(node => SetLookup(node, IsImplicitReceiver)) : [], shape);
+
+            // A collection of entities, such as EntityCollection or List<Entity>
+            case IObjectCreationOperation creation:
+                return Filled(creation, IsEntityOrRecords, value => Lookups(value, shape));
+
+            case IArrayCreationOperation or ICollectionExpressionOperation:
+                return Union(CollectionElements(op), element => Lookups(element, shape));
+
+            case IPropertyReferenceOperation property when EntitiesOf(property) is { } records:
+                return Lookups(records, shape);
+
+            case IInvocationOperation { TargetMethod.Name: SdkNames.ToEntity, Instance: { } instance } when IsEntityLike(instance.Type):
+                return Lookups(instance, shape);
+
+            case ILocalReferenceOperation local:
+            {
+                var result = FromLocal(local, value => Lookups(value, shape), collection => Lookups(collection, shape),
+                    (node, symbol) => Added(node, symbol, IsEntityOrRecords, value => Lookups(value, shape)), silent: true);
+
+                // Lookups set through the local, once it is no longer being resolved, so its table can be
+                return IsEntityLike(local.Type)
+                    ? result.Union(Set(local, Root(local).DescendantsAndSelf().SelectMany(node => SetLookup(node, instance => IsLocal(instance, local.Local))), shape))
+                    : result;
+            }
+
+            case IParameterReferenceOperation parameter when LambdaSource(parameter) is { } source:
+                return Lookups(source, shape);
+
+            case IParameterReferenceOperation parameter:
+            {
+                // The caller's lookups, and those set on the parameter here
+                var result = Unknown(op, "entity", shape, silent: true);
+                return IsEntityLike(parameter.Type)
+                    ? result.Union(Set(parameter, Root(parameter).DescendantsAndSelf().SelectMany(node => SetLookup(node, instance => IsParameter(instance, parameter.Parameter))), shape))
+                    : result;
+            }
+
+            case IInvocationOperation invocation when IsSystemCall(invocation):
+                return Passthrough(invocation, IsEntityOrRecords, value => Lookups(value, shape), value => Lookups(value, shape)) ?? TableResolution.Empty;
+
+            case { } when Branches(op) is { } branches:
+                return Union(branches, v => Lookups(v, shape));
+
+            default:
+                return Unknown(op, "entity", shape, silent: true);
+        }
+    }
+
+    /// <summary>
+    /// The columns set on an entity, in <see cref="TableResolution.Tables"/>, with a reason for each way more can be
+    /// set: a column whose name is computed at runtime, an entity from elsewhere, such as one that is retrieved, or
+    /// an entity passed to a method in the solution, which can set more.
+    /// </summary>
+    public TableResolution Columns(IOperation? operation)
+    {
+        var op = Unwrap(operation);
+        switch (op)
+        {
+            case null:
+            case { ConstantValue: { HasValue: true, Value: null } }:
+                return TableResolution.Empty;
+
+            case IObjectCreationOperation creation when IsEntityLike(creation.Type):
+                return creation.Initializer is { } members
+                    ? Union(Inside(members), node => ColumnsSet(node, IsImplicitReceiver, null))
+                    : TableResolution.Empty;
+
+            case IInvocationOperation { TargetMethod.Name: SdkNames.ToEntity, Instance: { } instance } when IsEntityLike(instance.Type):
+                return Columns(instance);
+
+            case ILocalReferenceOperation local when IsEntityLike(local.Type):
+                return FromLocal(local, Columns, use: (node, symbol) => ColumnsSet(node, instance => IsLocal(instance, symbol), CallOf(local)));
+
+            case IParameterReferenceOperation parameter when IsEntityLike(parameter.Type) && LambdaSource(parameter) is null:
+            {
+                // The caller's columns, and those set on the parameter here
+                var set = Root(parameter).DescendantsAndSelf().Select(node => ColumnsSet(node, instance => IsParameter(instance, parameter.Parameter), CallOf(parameter)));
+                return TableResolution.Union(set.Prepend(Unknown(op, "entity", TableShape.Columns)));
+            }
+
+            case { } when Branches(op) is { } branches:
+                return Union(branches, Columns);
+
+            default:
+                return Unknown(op, "entity", TableShape.Columns);
+        }
+    }
+
+    /// <summary>
+    /// The columns <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, or a reason when it
+    /// passes the entity to a method in the solution other than <paramref name="call"/>, the one being resolved for.
+    /// </summary>
+    private TableResolution ColumnsSet(IOperation node, Func<IOperation?, bool> isObject, IInvocationOperation? call)
+    {
+        if (SetColumn(node, isObject) is { } set)
+        {
+            return set.Column is { } column ? TableResolution.Table(column) : TableResolution.Unresolved("a column name is computed at runtime");
+        }
+        // Only whether the method is in the solution, as building its call would resolve its arguments in turn
+        if (node is IInvocationOperation invocation && !ReferenceEquals(invocation, call) && calls is not null
+            && IsInSource(invocation.TargetMethod) && invocation.Arguments.Any(a => isObject(Unwrap(a.Value))))
+        {
+            return TableResolution.Unresolved($"entity is passed to '{invocation.TargetMethod.Name}', which can set more columns");
+        }
+        return TableResolution.Empty;
+    }
+
+    /// <summary>
+    /// The call <paramref name="operation"/> is an argument of.
+    /// </summary>
+    private static IInvocationOperation? CallOf(IOperation operation)
+    {
+        var current = operation.Parent;
+        while (current is IConversionOperation or IParenthesizedOperation) current = current.Parent;
+        return current is IArgumentOperation { Parent: IInvocationOperation invocation } ? invocation : null;
+    }
+
+    /// <summary>
+    /// What the lookups <paramref name="set"/> on <paramref name="entity"/> need, read as <paramref name="shape"/>.
+    /// The table a lookup refers to is narrowed to the tables its column can refer to, when the metadata knows it.
+    /// </summary>
+    private TableResolution Set(IOperation entity, IEnumerable<(string? Column, IOperation Value)> set, TableShape shape)
+    {
+        var values = set.ToList();
+        if (values.Count == 0) return TableResolution.Empty;
+        if (shape == TableShape.LookupHolder) return Entity(entity);
+
+        var tables = lookups is not null && values.Any(l => l.Column is not null) ? Entity(entity).Tables : [];
+        var result = new List<TableResolution>();
+        foreach (var (column, value) in values)
+        {
+            var targets = column is null ? [] : tables.SelectMany(table => lookups!.TargetsOf(table, column)).Distinct(StringComparer.Ordinal).ToList();
+            result.Add(targets.Count > 0 ? Entity(value).WithinTargets(targets) : Entity(value));
+        }
+        return TableResolution.Union(result);
+    }
+
+    // XrmMockup doesn't check AppendTo on the owner a lookup sets, so ownerid is no lookup here
+    private const string OwnerColumn = "ownerid";
+
+    /// <summary>
+    /// The lookup <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, with its column when
+    /// known, where the value is an <c>EntityReference</c> (see <see cref="SetColumn"/>).
+    /// </summary>
+    private IEnumerable<(string? Column, IOperation Value)> SetLookup(IOperation node, Func<IOperation?, bool> isObject)
+    {
+        if (SetColumn(node, isObject) is { } lookup && symbols.Is(Unwrap(lookup.Value)?.Type, symbols.EntityReference) && lookup.Column != OwnerColumn) yield return lookup;
+    }
+
+    /// <summary>
+    /// The column <paramref name="node"/> sets on an entity <paramref name="isObject"/> accepts, with its name when
+    /// known: <c>e.Name = v</c>, <c>e["name"] = v</c>, <c>e.Attributes["name"] = v</c> or
+    /// <c>e.Attributes.Add("name", v)</c>. An early-bound property that isn't a column, such as <c>Id</c>, sets none.
+    /// </summary>
+    private (string? Column, IOperation Value)? SetColumn(IOperation node, Func<IOperation?, bool> isObject)
+    {
+        bool IsAttributes(IOperation? instance) =>
+            isObject(instance) || (Unwrap(instance) is IPropertyReferenceOperation { Property.Name: SdkNames.Attributes } attributes && isObject(attributes.Instance));
+
+        return node switch
+        {
+            ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: false } property } assignment
+                when isObject(property.Instance) && IsEntityLike(property.Property.ContainingType) && symbols.AttributeNameOf(property.Property) is { } column =>
+                (column, assignment.Value),
+            ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.IsIndexer: true, Arguments.Length: 1 } indexer } assignment
+                when IsAttributes(indexer.Instance) =>
+                (Key(indexer.Arguments[0].Value)?.ToLowerInvariant(), assignment.Value),
+            IInvocationOperation { TargetMethod.Name: "Add", Arguments.Length: 2 } add
+                when Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: SdkNames.Attributes } attributes && isObject(attributes.Instance) =>
+                (Key(add.Arguments[0].Value)?.ToLowerInvariant(), add.Arguments[1].Value),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The tables an early-bound lookup property, such as <c>contact.ParentCustomerId</c>, can refer to by the
+    /// metadata; empty when the property isn't a lookup the metadata knows.
+    /// </summary>
+    private IReadOnlyCollection<string> LookupTargets(IPropertyReferenceOperation property)
+    {
+        if (lookups is null || !symbols.Is(property.Type, symbols.EntityReference)) return [];
+        if (symbols.AttributeNameOf(property.Property) is not { } column) return [];
+        return symbols.LogicalNameOf(property.Instance?.Type ?? property.Property.ContainingType) is { } table ? lookups.TargetsOf(table, column) : [];
+    }
+
+    private static string? Key(IOperation operation) => operation.ConstantValue is { HasValue: true, Value: string key } ? key : null;
+
+    private TableResolution EntityOrRecords(IOperation value) => IsEntityLike(Unwrap(value)?.Type) ? Entity(value) : Records(value);
+
+    private TableResolution EntityOrReferences(IOperation value) => IsEntityLike(Unwrap(value)?.Type) ? Entity(value) : EntityReferences(value);
+
+    /// <summary>
+    /// The collection whose <c>EntityCollection.Entities</c> <paramref name="property"/> reads.
+    /// </summary>
+    private IOperation? EntitiesOf(IPropertyReferenceOperation property) =>
+        property is { Property.Name: SdkNames.Entities, Instance: { } records } && symbols.Is(property.Property.ContainingType, symbols.EntityCollection) ? records : null;
+
+    // How a collection is read, the same for records, entity references, requests and the lookups on records: the
+    // values put into it of a type it accepts, each an element or a collection of them, read with resolve
+
+    /// <summary>
+    /// What a collection is created with: the collections passed to its constructor, the values its initializer
+    /// adds, and the <c>Entities</c> it sets.
+    /// </summary>
+    private TableResolution Filled(IObjectCreationOperation creation, Func<ITypeSymbol?, bool> accepts, Func<IOperation, TableResolution> resolve)
+    {
+        var added = creation.Initializer?.Initializers.OfType<IInvocationOperation>().SelectMany(add => add.Arguments) ?? [];
+        var entities = creation.Initializer is { } initializer ? Inside(initializer).SelectMany(node => SetMember(node, IsImplicitReceiver, SdkNames.Entities)) : [];
+        return Union(creation.Arguments.Concat(added).Select(a => a.Value).Concat(entities).Where(v => Accepts(accepts, v)), resolve);
+    }
+
+    /// <summary>
+    /// What <paramref name="node"/> adds to the local <paramref name="symbol"/> or to its <c>Entities</c>;
+    /// <c>null</c> when it adds nothing.
+    /// </summary>
+    private TableResolution? Added(IOperation node, ILocalSymbol symbol, Func<ITypeSymbol?, bool> accepts, Func<IOperation, TableResolution> resolve) =>
+        node is IInvocationOperation { TargetMethod.Name: "Add" or "AddRange" or "Insert" or "InsertRange" } add
+        && (IsLocal(add.Instance, symbol) || (Unwrap(add.Instance) is IPropertyReferenceOperation { Property.Name: SdkNames.Entities } entities && IsLocal(entities.Instance, symbol)))
+            ? Union(add.Arguments.Select(a => a.Value).Where(v => Accepts(accepts, v)), resolve)
+            : null;
+
+    private static bool Accepts(Func<ITypeSymbol?, bool> accepts, IOperation value) => accepts(value.Type) || accepts(Unwrap(value)?.Type);
+
+    /// <summary>
+    /// What a framework call such as <c>ToList</c>, <c>Chunk</c> or <c>Select</c> passes on from the collections it
+    /// is given: the receiver and arguments of a type <paramref name="accepts"/>, read with
+    /// <paramref name="resolve"/>, and the values returned by lambdas, read with <paramref name="resolveReturned"/>.
+    /// <c>null</c> when nothing is passed on.
+    /// </summary>
+    private TableResolution? Passthrough(
+        IInvocationOperation invocation,
+        Func<ITypeSymbol?, bool> accepts,
+        Func<IOperation, TableResolution> resolve,
+        Func<IOperation, TableResolution> resolveReturned)
+    {
+        List<TableResolution>? result = null;
+        var sources = invocation.Instance is { } instance ? invocation.Arguments.Select(a => a.Value).Prepend(instance) : invocation.Arguments.Select(a => a.Value);
+        foreach (var source in sources)
+        {
+            if (Unwrap(source) is IDelegateCreationOperation { Target: IAnonymousFunctionOperation lambda } && accepts(lambda.Symbol.ReturnType))
+            {
+                foreach (var returned in Returned(lambda)) (result ??= []).Add(resolveReturned(returned));
+            }
+            else if (accepts(source.Type) || accepts(Unwrap(source)?.Type))
+            {
+                (result ??= []).Add(resolve(source));
+            }
+        }
+        return result is null ? null : TableResolution.Union(result);
+    }
+
+    /// <summary>
+    /// The values a lambda returns, without those of lambdas inside it.
+    /// </summary>
+    private static IEnumerable<IOperation> Returned(IAnonymousFunctionOperation lambda) =>
+        Inside(lambda.Body).OfType<IReturnOperation>().Where(r => r.ReturnedValue is not null).Select(r => r.ReturnedValue!);
+
+    /// <summary>
+    /// The collection whose elements a lambda parameter receives, such as <c>accounts</c> for <c>a</c> in
+    /// <c>accounts.Select(a => …)</c>; <c>null</c> when the lambda isn't passed to a framework call.
+    /// </summary>
+    private static IOperation? LambdaSource(IParameterReferenceOperation parameter)
+    {
+        if (parameter.Parameter is not { Ordinal: 0, ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.AnonymousFunction } lambdaSymbol }) return null;
+
+        var lambda = parameter.Parent;
+        while (lambda is not null && !(lambda is IAnonymousFunctionOperation function && SymbolEqualityComparer.Default.Equals(function.Symbol, lambdaSymbol))) lambda = lambda.Parent;
+        if (lambda?.Parent is not IDelegateCreationOperation { Parent: IArgumentOperation { Parent: IInvocationOperation invocation } argument } || !IsSystemCall(invocation)) return null;
+
+        return invocation.Instance ?? invocation.Arguments.FirstOrDefault(a => a != argument && a.Parameter?.Ordinal == 0)?.Value;
+    }
+
+    private static IEnumerable<IOperation> CollectionElements(IOperation operation) => operation switch
+    {
+        IArrayCreationOperation { Initializer: { } initializer } => initializer.ElementValues,
+        ICollectionExpressionOperation collection => collection.Elements.Select(e => e is ISpreadOperation spread ? spread.Operand : e),
+        _ => [],
+    };
+
+    /// <summary>
+    /// The tables of the elements of a collection that a loop variable iterates.
+    /// </summary>
+    private TableResolution EntityElements(IOperation collection) => Unwrap(collection) switch
+    {
+        IArrayCreationOperation or ICollectionExpressionOperation => Elements(collection),
+        var op when IsRecordsLike(op?.Type) => Records(op),
+        var op => Entity(op),
+    };
+
+    private TableResolution Elements(IOperation? operation)
+    {
+        var op = Unwrap(operation);
+        if (op is IArrayCreationOperation { Initializer: not null } or ICollectionExpressionOperation) return Union(CollectionElements(op), EntityOrRecords);
+        return IsRecordsLike(op?.Type) && !symbols.Is(op?.Type, symbols.EntityReferenceCollection) ? Records(op) : Unknown(op, "related records", TableShape.EntityReferences);
+    }
+
+    /// <summary>
+    /// The possible texts of a FetchXML string. Runtime parts become <see cref="Hole"/>, so the structure around
+    /// them can still be parsed. Values that are runtime as a whole are reported in <paramref name="failures"/>.
+    /// </summary>
+    private List<string> Templates(IOperation? operation, bool topLevel, List<TableResolution> failures, bool includeLinks = true)
+    {
+        var op = Unwrap(operation);
+        if (op is null)
+        {
+            failures.Add(TableResolution.Unresolved("FetchXML argument is missing"));
+            return [];
+        }
+
+        if (op.ConstantValue is { HasValue: true, Value: string constant }) return [constant];
+
+        switch (op)
+        {
+            case IInterpolatedStringOperation interpolated:
+            {
+                var builder = new StringBuilder();
+                foreach (var part in interpolated.Parts)
+                {
+                    builder.Append(part switch
+                    {
+                        IInterpolatedStringTextOperation text => text.Text.ConstantValue.Value as string,
+                        IInterpolationOperation { Expression.ConstantValue: { HasValue: true, Value: var value } } => value?.ToString(),
+                        _ => Hole.ToString(),
+                    });
+                }
+                return [builder.ToString()];
+            }
+
+            case IBinaryOperation { OperatorKind: BinaryOperatorKind.Add } binary when op.Type?.SpecialType == SpecialType.System_String:
+            {
+                var left = Templates(binary.LeftOperand, topLevel: false, failures);
+                var right = Templates(binary.RightOperand, topLevel: false, failures);
+                if (left.Count * right.Count > MaxTemplates)
+                {
+                    failures.Add(TableResolution.Unresolved("FetchXML is built in too many ways to analyze"));
+                    return [];
+                }
+                return left.SelectMany(l => right.Select(r => l + r)).ToList();
+            }
+
+            case ILocalReferenceOperation local:
+            {
+                // A local built from itself, such as links = links + "...", repeats a part the analysis can't count
+                if (!_visiting.Add(local.Local)) return topLevel ? [] : [Hole.ToString()];
+                try
+                {
+                    var templates = new List<string>();
+                    foreach (var value in LocalValues(local.Local, Root(local), Failed(failures)))
+                    {
+                        if (value.IsLoopCollection) failures.Add(TableResolution.Unresolved(LoopVariable(local.Local)));
+                        else templates.AddRange(Templates(value.Operation, topLevel, failures, includeLinks));
+                    }
+                    return templates.Distinct(StringComparer.Ordinal).ToList();
+                }
+                finally
+                {
+                    _visiting.Remove(local.Local);
+                }
+            }
+
+            case { } when Branches(op) is { } branches:
+                return branches.SelectMany(b => Templates(b, topLevel, failures, includeLinks)).ToList();
+
+            default:
+                if (!topLevel) return [Hole.ToString()];
+                failures.Add(Unknown(op, "FetchXML", includeLinks ? TableShape.Fetch : TableShape.FetchMainTable));
+                return [];
+        }
+    }
+
+    private static TableResolution ParseFetch(string template, bool includeLinks)
+    {
+        // Every string passed to a method is read as FetchXML too, so plain text is turned away before it can throw
+        XDocument document;
+        try
+        {
+            if (!template.TrimStart(XmlWhitespace).StartsWith("<", StringComparison.Ordinal)) return TableResolution.Unresolved(NotFetch);
+            document = XDocument.Parse(template);
+        }
+        catch (XmlException)
+        {
+            return TableResolution.Unresolved(NotFetch);
+        }
+
+        var result = new List<TableResolution>();
+        foreach (var element in document.Descendants().Where(e => e.Name.LocalName == "entity" || (includeLinks && e.Name.LocalName == "link-entity")))
+        {
+            var name = (string?)element.Attribute("name");
+            result.Add(
+                string.IsNullOrEmpty(name) ? TableResolution.Unresolved("FetchXML entity has no name")
+                : name!.IndexOf(Hole) >= 0 ? TableResolution.Unresolved("FetchXML table name is computed at runtime")
+                : TableResolution.Table(name));
+        }
+        return TableResolution.Union(result).OrUnresolved("FetchXML has no entity element");
+    }
+
+    /// <summary>
+    /// Resolves a local from every value assigned to it in its method. The union is taken, because the analysis
+    /// doesn't follow control flow. <paramref name="use"/> sees every operation in the method, to pick up
+    /// changes made through the local, such as <c>entity.LogicalName = "account"</c>. A <paramref name="silent"/>
+    /// local reports nothing for assignments it can't follow, as for any value from an unknown source.
+    /// </summary>
+    private TableResolution FromLocal(
+        ILocalReferenceOperation reference,
+        Func<IOperation, TableResolution> resolve,
+        Func<IOperation, TableResolution>? resolveElements = null,
+        Func<IOperation, ILocalSymbol, TableResolution?>? use = null,
+        bool silent = false)
+    {
+        var local = reference.Local;
+        if (!_visiting.Add(local)) return TableResolution.Empty;
+        try
+        {
+            var root = Root(reference);
+            var result = new List<TableResolution>();
+            foreach (var value in LocalValues(local, root, silent ? null : Failed(result)))
+            {
+                if (!value.IsLoopCollection)
+                {
+                    result.Add(resolve(value.Operation));
+                }
+                else
+                {
+                    result.Add(resolveElements is not null
+                        ? resolveElements(value.Operation)
+                        : TableResolution.Unresolved(LoopVariable(local)));
+                }
+            }
+
+            if (use is not null)
+            {
+                foreach (var node in root.DescendantsAndSelf())
+                {
+                    if (use(node, local) is { } resolution) result.Add(resolution);
+                }
+            }
+            return TableResolution.Union(result);
+        }
+        finally
+        {
+            _visiting.Remove(local);
+        }
+    }
+
+    /// <summary>
+    /// Links that can't be tied to a query local are not followed yet. Any of them in the method makes the
+    /// query's linked tables unknown, so they are reported instead of missed.
+    /// </summary>
+    private TableResolution NestedLinks(IOperation query)
+    {
+        var hasNestedLinks = Root(query).DescendantsAndSelf().Any(node => node switch
+        {
+            IPropertyReferenceOperation { Property.Name: SdkNames.LinkEntities } => true,
+            IInvocationOperation { TargetMethod.Name: SdkNames.AddLink } call => symbols.Is(call.TargetMethod.ContainingType, symbols.LinkEntity),
+            IObjectCreationOperation creation => symbols.Is(creation.Type, symbols.LinkEntity),
+            _ => false,
+        });
+        return hasNestedLinks ? TableResolution.Unresolved(NestedLinksReason) : TableResolution.Empty;
+    }
+
+    private TableResolution? AssignedMember(IObjectOrCollectionInitializerOperation? initializer, string member, Func<IOperation, TableResolution> resolve)
+    {
+        var assignments = initializer?.Initializers
+            .OfType<ISimpleAssignmentOperation>()
+            .Where(a => a.Target is IPropertyReferenceOperation property && property.Property.Name == member)
+            .ToList();
+
+        return assignments is { Count: > 0 } ? Union(assignments.Select(a => a.Value), resolve) : null;
+    }
+
+    private static IArgumentOperation? FirstStringArgument(IOperation call)
+    {
+        var arguments = call switch
+        {
+            IObjectCreationOperation creation => creation.Arguments,
+            IInvocationOperation invocation => invocation.Arguments,
+            _ => [],
+        };
+        return arguments.FirstOrDefault(a => a.Parameter is { Ordinal: 0, Type.SpecialType: SpecialType.System_String });
+    }
+
+    /// <summary>
+    /// An entity, not a reference to one, so its columns can be set.
+    /// </summary>
+    private bool IsEntity(IOperation value) => IsEntityLike(Unwrap(value)?.Type) && !symbols.Is(Unwrap(value)?.Type, symbols.EntityReference);
+
+    private bool IsEntityOrReference(ITypeSymbol? type) =>
+        symbols.Is(type, symbols.Entity) || symbols.Is(type, symbols.EntityReference);
+
+    /// <summary>
+    /// An entity or reference, or a type parameter constrained to one.
+    /// </summary>
+    private bool IsEntityOrRecords(ITypeSymbol? type) => IsEntityLike(type) || IsRecordsLike(type);
+
+    private bool IsEntityLike(ITypeSymbol? type) =>
+        IsEntityOrReference(type) || (type is ITypeParameterSymbol typeParameter && typeParameter.ConstraintTypes.Any(IsEntityLike));
+
+    /// <summary>
+    /// A collection of entities or references: an <c>EntityCollection</c>, or a list or array of them.
+    /// </summary>
+    private bool IsRecordsLike(ITypeSymbol? type, int depth = 0) =>
+        symbols.Is(type, symbols.EntityCollection) || symbols.Is(type, symbols.EntityReferenceCollection)
+        || (Nested(type, depth) is { } element && (IsEntityLike(element) || IsRecordsLike(element, depth + 1)));
+
+    /// <summary>
+    /// A request, or a collection of requests, of collections of them, and so on.
+    /// </summary>
+    private bool IsRequestLike(ITypeSymbol? type, int depth = 0) =>
+        symbols.Is(type, symbols.OrganizationRequest)
+        || (Nested(type, depth) is { } element && IsRequestLike(element, depth + 1));
+
+    /// <summary>
+    /// The element type of a collection nested <paramref name="depth"/> levels deep. Types that are collections of
+    /// themselves, such as <c>JToken</c>, stop at <see cref="MaxNesting"/>.
+    /// </summary>
+    private static ITypeSymbol? Nested(ITypeSymbol? type, int depth) =>
+        depth < MaxNesting && type?.SpecialType != SpecialType.System_String ? ElementType(type) : null;
+
+    private static ITypeSymbol? ElementType(ITypeSymbol? type) => type switch
+    {
+        null => null,
+        IArrayTypeSymbol array => array.ElementType,
+        INamedTypeSymbol named when named.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T => named.TypeArguments[0],
+        _ => type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)?.TypeArguments[0],
+    };
+
+    private bool IsTableQuery(ITypeSymbol? type) =>
+        symbols.Is(type, symbols.QueryExpression) || symbols.Is(type, symbols.QueryByAttribute);
+
+    /// <summary>
+    /// The values a conditional or coalesce can take; <c>null</c> for any other value.
+    /// </summary>
+    private static IOperation[]? Branches(IOperation? operation) => operation switch
+    {
+        IConditionalOperation { WhenFalse: { } whenFalse } conditional => [conditional.WhenTrue, whenFalse],
+        ICoalesceOperation coalesce => [coalesce.Value, coalesce.WhenNull],
+        _ => null,
+    };
+
+    private static TableResolution Union(IEnumerable<IOperation> values, Func<IOperation, TableResolution> resolve) =>
+        TableResolution.Union(values.Select(resolve));
+
+    private static Action<string> Failed(List<TableResolution> failures) => reason => failures.Add(TableResolution.Unresolved(reason));
+
+    private static string Indexer(IPropertyReferenceOperation indexer)
+    {
+        var target = Unwrap(indexer.Instance) switch
+        {
+            IPropertyReferenceOperation property => property.Property.Name,
+            ILocalReferenceOperation local => local.Local.Name,
+            IParameterReferenceOperation parameter => parameter.Parameter.Name,
+            IFieldReferenceOperation field => field.Field.Name,
+            _ => "an indexer",
+        };
+        var arguments = indexer.Arguments.Select(a => Key(a.Value) is { } key ? $"\"{key}\"" : "…");
+        return $"{target}[{string.Join(", ", arguments)}]";
+    }
+
+    /// <summary>
+    /// A value the resolver can't follow here. A method parameter becomes a slot for the call graph to fill in, and
+    /// a call to a method in the solution is resolved from what that method returns.
+    /// </summary>
+    /// <remarks>
+    /// A <paramref name="silent"/> value reports nothing where it stays unknown: a request read for one privilege,
+    /// whose reason is reported once, under <see cref="TableShape.RequestOther"/>.
+    /// </remarks>
+    private TableResolution Unknown(IOperation? operation, string what, TableShape shape, bool silent = false)
+    {
+        var reason = silent ? "" : Describe(operation, what);
+        return operation switch
+        {
+            IParameterReferenceOperation { Parameter.ContainingSymbol: IMethodSymbol method } parameter =>
+                TableResolution.Slot(new TableSlot(Nodes.Id(method), parameter.Parameter.Ordinal, shape, reason)),
+            IInvocationOperation invocation when calls?.Invoke(invocation) is { } call =>
+                TableResolution.Returned(new ReturnedTables(call, shape, reason)),
+            _ => silent ? TableResolution.Empty : TableResolution.Unresolved(reason),
+        };
+    }
+
+    private TableResolution UnknownRequest(IOperation? operation, TableShape shape) =>
+        Unknown(operation, "request", shape, silent: shape != TableShape.RequestOther);
+
+    /// <summary>
+    /// A type parameter of a generic method becomes a slot for the type argument at each call site, and one of the
+    /// method's type a slot for the type argument of the receiver.
+    /// </summary>
+    private TableResolution TypeParameter(ITypeParameterSymbol typeParameter)
+    {
+        var reason = $"table depends on type parameter '{typeParameter.Name}'";
+        if (typeParameter.DeclaringMethod is { } declaringMethod)
+        {
+            return TableResolution.Slot(new TableSlot(Nodes.Id(declaringMethod), TableSlot.TypeParameterOrdinal(typeParameter.Ordinal), TableShape.Entity, reason));
+        }
+
+        var ordinal = method is null ? -1 : Nodes.TypeParameters(method.ContainingType).IndexOf(typeParameter.OriginalDefinition);
+        return ordinal >= 0
+            ? TableResolution.Slot(new TableSlot(Nodes.Id(method!), TableSlot.TypeArgumentOrdinal(ordinal), TableShape.Entity, reason))
+            : TableResolution.Unresolved(reason);
+    }
+
+    private static string Describe(IOperation? operation, string what) => operation switch
+    {
+        IParameterReferenceOperation parameter => $"{what} comes from parameter '{parameter.Parameter.Name}'",
+        IFieldReferenceOperation field => $"{what} comes from field '{field.Field.Name}'",
+        IPropertyReferenceOperation { Property.IsIndexer: true } indexer => $"{what} comes from {Indexer(indexer)}",
+        IPropertyReferenceOperation property => $"{what} comes from property '{property.Property.Name}'",
+        ITypeParameterObjectCreationOperation creation => $"table depends on type parameter '{creation.Type?.Name}'",
+        IInvocationOperation invocation => $"{what} is returned by '{invocation.TargetMethod.Name}'",
+        { ConstantValue: { HasValue: true, Value: null } } => $"{what} is null",
+        _ => $"{what} is computed at runtime",
+    };
+}

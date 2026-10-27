@@ -1,0 +1,33 @@
+namespace XrmMockup.PermissionAnalyzer.Core.Model;
+
+/// <summary>
+/// Why a requirement is part of the requirement set. A basis is a fact about the code, not a likelihood.
+/// </summary>
+public enum RequirementBasis
+{
+    /// <summary>
+    /// Table and privilege resolved from the call itself: types, constants or local data flow.
+    /// </summary>
+    Direct,
+
+    /// <summary>
+    /// The execute privilege of a custom API, which calling it needs.
+    /// </summary>
+    ExecutePrivilege,
+
+    /// <summary>
+    /// Reached through an interface or abstract call that no dependency injection registration resolves, so
+    /// every implementation in the solution is included.
+    /// </summary>
+    AllImplementations,
+
+    /// <summary>
+    /// The record a lookup refers to can't be determined, so every table the lookup column can refer to is included.
+    /// </summary>
+    AllLookupTargets,
+
+    /// <summary>
+    /// From an Update plugin step filtered on columns, fired by an update whose columns can't all be determined.
+    /// </summary>
+    FilterUnknown,
+}
