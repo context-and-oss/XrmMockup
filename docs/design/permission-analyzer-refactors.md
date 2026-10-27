@@ -54,3 +54,45 @@ The simple fixes from that review are already in. Paths are relative to
    by the depth limit or a cycle is no longer memoized, `Cascades.Expand` keeps the steps a cascade fires,
    `--operation` selects only its own operation, a type parameter is read as its constraints allow, and
    `WithinTargets` keeps the columns, bypass and other parts of a value.
+
+## Shared with XrmMockup and the metadata tool
+
+Functionality duplicated between this tool, `xrmmockup-metadata` and XrmMockup365, found in the
+critical review, for a later consolidation PR. Most valuable first; paths are relative to `src/`.
+
+1. **Privilege checks per request.** `PermissionAnalyzer.Core/Extraction/RequestRules.cs` restates by hand
+   what each XrmMockup handler's `CheckSecurity` checks, and the two disagree. XrmMockup skips checks the
+   rules list: Merge runs Associate and Disassociate through `handler.Execute` and writes with `db.Update`
+   (`MergeRequestHandler.cs`), QualifyLead writes the lead with `db.Update`, CloseIncident adds the
+   resolution with `db.Add`, the Win/Lose/Close messages write the parent through SetState, and ReviseQuote
+   reads with `db.GetEntity`. XrmMockup also checks things the rules miss: Read on the regarding record in
+   SendEmail, Create on `quotedetail` in ReviseQuote, Append/AppendTo in QualifyLead, and the record team
+   messages, which have no rule. It never checks a `prv*` privilege. `RequestRule.Enforced` records where
+   XrmMockup doesn't check, but nothing reads it. Proposal: an SDK-free netstandard2.0 library with the
+   per-message checks, used by the analyzer and by XrmMockup's handlers, or at least by a parity test.
+   Until then, mark the rules above `Enforced = false` and report it.
+2. **Step and workflow trigger matching.** XrmMockup splits filtered attributes and
+   `triggeronupdateattributelist` on `,` without trimming or lowercasing (`XrmMockup365/Plugin/PluginTrigger.cs`,
+   `Workflow/WorkflowManager.cs`, `WorkflowConstructor.cs`), so `"name, telephone1"` never fires on
+   `telephone1`: a bug in XrmMockup. The analyzer trims and lowercases (`PluginStepLoader`, `WorkflowLoader`).
+   XrmMockup reads a workflow with an empty primary entity as any table and stores `runas` without applying
+   it; the analyzer drops the first and models the second. XrmMockup ignores the bypass parameters. Share
+   the parsing and the matching of message, table and columns, in `MetadataSkeleton` or the library in 1.
+3. **Reading the metadata files.** `Metadata.xml`, `Workflows`, `SecurityRoles`, `PrivilegeCatalog.xml` and
+   the DataContract settings are spelled separately in `XrmMockup365/Internal/Utility.cs`,
+   `MetadataGenerator.Core/Services/DataContractMetadataSerializer.cs`, `MetadataGenerator365/Program.cs`
+   and `PermissionAnalyzer.Tool/Metadata/*Loader.cs`. The analyzer's `WorkflowLoader` lacks XrmMockup's
+   duplicate workflow id check, and `LookupLoader` merges `*Metadata.xml` in ordinal order where XrmMockup
+   reads `Metadata.xml` first. Proposal: a `MetadataFiles` class in `MetadataSkeleton` with the names and
+   readers; the analyzer keeps its streaming partial reads on top.
+4. **Security role model.** `RoleLoader` maps roles onto the analyzer's own `Privilege` and `PrivilegeDepth`,
+   and `RoleSet.Combine` repeats the max depth of `Security.GetPrincipalPrivilege`. The SDK-free enums are
+   deliberate; they could move to the library in 1.
+5. **Tool configuration.** The two tools' `ConfigReader`s are near copies. The metadata tool's `--config`
+   ignores the file name and a missing file (`MetadataGenerator.Tool/Program.cs`); this tool honours both.
+   `-s` is a `.sln` path here and Dataverse solution names there, and the metadata tool's
+   `ShortCategoryConsoleFormatter` would shorten this tool's log prefix. Low value: a small shared source
+   package at most.
+
+Left alone on purpose: the legacy `MetadataGenerator365`, and the analyzer reading only parts of the
+metadata instead of the whole `MetadataSkeleton`, for speed.
