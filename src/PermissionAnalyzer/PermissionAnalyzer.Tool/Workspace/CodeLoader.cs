@@ -11,26 +11,54 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 /// that a single project references are added as referenced code (<see cref="ManifestBuilder.AddReferencedCode"/>).
 /// The projects must be restored, as for a build. Strong-name signing is turned off, because it only affects the
 /// output and its key file is often not on the machine.
+/// <para>
+/// Every path is loaded into one workspace, so a project that several of them reference, such as a shared library of
+/// the plugin solutions, is loaded once and added once: by the first path that has it, whose kind of code is never
+/// weaker than a later one's.
+/// </para>
 /// </summary>
-internal sealed class CodeLoader(ILogger<CodeLoader> logger)
+internal sealed class CodeLoader(ILogger<CodeLoader> logger) : IDisposable
 {
-    public async Task AddAsync(string path, ManifestBuilder builder, ProjectFilter filter, CancellationToken cancellationToken, bool pluginCode = false)
+    // MSBuild reports warnings such as NuGet audit results as failures too, so they're only shown when a project
+    // turns out not to load, below
+    private readonly List<string> _failures = [];
+
+    // What became of each project, by file and name (which has the target framework)
+    private readonly Dictionary<(string File, string Name), Outcome> _seen = [];
+
+    private enum Outcome { Added, Skipped }
+
+    private MSBuildWorkspace? _workspace;
+    private IDisposable? _failureHandler;
+
+    public void Dispose()
     {
-        var solutionDirectory = Path.GetDirectoryName(Path.GetFullPath(path))!;
+        _failureHandler?.Dispose();
+        _workspace?.Dispose();
+    }
+
+    private MSBuildWorkspace Workspace()
+    {
+        if (_workspace is not null) return _workspace;
+
         var properties = FrameworkReferences.Properties();
         if (properties.TryGetValue(FrameworkReferences.Property, out var frameworkRoot))
         {
             logger.LogDebug(".NET Framework reference assemblies from {Root}", frameworkRoot);
         }
-        using var workspace = MSBuildWorkspace.Create(properties);
-        // MSBuild reports warnings such as NuGet audit results as failures too, so they're only shown when a
-        // project turns out not to load, below
-        var failures = new List<string>();
-        using var _ = workspace.RegisterWorkspaceFailedHandler(e =>
+        _workspace = MSBuildWorkspace.Create(properties);
+        _failureHandler = _workspace.RegisterWorkspaceFailedHandler(e =>
         {
             logger.LogDebug("{Message}", e.Diagnostic.Message);
-            lock (failures) failures.Add(e.Diagnostic.Message);
+            lock (_failures) _failures.Add(e.Diagnostic.Message);
         });
+        return _workspace;
+    }
+
+    public async Task AddAsync(string path, ManifestBuilder builder, ProjectFilter filter, CancellationToken cancellationToken, bool pluginCode = false)
+    {
+        var solutionDirectory = Path.GetDirectoryName(Path.GetFullPath(path))!;
+        var workspace = Workspace();
 
         logger.LogInformation("Loading {Path}", path);
         IEnumerable<Project> projects;
@@ -41,12 +69,16 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
         }
         else
         {
-            await workspace.OpenProjectAsync(path, cancellationToken: cancellationToken);
+            // Opening a project reuses the projects it references that the workspace already has
+            var fullPath = Path.GetFullPath(path);
+            if (!workspace.CurrentSolution.Projects.Any(p => string.Equals(p.FilePath, fullPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                await workspace.OpenProjectAsync(path, cancellationToken: cancellationToken);
+            }
             // A project with several target frameworks loads as one project per framework. The projects it
             // references are analyzed too, because entry points in this project call into them, such as
             // function apps whose Dataverse calls are in a shared library. Code in them that the project doesn't
             // reach isn't reported as unreached, since other apps that share the library may call it
-            var fullPath = Path.GetFullPath(path);
             var solution = workspace.CurrentSolution;
             var roots = solution.Projects.Where(p => string.Equals(p.FilePath, fullPath, StringComparison.OrdinalIgnoreCase)).ToList();
             projects = WithReferences(solution, roots).ToList();
@@ -57,9 +89,9 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
         var excluded = new HashSet<string>(StringComparer.Ordinal);
         string Problems(Project project)
         {
-            lock (failures)
+            lock (_failures)
             {
-                var messages = failures.Where(f => project.FilePath is { } file && f.Contains(file)).Distinct().Take(3);
+                var messages = _failures.Where(f => project.FilePath is { } file && f.Contains(file)).Distinct().Take(3);
                 return string.Concat(messages.Select(m => Environment.NewLine + "  " + m));
             }
         }
@@ -75,9 +107,18 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
                 continue;
             }
 
+            var key = (project.FilePath ?? "", project.Name);
+            if (_seen.TryGetValue(key, out var outcome))
+            {
+                logger.LogDebug("{Project} was already loaded", project.Name);
+                if (outcome == Outcome.Added) analyzed++;
+                continue;
+            }
+
             if (project.Language != LanguageNames.CSharp)
             {
                 logger.LogInformation("Skipping {Project}: only C# is analyzed", project.Name);
+                _seen[key] = Outcome.Skipped;
                 continue;
             }
 
@@ -104,6 +145,7 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger)
             var added = pluginCode ? builder.AddPluginCode(compilation, cancellationToken)
                 : referenced.Contains(project.Id) ? builder.AddReferencedCode(compilation, cancellationToken)
                 : builder.Add(compilation, cancellationToken);
+            _seen[key] = added ? Outcome.Added : Outcome.Skipped;
             if (!added)
             {
                 if (problems.Length == 0)

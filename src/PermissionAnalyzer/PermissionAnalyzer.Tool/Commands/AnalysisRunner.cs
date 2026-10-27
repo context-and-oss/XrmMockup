@@ -49,7 +49,7 @@ internal static class AnalysisRunner
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
             var filter = new ProjectFilter(root, settings.ExcludeProjects);
-            var loader = new CodeLoader(loggerFactory.CreateLogger<CodeLoader>());
+            using var loader = new CodeLoader(loggerFactory.CreateLogger<CodeLoader>());
             await loader.AddAsync(settings.Target, builder, filter, cancellationToken);
             foreach (var plugins in settings.PluginSolutions)
             {
