@@ -136,6 +136,34 @@ public class CoverageTests
 
         Assert.Equal(["account:Create as ApplicationUser: Missing"], Results(report, manifest.Entry("function:ProcessOrder")));
         Assert.False(report.UsesConfiguredRoles);
+        Assert.Empty(report.UnusedPrincipals);
+    }
+
+    [Fact]
+    public void ReportListsSettingsThatMatchNothingAnalyzed()
+    {
+        var manifest = Analyze.Code(FunctionSource, Governed);
+        var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
+        {
+            Principals = new Dictionary<string, RoleSet>
+            {
+                ["Test/ProcessOrder"] = RoleSet.Combine([Integration], "Principals: Test/ProcessOrder"),
+                ["Test/Gone"] = RoleSet.Combine([Integration], "Principals: Test/Gone"),
+                ["Other"] = RoleSet.Combine([Integration], "Principals: Other"),
+            },
+            Users = new Dictionary<string, RoleSet> { [UserId] = RoleSet.Combine([Manager], "Users: svc-plugins") },
+        });
+
+        Assert.Equal(["Other", "Test/Gone"], report.UnusedPrincipals);
+        Assert.Equal([UserId], report.UnusedUsers);
+    }
+
+    [Fact]
+    public void UserIdsInConfigurationAreNormalized()
+    {
+        Assert.Equal(UserId, CoverageSetup.UserId("{" + UserId.ToUpperInvariant() + "}"));
+        var error = Assert.Throws<ToolException>(() => CoverageSetup.UserId("svc-plugins"));
+        Assert.StartsWith("XrmMockup:Permissions:Users:svc-plugins isn't a user id", error.Message);
     }
 
     [Fact]

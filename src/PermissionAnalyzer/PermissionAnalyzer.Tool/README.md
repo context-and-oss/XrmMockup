@@ -545,8 +545,8 @@ names:
 | `ExcludeProjects` | Projects to leave out, such as test projects. See below |
 | `PluginSolutions` | Solutions or projects with plugin code that the analyzed code fires, used for plugin cascades only. `--plugin-solution` adds to these. See [Plugin code in another solution](#plugin-code-in-another-solution) |
 | `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds a method to these and also limits the report to the `--entry` methods. A name that matches no method is reported as a warning |
-| `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
-| `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |
+| `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given. A key that matches no analyzed assembly or function is logged as a warning |
+| `Users` | The roles of specific users by user id (the `systemuserid`, in any GUID format), such as the impersonating user of a plugin step or the owner of a background workflow. `Name` is shown in the output. A key that isn't a GUID is an error, and one no analyzed operation runs as is logged as a warning |
 | `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table, or leave out `Table` to accept a privilege not tied to a table by its name. Suppressed privileges are shown but don't fail `--fail-on-missing` |
 | `Rules` | Rules for requests passed to `Execute`, which replace the built-in rule for their message or add one. See below |
 

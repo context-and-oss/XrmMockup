@@ -697,7 +697,8 @@ The section holds what static analysis can't know:
         "Contoso.Functions": { "Roles": ["Integration App"] },
         "Contoso.Functions/ProcessOrder": { "Roles": ["Integration App", "Order Processor"] }
       },
-      // Impersonating users from plugin step metadata, mapped to roles
+      // Impersonating users from plugin step metadata and background workflow owners, by systemuserid
+      // (any GUID format; anything else is an error), mapped to roles
       "Users": {
         "00000000-0000-0000-0000-000000000001": { "Name": "svc-plugins", "Roles": ["Plugin Service"] }
       },
@@ -711,6 +712,10 @@ The section holds what static analysis can't know:
   }
 }
 ```
+
+A `Principals` key or `Users` id that matches nothing analyzed is logged as a warning, like an
+`--exclude` pattern that matches no project. The warnings are left out when an entry point option
+narrows the analysis, and for `Principals` when `--role` replaces them.
 
 Command-line options override the matching setting, as in the metadata tool. For example,
 `--solution` overrides `Solution` and `--metadata` overrides the metadata folder.

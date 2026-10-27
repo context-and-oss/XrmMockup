@@ -75,6 +75,18 @@ internal static class AnalysisRunner
             if (coverageOptions is not null)
             {
                 coverage = CoverageEvaluator.Evaluate(manifest, coverageOptions);
+                // Other entry points' settings are expected not to match when the analysis is narrowed to some
+                if (request.Scope is null)
+                {
+                    foreach (var key in coverage.UnusedPrincipals)
+                    {
+                        logger.LogWarning("{Setting}:Principals:{Key} matches no analyzed assembly or function", PermissionsConfiguration.SectionPath, key);
+                    }
+                    foreach (var id in coverage.UnusedUsers)
+                    {
+                        logger.LogWarning("{Setting}:Users:{Id} is a user no analyzed operation runs as", PermissionsConfiguration.SectionPath, id);
+                    }
+                }
                 if (coverageOptions.Roles is null && coverageOptions.CallerRoles is null && !coverage.UsesConfiguredRoles)
                 {
                     if (request.FailOnMissing)

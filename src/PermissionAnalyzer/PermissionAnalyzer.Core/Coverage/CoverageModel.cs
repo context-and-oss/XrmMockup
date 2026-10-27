@@ -161,7 +161,9 @@ public sealed class CoverageReport(
     CoverageSummary summary,
     IReadOnlyList<MissingPrivilege> missing,
     IReadOnlyList<MissingGlobalPrivilege> missingGlobal,
-    bool usesConfiguredRoles)
+    bool usesConfiguredRoles,
+    IReadOnlyList<string>? unusedPrincipals = null,
+    IReadOnlyList<string>? unusedUsers = null)
 {
     public CoverageSummary Summary { get; } = summary;
 
@@ -179,6 +181,16 @@ public sealed class CoverageReport(
     /// Some requirement was checked against roles from <c>Principals</c> or <c>Users</c>.
     /// </summary>
     public bool UsesConfiguredRoles { get; } = usesConfiguredRoles;
+
+    /// <summary>
+    /// The <c>Principals</c> keys no analyzed entry point used, sorted; empty when <c>--role</c> replaces them.
+    /// </summary>
+    public IReadOnlyList<string> UnusedPrincipals { get; } = unusedPrincipals ?? [];
+
+    /// <summary>
+    /// The <c>Users</c> ids no analyzed operation runs as, sorted.
+    /// </summary>
+    public IReadOnlyList<string> UnusedUsers { get; } = unusedUsers ?? [];
 
     public SectionCoverage For(IManifestSection section) => section is EntryPoint ? entryPoints[section.Id] : unreached[section.Id];
 }

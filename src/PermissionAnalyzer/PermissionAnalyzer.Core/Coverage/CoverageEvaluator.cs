@@ -68,6 +68,8 @@ public static class CoverageEvaluator
         foreach (var user in options.Users) users[user.Key] = user.Value;
 
         var usesConfiguredRoles = false;
+        var usedPrincipals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var sections = new List<SectionCoverage>();
         var missing = new SortedDictionary<(string Table, Privilege Privilege, RunsAs RunsAs, string Roles), (RoleSet Roles, SortedSet<string> In)>(MissingOrder);
         var missingGlobal = new SortedDictionary<(string Privilege, RunsAs RunsAs, string Roles), (RoleSet Roles, SortedSet<string> In)>(MissingGlobalOrder);
@@ -76,7 +78,7 @@ public static class CoverageEvaluator
         {
             var id = manifestSection.Id;
             var entryPoint = manifestSection as EntryPoint;
-            var applicationUser = ApplicationUserRoles(entryPoint, options, principals);
+            var applicationUser = ApplicationUserRoles(entryPoint, options, principals, usedPrincipals);
             var identities = new SortedDictionary<RunsAs, IdentityRoles>();
             var coverage = new Dictionary<Requirement, RequirementCoverage>();
             var globalCoverage = new Dictionary<GlobalRequirement, RequirementCoverage>();
@@ -86,6 +88,7 @@ public static class CoverageEvaluator
                 if (!identities.TryGetValue(identity, out var roles))
                 {
                     roles = Roles(identity, entryPoint, options, applicationUser, users);
+                    if (identity.Kind == RunsAsKind.User && roles.Roles is not null) usedUsers.Add(identity.UserId!);
                     if (roles.Roles is { } set && set != options.Roles && set != options.CallerRoles) usesConfiguredRoles = true;
                     identities.Add(identity, roles);
                 }
@@ -148,8 +151,13 @@ public static class CoverageEvaluator
 
         var missingPrivileges = missing.Select(m => new MissingPrivilege(m.Key.Table, m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();
         var missingGlobalPrivileges = missingGlobal.Select(m => new MissingGlobalPrivilege(m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();
-        return new CoverageReport(entryPoints, unreached, summary, missingPrivileges, missingGlobalPrivileges, usesConfiguredRoles);
+        // --role replaces the principals, so none of them is expected to match
+        var unusedPrincipals = options.Roles is null ? Unused(options.Principals.Keys, usedPrincipals) : [];
+        return new CoverageReport(entryPoints, unreached, summary, missingPrivileges, missingGlobalPrivileges, usesConfiguredRoles, unusedPrincipals, Unused(options.Users.Keys, usedUsers));
     }
+
+    private static List<string> Unused(IEnumerable<string> keys, HashSet<string> used) =>
+        keys.Where(k => !used.Contains(k)).OrderBy(k => k, StringComparer.Ordinal).ToList();
 
     private static readonly IComparer<(string Table, Privilege Privilege, RunsAs RunsAs, string Roles)> MissingOrder =
         Comparer<(string Table, Privilege Privilege, RunsAs RunsAs, string Roles)>.Create((x, y) =>
@@ -223,7 +231,7 @@ public static class CoverageEvaluator
     /// <summary>
     /// <c>--role</c>, else the entry point's function or assembly in <see cref="CoverageOptions.Principals"/>.
     /// </summary>
-    private static RoleSet? ApplicationUserRoles(EntryPoint? entryPoint, CoverageOptions options, Dictionary<string, RoleSet> principals)
+    private static RoleSet? ApplicationUserRoles(EntryPoint? entryPoint, CoverageOptions options, Dictionary<string, RoleSet> principals, HashSet<string> used)
     {
         if (options.Roles is not null) return options.Roles;
         if (entryPoint?.Assembly is not { } assembly) return null;
@@ -231,8 +239,11 @@ public static class CoverageEvaluator
         if (entryPoint.Kind == EntryPointKind.Function && EntryPointIds.FunctionName(entryPoint.Id) is { } name
             && principals.TryGetValue($"{assembly}/{name}", out var function))
         {
+            used.Add($"{assembly}/{name}");
             return function;
         }
-        return principals.TryGetValue(assembly, out var app) ? app : null;
+        if (!principals.TryGetValue(assembly, out var app)) return null;
+        used.Add(assembly);
+        return app;
     }
 }

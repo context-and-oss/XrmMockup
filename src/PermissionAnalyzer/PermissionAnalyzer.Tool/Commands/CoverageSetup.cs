@@ -52,12 +52,20 @@ internal static class CoverageSetup
             Users = configuration.Users
                 .OrderBy(u => u.Key, StringComparer.Ordinal)
                 .ToDictionary(
-                    u => u.Key,
+                    u => UserId(u.Key),
                     u => Resolve(catalog, u.Value.Roles, $"Users: {u.Value.Name ?? u.Key}", $"{PermissionsConfiguration.SectionPath}:Users:{u.Key}"),
                     StringComparer.OrdinalIgnoreCase),
             Suppress = configuration.Suppress.Select(Suppression).ToList(),
         };
     }
+
+    /// <summary>
+    /// A <c>Users</c> key as the id the analysis writes, so braces and case don't matter.
+    /// </summary>
+    internal static string UserId(string key) =>
+        Guid.TryParse(key, out var id)
+            ? id.ToString("D")
+            : throw new ToolException($"{PermissionsConfiguration.SectionPath}:Users:{key} isn't a user id. Use the systemuserid, such as 6f1c2a9e-0000-4000-8000-000000000001");
 
     private static RoleSet Resolve(RoleCatalog catalog, IReadOnlyList<string> names, string origin, string setting)
     {
