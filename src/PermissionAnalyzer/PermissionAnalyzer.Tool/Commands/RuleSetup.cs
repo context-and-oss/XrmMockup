@@ -33,6 +33,8 @@ internal static class RuleSetup
             GlobalPrivileges = GlobalPrivileges(rule.GlobalPrivileges, setting),
             Assumption = Blank(rule.Assumption),
             Enforced = rule.Enforced ?? true,
+            FiresOn = Blank(rule.FiresOn)?.ToLowerInvariant(),
+            StepMessage = Blank(rule.StepMessage),
         };
     }
 

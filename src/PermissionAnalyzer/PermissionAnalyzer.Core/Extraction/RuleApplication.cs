@@ -106,19 +106,25 @@ internal static class RuleApplication
 
     /// <summary>
     /// The member a request's plugin steps fire on: that of its first check on a member, usually <c>Target</c>.
+    /// <c>null</c> when the rule names the table they fire on (<see cref="ExpandedRule.FiresOn"/>).
     /// </summary>
-    public static string? PrimaryMember(ExpandedRule rule) => rule.Checks.FirstOrDefault(c => c.Member is not null)?.Member;
+    public static string? PrimaryMember(ExpandedRule rule) =>
+        rule.FiresOn is null ? rule.Checks.FirstOrDefault(c => c.Member is not null)?.Member : null;
 
     /// <summary>
-    /// The plugin steps a request fires: those of each of its messages, on the table of its
-    /// <see cref="PrimaryMember"/>, or else of its first check on a fixed table. A request whose checks name no
-    /// table fires on no table.
+    /// The plugin steps a request fires: those of each of its messages, on the table the rule names, or else that
+    /// of its <see cref="PrimaryMember"/>, or else of its first check on a fixed table. A request whose checks name
+    /// no table fires on no table.
     /// </summary>
     private static TableResolution Fired(string message, ExpandedRule rule, IRequestMembers members, PluginBypass bypass)
     {
         var tables = TableResolution.Empty;
         TableResolution? columns = null;
-        if (PrimaryMember(rule) is { } member)
+        if (rule.FiresOn is { } firesOn)
+        {
+            tables = TableResolution.Table(firesOn);
+        }
+        else if (PrimaryMember(rule) is { } member)
         {
             tables = members.Tables(message, member);
             columns = members.Columns(member);

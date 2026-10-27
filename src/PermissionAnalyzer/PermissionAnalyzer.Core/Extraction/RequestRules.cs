@@ -45,11 +45,13 @@ internal sealed class RequestRules
         {
             Assumption = "SendEmail sends the email as the calling user; sending it as another user needs prvSendAsUser",
         },
-        Rule("CloseIncident", On("IncidentResolution", Privilege.Create), OnTable("incident", Privilege.Write)),
-        Rule("WinOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)),
-        Rule("LoseOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)),
-        Rule("WinQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)),
-        Rule("CloseQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)),
+        // Closing a record creates its close activity, but the steps fire on the record, and for opportunities and
+        // quotes on the Win or Lose message, as in XrmMockup
+        Rule("CloseIncident", On("IncidentResolution", Privilege.Create), OnTable("incident", Privilege.Write)) with { FiresOn = "incident" },
+        Rule("WinOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)) with { FiresOn = "opportunity", StepMessage = "Win" },
+        Rule("LoseOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)) with { FiresOn = "opportunity", StepMessage = "Lose" },
+        Rule("WinQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)) with { FiresOn = "quote", StepMessage = "Win" },
+        Rule("CloseQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)) with { FiresOn = "quote", StepMessage = "Lose" },
         Rule("ReviseQuote", OnTable("quote", Privilege.Read, Privilege.Create)),
         Rule("InitializeFileBlocksUpload", On(SdkNames.Target, Privilege.Write)) with { Enforced = false },
         Rule("InitializeFileBlocksDownload", On(SdkNames.Target, Privilege.Read)) with { Enforced = false },
@@ -154,7 +156,8 @@ internal sealed class RequestRules
         if (rule.Assumption is { } assumption) assumptions.Add(assumption);
         var requests = new List<string>();
         var missing = new List<string>();
-        var messages = new List<string> { message };
+        var messages = new List<string> { rule.StepMessage ?? message };
+        var firesOn = rule.FiresOn;
         if (rule.Requests is { } nested) requests.Add(nested);
         foreach (var other in rule.As.Select(MessageNamed))
         {
@@ -170,6 +173,7 @@ internal sealed class RequestRules
             missing.AddRange(expanded.Missing);
             globals.AddRange(expanded.GlobalPrivileges);
             assumptions.AddRange(expanded.Assumptions);
+            firesOn ??= expanded.FiresOn;
         }
         visiting.Remove(message);
 
@@ -179,7 +183,8 @@ internal sealed class RequestRules
             missing.Distinct(StringComparer.Ordinal).ToList(),
             messages.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             globals.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g, StringComparer.Ordinal).ToList(),
-            assumptions.Distinct(StringComparer.Ordinal).OrderBy(a => a, StringComparer.Ordinal).ToList());
+            assumptions.Distinct(StringComparer.Ordinal).OrderBy(a => a, StringComparer.Ordinal).ToList(),
+            firesOn?.ToLowerInvariant());
         // A rule expanded inside a cycle misses the part of the cycle above it, so only complete ones are kept
         if (visiting.Count == 0) _expanded[message] = result;
         return result;
@@ -201,18 +206,20 @@ internal sealed class RequestRules
 /// <param name="Requests">The members that hold requests run as part of this one.</param>
 /// <param name="Missing">As-messages that have no rule.</param>
 /// <param name="Messages">
-/// The messages the request fires plugin steps for: its own and its as-messages, as Dataverse runs the steps of
-/// <c>Create</c> and <c>Update</c> for <c>Upsert</c>.
+/// The messages the request fires plugin steps for: its own, or its <see cref="RequestRule.StepMessage"/>, and its
+/// as-messages, as Dataverse runs the steps of <c>Create</c> and <c>Update</c> for <c>Upsert</c>.
 /// </param>
 /// <param name="GlobalPrivileges">The privileges the request needs by name, sorted.</param>
 /// <param name="Assumptions">What the analysis assumes about the request, sorted.</param>
+/// <param name="FiresOn">The table the request's plugin steps fire on, when the rule or an as-rule names one.</param>
 internal sealed record ExpandedRule(
     IReadOnlyList<RuleCheck> Checks,
     IReadOnlyList<string> Requests,
     IReadOnlyList<string> Missing,
     IReadOnlyList<string> Messages,
     IReadOnlyList<string> GlobalPrivileges,
-    IReadOnlyList<string> Assumptions);
+    IReadOnlyList<string> Assumptions,
+    string? FiresOn = null);
 
 /// <summary>
 /// The reasons a request isn't checked, built and recognized in one place, so the coverage summary can count them.

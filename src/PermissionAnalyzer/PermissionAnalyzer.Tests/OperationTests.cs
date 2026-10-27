@@ -117,6 +117,18 @@ public class OperationTests
     }
 
     [Fact]
+    public void ClosingARecordIsAnOperationOnTheRecord()
+    {
+        var operation = Run("CloseIncident", "incident");
+
+        // Not Create on the incident: the request creates the resolution, which is another member
+        Assert.Equal(["incident:Write"], operation.Requirements());
+        var unresolved = Assert.Single(operation.Unresolved);
+        Assert.Equal("IncidentResolution of the CloseIncident request isn't known", unresolved.Reason);
+        Assert.Equal([Privilege.Create], unresolved.Privileges);
+    }
+
+    [Fact]
     public void AccessRightsTheUserGrantsAreUnresolved()
     {
         var operation = Run("GrantAccess", "ctx_order");

@@ -44,6 +44,18 @@ public sealed record RequestRule(string Message)
     /// Whether XrmMockup's handler for the message makes the checks. Dataverse makes them either way.
     /// </summary>
     public bool Enforced { get; init; } = true;
+
+    /// <summary>
+    /// The table the request's plugin steps fire on, when it isn't that of its first check on a member: such as
+    /// <c>opportunity</c> for <c>WinOpportunityRequest</c>, whose first check is on its <c>OpportunityClose</c>.
+    /// </summary>
+    public string? FiresOn { get; init; }
+
+    /// <summary>
+    /// The message the request's plugin steps are registered on, when it isn't the request's own: such as
+    /// <c>Win</c> for <c>WinOpportunityRequest</c>.
+    /// </summary>
+    public string? StepMessage { get; init; }
 }
 
 /// <summary>

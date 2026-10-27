@@ -144,6 +144,16 @@ public record RuleConfiguration
     /// Whether XrmMockup makes the checks. <c>true</c> when not set.
     /// </summary>
     public bool? Enforced { get; init; }
+
+    /// <summary>
+    /// The table the request's plugin steps fire on, when it isn't that of its first member check.
+    /// </summary>
+    public string? FiresOn { get; init; }
+
+    /// <summary>
+    /// The message the request's plugin steps are registered on, when it isn't the request's own.
+    /// </summary>
+    public string? StepMessage { get; init; }
 }
 
 public record RuleCheckConfiguration

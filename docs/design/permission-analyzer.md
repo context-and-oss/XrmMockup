@@ -401,7 +401,9 @@ fires.
 
 **`--operation`.** A user operation is an entry point of kind `Operation` with no code. It is
 evaluated as a request of its message whose first member check (usually `Target`) refers to the
-given table, run as `Caller`:
+given table, run as `Caller`. For a rule that names the table its steps fire on (`FiresOn`, such as
+`opportunity` for `WinOpportunity`), the given table is that table, and every member check is on
+another member:
 
 - The privileges of the member checks on that member are needed on the table, and those of
   fixed-table checks on their table. Checks on other members (`RelatedEntities`), access masks

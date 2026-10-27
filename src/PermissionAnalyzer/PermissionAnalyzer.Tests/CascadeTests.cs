@@ -152,6 +152,37 @@ public class CascadeTests
     }
 
     [Fact]
+    public void WinningAnOpportunityFiresWinStepsOnTheOpportunity()
+    {
+        var manifest = Analyze.Code("""
+            namespace Contoso
+            {
+                public class OpportunityPlugin : Plugin
+                {
+                    public OpportunityPlugin()
+                    {
+                        RegisterPluginStep<Opportunity>("Win", ExecutionStage.PostOperation, c => c.OrganizationService.Delete("lead", Guid.Empty));
+                    }
+                }
+
+                [EntityLogicalName("opportunity")]
+                public class Opportunity : Entity { public Opportunity() : base("opportunity") { } }
+
+                public class Closer
+                {
+                    public void Run(IOrganizationService service, Guid id) =>
+                        service.Execute(new WinOpportunityRequest { OpportunityClose = new Entity("opportunityclose") { ["opportunityid"] = new EntityReference("opportunity", id) }, Status = new OptionSetValue(3) });
+                }
+            }
+            """,
+            setup: builder => builder.AddEntryMethods(["Contoso.Closer.Run"]));
+
+        var run = manifest.Entry("method:Contoso.Closer.Run(IOrganizationService, Guid)");
+        Assert.Equal(["plugin:Contoso.OpportunityPlugin:Win:opportunity:PostOperation"], run.Triggers);
+        Assert.Equal(["lead:Delete", "opportunity:AppendTo", "opportunity:Write", "opportunityclose:Append", "opportunityclose:Create"], run.Requirements().Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void StepsThatFireEachOtherAreExpandedOnce()
     {
         var manifest = Analyze.Code("""

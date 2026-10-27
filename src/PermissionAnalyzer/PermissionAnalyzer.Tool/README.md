@@ -440,7 +440,10 @@ point. Steps come from code registrations and from the plugin steps in the metad
   Azure Function or the user it acts for through `CallerId`, unless the step impersonates a user.
 - `Create`, `Update`, `Delete`, `Retrieve`, `RetrieveMultiple`, `Associate` and `Disassociate` fire their
   own message. A request fires its message on its `Target` table, and the messages it runs as:
-  `Upsert` also fires `Create` and `Update`, and `CreateMultiple` also fires `Create`.
+  `Upsert` also fires `Create` and `Update`, and `CreateMultiple` also fires `Create`. A request that
+  closes a record, such as `WinOpportunity` or `CloseIncident`, fires on the record, not on the close
+  activity it creates, and `WinOpportunity` and `WinQuote` fire `Win` steps, `LoseOpportunity` and
+  `CloseQuote` fire `Lose` steps, as in XrmMockup.
 - A step without a table fires for every table. An operation on a table that can't be resolved fires
   only those: the steps on a table are reported as unresolved ("may fire any of 12 Update steps"),
   because including every step of the message would include most of the solution and tell nothing.
@@ -595,6 +598,8 @@ needs. A message is matched to a rule by its own name first, ignoring case, so a
 | `GlobalPrivileges` | Privileges the request needs by name, such as `prvBulkDelete`, looked up in the privilege catalog as above |
 | `Assumption` | What the analysis assumes about the request, listed under assumptions wherever it is called |
 | `Enforced` | `false` when XrmMockup doesn't make the checks (Dataverse still does) |
+| `FiresOn` | The table the request's plugin steps fire on, when it isn't that of its first member check, as for `WinOpportunity`, which creates an `opportunityclose` but fires on `opportunity` |
+| `StepMessage` | The message the request's plugin steps are registered on, when it isn't the request's own, as `Win` for `WinOpportunity` |
 
 A rule with none of these needs no privilege, so its requests are no longer reported.
 
