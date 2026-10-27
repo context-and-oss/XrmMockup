@@ -23,7 +23,8 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
         }
         else
         {
-            var missing = coverage.Summary.Missing;
+            // A privilege once per identity and roles, as the text report lists them, not once per entry point
+            var missing = coverage.Missing.Count + coverage.MissingGlobal.Count;
             writer.Write(missing > 0 ? $"### ✘ {ReportText.Count(missing, "missing privilege")}\n\n" : "### ✔ No missing privileges\n\n");
             writer.Write(ReportText.Result(coverage.Summary) + "\n\n");
             if (ReportText.NotChecked(coverage.Summary) is { } notChecked) writer.Write($"> [!WARNING]\n> {Text(notChecked)}\n\n");
@@ -80,17 +81,34 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
     /// <summary>
     /// Text with the characters Markdown would format escaped, so a role or reason shows as written, also in a table.
     /// </summary>
-    private static string Text(string text) => MarkdownCharacters().Replace(text, @"\$0");
+    internal static string Text(string text) => MarkdownCharacters().Replace(OneLine(text), @"\$0");
 
     /// <summary>
-    /// A code span that also works in a table cell.
+    /// A code span that also works in a table cell, fenced with one backtick more than the longest run in the text.
     /// </summary>
-    private static string Code(string text)
+    internal static string Code(string text)
     {
-        var escaped = text.Replace("|", @"\|");
-        return text.Contains('`') ? $"`` {escaped} ``" : $"`{escaped}`";
+        var escaped = OneLine(text).Replace("|", @"\|");
+        var longest = Backticks().Matches(escaped).Select(m => m.Length).DefaultIfEmpty(0).Max();
+        if (longest == 0) return $"`{escaped}`";
+
+        // The spaces keep a backtick at either end apart from the fence; Markdown strips them
+        var fence = new string('`', longest + 1);
+        return $"{fence} {escaped} {fence}";
     }
+
+    /// <summary>
+    /// <paramref name="text"/> with line breaks and other control characters as spaces, so it can't end a table row or
+    /// start a block of its own.
+    /// </summary>
+    private static string OneLine(string text) => ControlCharacters().Replace(text, " ");
 
     [GeneratedRegex(@"[\\`*_{}\[\]<>#|~]")]
     private static partial Regex MarkdownCharacters();
+
+    [GeneratedRegex(@"`+")]
+    private static partial Regex Backticks();
+
+    [GeneratedRegex(@"\p{Cc}")]
+    private static partial Regex ControlCharacters();
 }

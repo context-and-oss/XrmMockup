@@ -48,10 +48,10 @@ public class OutputFormatTests
 
     private const string UpdateStep = "plugin:P:Update:account:PostOperation";
 
-    private static string Write(IManifestWriter writer, RoleDefinition? role = null, IReadOnlyList<Suppression>? suppress = null, string file = "Code.cs")
+    private static string Write(IManifestWriter writer, RoleDefinition? role = null, IReadOnlyList<Suppression>? suppress = null, string file = "Code.cs", string source = Source)
     {
         var builder = new ManifestBuilder(Analyze.Root);
-        Assert.True(builder.Add(Analyze.Compile(Source, file: file)));
+        Assert.True(builder.Add(Analyze.Compile(source, file: file)));
         var manifest = builder.Build(["account", "contact"]);
         var coverage = role is null ? null : CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([role], "--role"), Suppress = suppress ?? [] });
         using var output = new StringWriter();
@@ -96,6 +96,37 @@ public class OutputFormatTests
         // The counts are of the whole analysis
         Assert.StartsWith("### ✘ 2 missing privileges", markdown);
         Assert.EndsWith("Filtered by --table contact: 2 of 4 requirements match\n", markdown);
+    }
+
+    [Fact]
+    public void MarkdownHeadingCountsEachMissingPrivilegeOnce()
+    {
+        var markdown = Write(new MarkdownManifestWriter(), Salesperson, source: """
+            public class Importer
+            {
+                public void First(IOrganizationService service) => service.Create(new Contact());
+
+                public void Second(IOrganizationService service) => service.Create(new Contact());
+            }
+            """);
+
+        Assert.StartsWith("### ✘ 1 missing privilege\n\nResult: 0 granted, 2 missing", markdown);
+    }
+
+    [Theory]
+    [InlineData("a|b", @"`a\|b`")]
+    [InlineData("a`b", "`` a`b ``")]
+    [InlineData("``a`", "``` ``a` ```")]
+    [InlineData("a\n| x |\r\nb", @"`a \| x \|  b`")]
+    public void MarkdownCodeSpansStayOnOneLineAndInTheirCell(string text, string expected)
+    {
+        Assert.Equal(expected, MarkdownManifestWriter.Code(text));
+    }
+
+    [Fact]
+    public void MarkdownTextHasNoLineBreaks()
+    {
+        Assert.Equal(@"Sales \# Ops", MarkdownManifestWriter.Text("Sales\n# Ops"));
     }
 
     [Fact]

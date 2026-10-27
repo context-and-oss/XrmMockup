@@ -851,8 +851,11 @@ the detail level, take the filters, and keep the output deterministic.
 - **Markdown** (`--format markdown`) is for a pull request comment or a job summary: a heading
   with the result, `Result` and `Not checked` (as a warning callout), then the `minimal` blocks as
   `| Table | Privileges |` tables, with the `compact` entry point groups and the unresolved
-  operations in `<details>`, so the comment stays short. It ends with the counts. Free text is
-  escaped and ids are code spans, with `|` escaped so they don't break a table.
+  operations in `<details>`, so the comment stays short. It ends with the counts. The heading
+  counts each missing privilege once per identity and roles, as `Missing privileges` lists them.
+  Free text is escaped and ids are code spans fenced past their longest run of backticks, with `|`
+  escaped and line breaks and control characters as spaces, so they can't break a table or add
+  Markdown of their own.
 - **SARIF** (`--format sarif`, 2.1.0) is for GitHub code scanning. The rules are
   `missing-privilege` (error), `unresolved-operation` (warning, not for SYSTEM), `not-checked`
   and `unverifiable` (notes). A result is a call site with one privilege, identity and role

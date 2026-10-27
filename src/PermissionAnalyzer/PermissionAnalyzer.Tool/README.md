@@ -147,7 +147,7 @@ Missing from Salesperson (--role), for Caller:
 
 1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
 Result: 1 granted, 1 missing, 1 as SYSTEM
-Not checked: 1 unresolved operation (1 with an unknown table)
+Not checked: 1 unresolved operation (1 with an unknown table or request)
 Not shown: entry points, sources and requirements with nothing to fix. --detail compact adds the entry points, normal the sources, detailed everything
 ```
 
@@ -166,7 +166,7 @@ plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation  src/Plugi
 Result: 1 granted, 1 missing, 1 as SYSTEM
 Missing privileges:
   ✘ contact  Create  Caller  Salesperson (--role)  in plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation
-Not checked: 1 unresolved operation (1 with an unknown table)
+Not checked: 1 unresolved operation (1 with an unknown table or request)
 Not shown: 2 requirements with nothing to fix. --detail detailed lists them, full also adds every source and call path
 ```
 
@@ -706,11 +706,12 @@ it). Without roles, none of these are written.
 ### Markdown
 
 `--format markdown` writes the report as GitHub-flavored Markdown, for a pull request comment or a
-job summary: a heading with the result (`✘ 28 missing privileges`), the `Result` line and the
+job summary: a heading with the number of privileges the roles lack (`✘ 6 missing privileges`, each counted once as in `Missing privileges`), the `Result` line and the
 `Not checked` line as a warning, then a table per set of roles with what it lacks, as in `minimal`.
 The entry points that need each block's privileges, as in `compact`, and the unresolved operations
 are folded away in `<details>`. It ends with the counts. Markdown ignores `--detail`; filters
-narrow it like the text. Role names, reasons and ids are escaped, so they show as written.
+narrow it like the text. Role names, reasons and ids are escaped and put on one line, so they show as written and can't
+add Markdown of their own.
 
 ```yaml
 - run: xrmmockup-permissions --fail-on-missing --format markdown --output permissions.md
