@@ -23,4 +23,9 @@ public interface IManifestSection
     IReadOnlyList<UnresolvedOperation> Unresolved { get; }
 
     IReadOnlyList<Assumption> Assumptions { get; }
+
+    /// <summary>
+    /// The analysis stopped at its limit of calls, so requirements may be missing.
+    /// </summary>
+    bool Truncated { get; }
 }

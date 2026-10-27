@@ -9,7 +9,8 @@ public sealed class MethodManifest(
     IReadOnlyList<Requirement> requirements,
     IReadOnlyList<UnresolvedOperation> unresolved,
     IReadOnlyList<Assumption> assumptions,
-    IReadOnlyList<GlobalRequirement>? globalRequirements = null) : IManifestSection
+    IReadOnlyList<GlobalRequirement>? globalRequirements = null,
+    bool truncated = false) : IManifestSection
 {
     /// <summary>
     /// Fully qualified method signature, e.g. <c>Contoso.Plugins.AccountPostPlugin.Execute(LocalPluginContext)</c>.
@@ -37,4 +38,6 @@ public sealed class MethodManifest(
     /// Operations counted as running as the caller because their identity is unknown, sorted by source location.
     /// </summary>
     public IReadOnlyList<Assumption> Assumptions { get; } = assumptions;
+
+    public bool Truncated { get; } = truncated;
 }

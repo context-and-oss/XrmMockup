@@ -68,7 +68,7 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
                 .Concat(missing.Value.MissingGlobal.Select(m => Missing(null, m.Privilege, m.RunsAs, m.Roles, m.In)))
                 .ToList(),
             coverage?.Summary is { } summary
-                ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.UnresolvedWorkflow, summary.Unverifiable, summary.Incomplete)
+                ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.UnresolvedWorkflow, summary.Unverifiable, summary.Truncated, summary.Incomplete)
                 : null);
 
         writer.Write(JsonSerializer.Serialize(document, Options));
@@ -181,6 +181,7 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
         int UnresolvedCustomApi,
         int UnresolvedWorkflow,
         int Unverifiable,
+        int Truncated,
         bool Incomplete);
 
     private sealed record UnresolvedDocument(

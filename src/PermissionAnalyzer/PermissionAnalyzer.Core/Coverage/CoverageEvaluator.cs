@@ -143,7 +143,8 @@ public static class CoverageEvaluator
             sections.Sum(s => s.UnresolvedNoRule),
             sections.Sum(s => s.UnresolvedCustomApi),
             sections.Sum(s => s.UnresolvedWorkflow),
-            Count(CoverageStatus.Unverifiable));
+            Count(CoverageStatus.Unverifiable),
+            manifest.Sections.Count(s => s.Truncated));
 
         var missingPrivileges = missing.Select(m => new MissingPrivilege(m.Key.Table, m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();
         var missingGlobalPrivileges = missingGlobal.Select(m => new MissingGlobalPrivilege(m.Key.Privilege, m.Key.RunsAs, m.Value.Roles, m.Value.In.ToList())).ToList();

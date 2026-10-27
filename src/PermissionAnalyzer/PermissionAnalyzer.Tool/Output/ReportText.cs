@@ -76,6 +76,11 @@ internal static class ReportText
         {
             parts.Add($"{Count(summary.Unverifiable, "privilege")} not tied to a table (the role metadata predates them; regenerate it)");
         }
+        if (summary.Truncated > 0)
+        {
+            var sections = summary.Truncated == 1 ? "entry point or method" : "entry points or methods";
+            parts.Add($"{summary.Truncated} {sections} whose analysis stopped at the call limit");
+        }
         return parts.Count > 0 ? "Not checked: " + string.Join(", ", parts) : null;
     }
 

@@ -104,7 +104,8 @@ public sealed class SectionCoverage(
 /// <summary>
 /// Counts over every requirement of a <see cref="CoverageReport"/>, including privileges not tied to a table. <see cref="UnresolvedNoRule"/>,
 /// <see cref="UnresolvedCustomApi"/> and <see cref="UnresolvedWorkflow"/> are the parts of <see cref="Unresolved"/> that are requests
-/// without a rule, custom API calls and fired workflows.
+/// without a rule, custom API calls and fired workflows. <see cref="Truncated"/> counts the entry points and unreached methods
+/// whose analysis stopped early.
 /// </summary>
 public sealed record CoverageSummary(
     int Granted,
@@ -117,17 +118,18 @@ public sealed record CoverageSummary(
     int UnresolvedNoRule,
     int UnresolvedCustomApi,
     int UnresolvedWorkflow,
-    int Unverifiable)
+    int Unverifiable,
+    int Truncated = 0)
 {
     /// <summary>
-    /// Something the result doesn't cover: unresolved operations, identities without roles or privileges that
-    /// can't be checked.
+    /// Something the result doesn't cover: unresolved operations, identities without roles, privileges that
+    /// can't be checked or an analysis that stopped early.
     /// </summary>
-    public bool Incomplete => Unresolved + NotChecked + Unverifiable > 0;
+    public bool Incomplete => Unresolved + NotChecked + Unverifiable + Truncated > 0;
 
     /// <summary>
     /// Nothing is missing. With <paramref name="strict"/>, everything was also checked: no unresolved operations,
-    /// unchecked identities or unverifiable privileges.
+    /// unchecked identities, unverifiable privileges or analyses that stopped early.
     /// </summary>
     public bool Passed(bool strict) => Missing == 0 && (!strict || !Incomplete);
 }

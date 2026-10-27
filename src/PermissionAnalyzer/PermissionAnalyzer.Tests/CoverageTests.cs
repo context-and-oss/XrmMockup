@@ -462,6 +462,17 @@ public class CoverageTests
     }
 
     [Fact]
+    public void TruncatedAnalysisOnlyFailsWhenStrict()
+    {
+        var summary = new CoverageSummary(Granted: 2, NotGoverned: 0, Missing: 0, Suppressed: 0, NotChecked: 0, System: 0, Unresolved: 0, UnresolvedNoRule: 0, UnresolvedCustomApi: 0, UnresolvedWorkflow: 0, Unverifiable: 0, Truncated: 2);
+
+        Assert.True(summary.Incomplete);
+        Assert.True(summary.Passed(strict: false));
+        Assert.False(summary.Passed(strict: true));
+        Assert.Equal("Not checked: 2 entry points or methods whose analysis stopped at the call limit", ReportText.NotChecked(summary));
+    }
+
+    [Fact]
     public void TextOutputCountsRequestsWithoutRuleAndCustomApiCalls()
     {
         var manifest = Analyze.Code("""

@@ -452,8 +452,9 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 var results = g.OrderBy(n => n.Id, StringComparer.Ordinal).Select(n => evaluator.EvaluateAlone(n, n.Display)).ToList();
                 var member = _graph.Nodes.TryGetValue(g.Key, out var memberNode) ? memberNode : null;
                 var declaration = member?.Declaration ?? g.Select(n => n.MemberDeclaration).Where(d => d is not null).Min();
-                var (requirements, unresolved, assumptions, globalRequirements) = Aggregate(resolver.Resolve(results), RunsAs.ApplicationUser with { Assumed = true });
-                return new MethodManifest(g.Key, declaration, requirements, unresolved, assumptions, globalRequirements);
+                var hits = resolver.Resolve(results);
+                var (requirements, unresolved, assumptions, globalRequirements) = Aggregate(hits, RunsAs.ApplicationUser with { Assumed = true });
+                return new MethodManifest(g.Key, declaration, requirements, unresolved, assumptions, globalRequirements, hits.Truncated);
             })
             .ToList();
     }
@@ -462,7 +463,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     {
         var hits = resolver.Resolve([cascade.Result], candidate.Kind == EntryPointKind.CustomApi ? candidate : null);
         var (requirements, unresolved, assumptions, globalRequirements) = Aggregate(hits, caller);
-        return Describe(candidate, requirements, unresolved, assumptions, cascade.Fired, globalRequirements);
+        return Describe(candidate, requirements, unresolved, assumptions, cascade.Fired, globalRequirements, hits.Truncated);
     }
 
     private static EntryPoint Describe(
@@ -471,7 +472,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         IReadOnlyList<UnresolvedOperation> unresolved,
         IReadOnlyList<Assumption> assumptions,
         IReadOnlyList<string>? triggers = null,
-        IReadOnlyList<GlobalRequirement>? globalRequirements = null) =>
+        IReadOnlyList<GlobalRequirement>? globalRequirements = null,
+        bool truncated = false) =>
         new(
             candidate.Id,
             candidate.Kind,
@@ -484,7 +486,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             unresolved,
             assumptions,
             triggers,
-            globalRequirements);
+            globalRequirements,
+            truncated);
 
     /// <summary>
     /// Merges the hits of an evaluation: one requirement per table (or privilege not tied to a table), privilege and

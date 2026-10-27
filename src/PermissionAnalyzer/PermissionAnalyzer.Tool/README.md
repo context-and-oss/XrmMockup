@@ -206,8 +206,9 @@ Each requirement is checked against the roles of the identity it runs as:
 - `Missing privileges` lists each missing privilege once, with the identity, the roles that don't
   grant it and every entry point or unreached method that needs it. With `--fail-on-missing`, the error names them too.
 - `Not checked` lists what the result doesn't cover: unresolved operations (split into requests
-  without a rule, custom API calls, and operations with an unknown table or request), requirements whose identity has no roles and
-  unverifiable privileges. It is left out when everything was checked. When nothing is
+  without a rule, custom API calls, fired workflows, and operations with an unknown table or request), requirements whose identity
+  has no roles, unverifiable privileges, and entry points or methods whose analysis stopped at its limit of 10,000 calls
+  (their requirements may be incomplete). It is left out when everything was checked. When nothing is
   missing but something wasn't checked, `--fail-on-missing` exits with `0` and logs a warning; `--strict` makes it fail.
 - Some privileges aren't tied to a table, such as `prvActOnBehalfOfAnotherUser` or the execute
   privilege of a custom API. They are listed with their name in the table column and `global` as the
@@ -230,7 +231,7 @@ xrmmockup-permissions --function ProcessOrder --role "Integration App" --fail-on
 | Code | Meaning |
 |------|---------|
 | `0` | Success. With `--fail-on-missing`: every checked privilege is granted, suppressed or on a table no role governs |
-| `1` | With `--fail-on-missing`: some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, or a privilege is unverifiable |
+| `1` | With `--fail-on-missing`: some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, a privilege is unverifiable, or an analysis stopped at the call limit |
 | `2` | Error: invalid options, missing files, an unknown role, or, with `--fail-on-missing`, no roles at all (no `--role`, `--caller-role`, and nothing analyzed matches `Principals` or `Users`) |
 
 ## Entry points
@@ -697,7 +698,8 @@ With roles, each requirement also has `coverage` (`status`: `granted`, `not-gove
 `suppressed`, `not-checked`, `system` or `unverifiable`, with `depth` or `reason`), each entry point has `roles` (the
 roles per identity, with their `origin`), and the document
 has a `result` with the counts, `unresolvedNoRule`, `unresolvedCustomApi` and `unresolvedWorkflow` (the
-unresolved operations that are requests without a rule, custom API calls and fired workflows) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
+unresolved operations that are requests without a rule, custom API calls and fired workflows), `truncated` (the
+entry points and methods whose analysis stopped at the call limit) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
 with `table` (left out for a privilege not tied to a table), `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
 it). Without roles, none of these are written.
 

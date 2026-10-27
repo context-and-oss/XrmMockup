@@ -127,9 +127,10 @@ internal static class AnalysisRunner
             {
                 logger.LogWarning(
                     "The roles grant every privilege found, but the result is incomplete: {Unresolved} unresolved operations, " +
-                    "{NotChecked} requirements without roles and {Unverifiable} privileges not tied to a table that the role metadata predates weren't checked. " +
+                    "{NotChecked} requirements without roles, {Unverifiable} privileges not tied to a table that the role metadata predates " +
+                    "and {Truncated} entry points or methods whose analysis stopped at the call limit weren't checked. " +
                     "See 'Not checked' in the report, or pass {Strict} to fail on them",
-                    summary.Unresolved, summary.NotChecked, summary.Unverifiable, CliOptions.Strict.Primary);
+                    summary.Unresolved, summary.NotChecked, summary.Unverifiable, summary.Truncated, CliOptions.Strict.Primary);
             }
             return ExitCodes.Success;
         }
@@ -137,13 +138,13 @@ internal static class AnalysisRunner
         if (summary.Missing > 0)
         {
             var privileges = coverage.Missing.Select(m => $"{m.Table} {m.Privilege}").Concat(coverage.MissingGlobal.Select(m => m.Privilege)).Distinct().ToList();
-            logger.LogError("The roles don't grant {Count} privileges: {Privileges}. See 'Missing privileges' in the report", privileges.Count, string.Join(", ", privileges));
+            logger.LogError("The roles don't grant {Count} privileges: {Privileges}. See the report", privileges.Count, string.Join(", ", privileges));
         }
         else
         {
             logger.LogError(
-                "{Strict}: {Unresolved} unresolved, {NotChecked} not checked, {Unverifiable} unverifiable",
-                CliOptions.Strict.Primary, summary.Unresolved, summary.NotChecked, summary.Unverifiable);
+                "{Strict}: {Unresolved} unresolved, {NotChecked} not checked, {Unverifiable} unverifiable, {Truncated} stopped at the call limit",
+                CliOptions.Strict.Primary, summary.Unresolved, summary.NotChecked, summary.Unverifiable, summary.Truncated);
         }
         return ExitCodes.MissingPrivileges;
     }

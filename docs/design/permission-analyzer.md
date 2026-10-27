@@ -604,8 +604,8 @@ xrmmockup-permissions --role "Integration App" --function ProcessOrder --fail-on
   configured, is an error (exit `2`) that suggests the closest names.
 - `Suppress` entries (§6.3) turn a missing privilege into "suppressed", which doesn't fail.
   A table no role in `Metadata/` mentions counts as covered, because XrmMockup doesn't check it.
-- `--strict` fails like `--fail-on-missing`, and also on unresolved operations, identities with no roles to check against
-  and unverifiable privileges.
+- `--strict` fails like `--fail-on-missing`, and also on unresolved operations, identities with no roles to check against,
+  unverifiable privileges and entry points or methods whose analysis stopped at the call limit (`Evaluator.MaxVisits`).
 - Output: granted / missing per `(table, privilege)` with the depth the role grants, the
   source location and the call path. With `--fail-on-missing`, exit code `0` = covered, `1` =
   missing privileges; `2` is always an analysis error. Unresolved operations alone don't fail
@@ -644,7 +644,8 @@ Not checked: 5 unresolved operations (1 request without a rule, 3 custom API cal
 so each gap is listed once with every entry point that needs it. `Not checked` lists unresolved
 operations (requests with no rule and custom API calls apart from operations with an unknown
 table or request, §5.3), requirements whose identity has no roles, and privileges not tied to a
-table that are unverifiable because the role metadata predates them. The line is left out when everything was checked. When nothing is missing but something wasn't
+table that are unverifiable because the role metadata predates them, and the entry points or methods whose analysis
+stopped at the call limit. The line is left out when everything was checked. When nothing is missing but something wasn't
 checked, `--fail-on-missing` exits `0` with a warning, and `--strict` fails.
 
 Finding which downloaded roles, or smallest combination of roles, would cover a requirement
@@ -746,7 +747,7 @@ Command-line options override the matching setting, as in the metadata tool. For
                 "origin": "--role", "in": ["plugin:Contoso.AccountPostPlugin:Update:account:PostOperation"] }],   // with roles only; no "table" for a privilege not tied to a table
   "result": { "granted": 12, "notGoverned": 0, "missing": 2, "suppressed": 0, "notChecked": 1,
               "system": 1, "unresolved": 1, "unresolvedNoRule": 0, "unresolvedCustomApi": 0, "unresolvedWorkflow": 0,
-              "unverifiable": 0,
+              "unverifiable": 0, "truncated": 0,
               "incomplete": true }   // with roles only
 }
 ```

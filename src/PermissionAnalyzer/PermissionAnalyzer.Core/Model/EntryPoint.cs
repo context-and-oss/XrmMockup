@@ -15,7 +15,8 @@ public sealed class EntryPoint(
     IReadOnlyList<UnresolvedOperation> unresolved,
     IReadOnlyList<Assumption> assumptions,
     IReadOnlyList<string>? triggers = null,
-    IReadOnlyList<GlobalRequirement>? globalRequirements = null) : IManifestSection
+    IReadOnlyList<GlobalRequirement>? globalRequirements = null,
+    bool truncated = false) : IManifestSection
 {
     /// <summary>
     /// A stable id such as <c>plugin:Contoso.AccountPostPlugin:Update:account:PostOperation</c>.
@@ -65,4 +66,6 @@ public sealed class EntryPoint(
     /// steps, sorted. Their requirements are part of <see cref="Requirements"/>.
     /// </summary>
     public IReadOnlyList<string> Triggers { get; } = triggers ?? [];
+
+    public bool Truncated { get; } = truncated;
 }
