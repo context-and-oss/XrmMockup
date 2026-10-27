@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using XrmMockup.MetadataGenerator.Core.Extensions;
 using XrmMockup.MetadataGenerator.Core.Models;
-using XrmMockup.MetadataGenerator.Tool.Logging;
 using XrmMockup.MetadataGenerator.Tool.Options;
+using XrmMockup.Tools.Common.Logging;
 
 using MsOptions = Microsoft.Extensions.Options;
 
@@ -62,11 +62,7 @@ public static class ServiceCollectionExtensions
             builder
                 .AddFilter("Microsoft", LogLevel.Warning)
                 .AddFilter("System", LogLevel.Warning)
-                .AddConsole(options =>
-                {
-                    options.FormatterName = ShortCategoryConsoleFormatter.FormatterName;
-                })
-                .AddConsoleFormatter<ShortCategoryConsoleFormatter, SimpleConsoleFormatterOptions>(options =>
+                .AddShortCategoryConsole(options =>
                 {
                     options.TimestampFormat = "HH:mm:ss ";
                     options.ColorBehavior = LoggerColorBehavior.Enabled;
