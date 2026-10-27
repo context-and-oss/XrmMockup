@@ -65,12 +65,33 @@ public class PluginStepLoaderTests
         }
     }
 
-    private static MetadataSkeleton Skeleton(string table, string lookup, string plugin)
+    [Fact]
+    public void AnEntityInTheMainFileWinsOverTheSameEntityInAnExtraFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(directory);
+        try
+        {
+            // "Extra" sorts before "Metadata", but XrmMockup reads the main file first and ignores an entity it has
+            Write(Path.Combine(directory, MetadataFileLoader.MetadataFile), Skeleton("contact", "parentcustomerid", "Contoso.Main", "account"));
+            Write(Path.Combine(directory, "Extra" + MetadataFileLoader.MetadataFile), Skeleton("contact", "ctx_ownerid", "Contoso.Extra", "systemuser"));
+
+            var contents = MetadataFileLoader.Load(directory);
+
+            Assert.Equal(["contact.parentcustomerid -> account"], contents.Lookups.Select(c => $"{c.Table}.{c.Column} -> {string.Join(",", c.Targets)}"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static MetadataSkeleton Skeleton(string table, string lookup, string plugin, string target = "account")
     {
         var entity = new EntityMetadata { LogicalName = table };
         typeof(EntityMetadata).GetProperty(nameof(EntityMetadata.Attributes))!.SetValue(entity, new AttributeMetadata[]
         {
-            new LookupAttributeMetadata { LogicalName = lookup, Targets = ["account"] },
+            new LookupAttributeMetadata { LogicalName = lookup, Targets = [target] },
         });
         return new MetadataSkeleton
         {

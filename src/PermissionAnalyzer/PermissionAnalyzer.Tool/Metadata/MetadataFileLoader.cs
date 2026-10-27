@@ -37,9 +37,13 @@ internal static class MetadataFileLoader
 
         var entitySerializer = new DataContractSerializer(typeof(Dictionary<string, EntityMetadata>), EntityMetadataElement, Namespace);
         var pluginSerializer = new DataContractSerializer(typeof(List<MetaPlugin>), PluginsElement, Namespace);
-        var entities = new List<EntityMetadata>();
+        // As in XrmMockup, the main file goes first and an entity that an earlier file has is ignored
+        var entities = new Dictionary<string, EntityMetadata>();
         var plugins = new List<MetaPlugin>();
-        foreach (var file in Directory.GetFiles(metadataDirectory, "*" + MetadataFile).OrderBy(f => f, StringComparer.Ordinal))
+        var files = Directory.GetFiles(metadataDirectory, "*" + MetadataFile)
+            .OrderBy(f => Path.GetFileName(f) == MetadataFile ? 0 : 1)
+            .ThenBy(f => f, StringComparer.Ordinal);
+        foreach (var file in files)
         {
             // Plugin steps only come from the main file, as in XrmMockup
             var withPlugins = Path.GetFileName(file) == MetadataFile;
@@ -57,7 +61,10 @@ internal static class MetadataFileLoader
                 }
                 else if (reader.LocalName == EntityMetadataElement)
                 {
-                    if (entitySerializer.ReadObject(reader) is Dictionary<string, EntityMetadata> metadata) entities.AddRange(metadata.Values);
+                    if (entitySerializer.ReadObject(reader) is Dictionary<string, EntityMetadata> metadata)
+                    {
+                        foreach (var entity in metadata) entities.TryAdd(entity.Key, entity.Value);
+                    }
                     readEntities = true;
                 }
                 else if (reader.LocalName == PluginsElement && withPlugins)
@@ -71,6 +78,6 @@ internal static class MetadataFileLoader
                 }
             }
         }
-        return new(LookupLoader.Convert(entities), PluginStepLoader.Convert(plugins));
+        return new(LookupLoader.Convert(entities.Values), PluginStepLoader.Convert(plugins));
     }
 }
