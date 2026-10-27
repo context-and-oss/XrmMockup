@@ -82,7 +82,7 @@ critical review, for a later consolidation PR. Most valuable first; paths are re
    the DataContract settings are spelled separately in `XrmMockup365/Internal/Utility.cs`,
    `MetadataGenerator.Core/Services/DataContractMetadataSerializer.cs`, `MetadataGenerator365/Program.cs`
    and `PermissionAnalyzer.Tool/Metadata/*Loader.cs`. The analyzer's `WorkflowLoader` lacks XrmMockup's
-   duplicate workflow id check, and `LookupLoader` merges `*Metadata.xml` in ordinal order where XrmMockup
+   duplicate workflow id check, and `MetadataFileLoader` merges `*Metadata.xml` in ordinal order where XrmMockup
    reads `Metadata.xml` first. Proposal: a `MetadataFiles` class in `MetadataSkeleton` with the names and
    readers; the analyzer keeps its streaming partial reads on top.
 4. **Security role model.** `RoleLoader` maps roles onto the analyzer's own `Privilege` and `PrivilegeDepth`,
