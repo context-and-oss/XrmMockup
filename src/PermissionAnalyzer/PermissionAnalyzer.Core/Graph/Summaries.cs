@@ -156,11 +156,12 @@ internal sealed class NodeSummary(string id, string member, string display, stri
 
     /// <summary>
     /// Adds the facts of the same node from another compilation, such as another target framework. Facts at the
-    /// same source location are the same fact.
+    /// same source location are the same fact, unless an access resolved differently, such as through a constant
+    /// that each target framework defines its own way: then both are kept.
     /// </summary>
     public void Merge(NodeSummary other)
     {
-        MergeBySource(Accesses, other.Accesses, a => (a.Source, a.Operation + "\n" + a.ReasonPrefix + "\n" + string.Join(",", a.Privileges)));
+        MergeBySource(Accesses, other.Accesses, a => (a.Source, a.Operation + "\n" + a.ReasonPrefix + "\n" + string.Join(",", a.Privileges) + "\n" + a.Tables + "\n" + string.Join(",", a.Service)));
         MergeBySource(Calls, other.Calls, c => (c.Source, c.Target));
         Lambdas.UnionWith(other.Lambdas);
         if (Returns.Count == 0) Returns.AddRange(other.Returns);

@@ -45,6 +45,23 @@ public class DeterminismTests
     }
 
     [Fact]
+    public void ACallThatResolvesDifferentlyPerTargetFrameworkKeepsBoth()
+    {
+        // The call is at the same place in both compilations, but its constant differs, as with #if per framework
+        const string Call = """
+            namespace Contoso
+            {
+                class Cleanup { void Run(IOrganizationService s) => s.Delete(Names.Table, Guid.Empty); }
+            }
+            """;
+        var builder = new ManifestBuilder(Analyze.Root);
+        builder.Add(Analyze.Compile(Call + """static class Names { public const string Table = "account"; }"""));
+        builder.Add(Analyze.Compile(Call + """static class Names { public const string Table = "contact"; }"""));
+
+        Assert.Equal(["account:Delete", "contact:Delete"], Assert.Single(builder.Build().Unreached).Requirements());
+    }
+
+    [Fact]
     public void OutputDoesNotDependOnCompilationOrder()
     {
         var forward = new ManifestBuilder(Analyze.Root);
