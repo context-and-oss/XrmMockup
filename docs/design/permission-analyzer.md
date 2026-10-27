@@ -19,7 +19,10 @@ out which table privileges each entry point needs and compares them with the dow
 
 Goals
 
-- Static analysis only. The code is not executed and no Dataverse connection is needed.
+- Static analysis only. The analyzed code is not run and no Dataverse connection is needed. Loading
+  a project is a design-time build, so MSBuild targets and tasks (such as `Exec`) and source
+  generators from the project and its packages can run: the tool must only be pointed at code that
+  would be built anyway (§8).
 - **Deterministic answers.** The same code and metadata always give the same output, with
   stable ordering. Every requirement states why it is included (§5.2). Nothing is scored or
   guessed: when the tool can't decide something, it includes it with the reason or lists it
@@ -763,6 +766,10 @@ results point at the source location of each missing privilege; see phase 6 in �
 
 ## 8. Limitations
 
+- **Trust**: `MSBuildWorkspace` loads projects with a design-time build, so their targets, tasks
+  and source generators can run. The README tells CI users not to analyze fork pull requests
+  in a job with secrets (`pull_request_target`), and to take `Metadata/` and the configuration from
+  the base branch so a change can't grant itself the privileges it needs.
 - **Depth**: the report shows the depth each role grants (`User`, `BusinessUnit`,
   `ParentChildBusinessUnit`, `Organization`) next to each requirement, but can't prove it is
   enough, because that depends on record ownership at runtime. For now any depth counts as

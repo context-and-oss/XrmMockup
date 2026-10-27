@@ -75,8 +75,10 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
             if (_detail <= Detail.Compact)
             {
                 var which = _detail == Detail.Minimal ? "entry points, " : "";
+                // Without roles every requirement is listed, so only what runs as SYSTEM is left out
+                var requirements = coverage is null ? "what runs as SYSTEM" : "requirements with nothing to fix";
                 var adds = _detail == Detail.Minimal ? $"{Name(Detail.Compact)} adds the entry points, {Name(Detail.Normal)} the sources" : $"{Name(Detail.Normal)} adds the sources";
-                writer.Write($"Not shown: {which}sources and requirements with nothing to fix. {CliOptions.Detail.Primary} {adds}, {Name(Detail.Detailed)} everything\n");
+                writer.Write($"Not shown: {which}sources and {requirements}. {CliOptions.Detail.Primary} {adds}, {Name(Detail.Detailed)} everything\n");
             }
             else if (NotShown(_hiddenRows, _hiddenAssumptions, _trimmed) is { } notShown)
             {

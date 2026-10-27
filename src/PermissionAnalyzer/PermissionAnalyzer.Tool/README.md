@@ -42,7 +42,7 @@ Caller needs:
   contact  Create
 
 1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
-Not shown: entry points, sources and requirements with nothing to fix. --detail compact adds the entry points, normal the sources, detailed everything
+Not shown: entry points, sources and what runs as SYSTEM. --detail compact adds the entry points, normal the sources, detailed everything
 ```
 
 The output lists the privileges each identity needs (see [Runs as](#runs-as)), a line per table
@@ -233,6 +233,21 @@ xrmmockup-permissions --function ProcessOrder --role "Integration App" --fail-on
 | `0` | Success. With `--fail-on-missing`: every checked privilege is granted, suppressed or on a table no role governs |
 | `1` | With `--fail-on-missing`: some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, a privilege is unverifiable, or an analysis stopped at the call limit |
 | `2` | Error: invalid options, missing files, an unknown role, or, with `--fail-on-missing`, no roles at all (no `--role`, `--caller-role`, and nothing analyzed matches `Principals` or `Users`) |
+
+As a pull request check, run the tool on the pull request's code but take `Metadata/` and
+`appsettings.json` from the base branch, for example with
+`git checkout origin/main -- Metadata appsettings.json` before the run. Otherwise the change being
+checked can grant itself what it needs, by editing a role in `Metadata/`, adding a `Suppress` entry,
+or mapping a function to another role in `Principals`. Review changes to those files on their own.
+
+### Trust
+
+The analysis doesn't run the code it reads, but loading a project is a design-time build: MSBuild
+evaluates the project files and runs the targets that build needs, which can include the project's
+and its packages' own targets and tasks such as `Exec`, and Roslyn runs their source generators.
+Only analyze code you would build. In particular, don't run it on code from a fork in a workflow that
+has secrets or a write token, such as one triggered by `pull_request_target`; `pull_request` gives
+fork pull requests neither.
 
 ## Entry points
 
@@ -680,7 +695,8 @@ leaves it out; it matches `--privilege` by name. An unresolved operation has no 
 so only `--runs-as` and `--privilege` apply to it. `Missing privileges` lists only the privileges that a
 requirement matching the filters is missing. Filters apply after analysis: a line such as
 `Filtered by --table account: 12 of 270 requirements match` says how much matched, and nothing that is
-computed, counted or checked changes.
+computed, counted or checked changes. In particular, filters never change the exit code or the error
+`--fail-on-missing` and `--strict` log: a privilege the filters hide still fails the run.
 
 ### JSON
 
@@ -740,7 +756,7 @@ is in, so code scanning finds the files; outside a repository they are relative 
 
 ```yaml
 - run: xrmmockup-permissions --fail-on-missing --format sarif --output permissions.sarif
-- uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@v4
   if: always()
   with:
     sarif_file: permissions.sarif

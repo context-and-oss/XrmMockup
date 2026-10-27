@@ -205,6 +205,14 @@ public class ReportTests
     }
 
     [Fact]
+    public void WithoutRolesMinimalOnlyLeavesOutSystem()
+    {
+        var lines = Lines(Text(ReportOptions.Default, roles: false));
+
+        Assert.Equal("Not shown: entry points, sources and what runs as SYSTEM. --detail compact adds the entry points, normal the sources, detailed everything", lines[^2]);
+    }
+
+    [Fact]
     public void WithoutRolesNormalShowsEveryRequirement()
     {
         var lines = Lines(Text(new ReportOptions(Detail.Normal), roles: false));
