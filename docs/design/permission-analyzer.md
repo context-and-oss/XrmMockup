@@ -140,7 +140,8 @@ classes work.
 
 Entry point ids: `plugin:{type}:{message}:{table|any}:{stage}` for steps (`{type}` is the
 reflection name, with `+` for nested types), `plugin:{type}` for a plain `IPlugin` without known
-steps, `custom-api:{name}`, `activity:{type}`, `function:{name}` and `method:{method id}`. Abstract
+steps, `custom-api:{name}`, `activity:{type}`, `function:{assembly}/{name}` (function names are only
+unique within an app) and `method:{method id}`. Abstract
 plugin classes, and plugin classes that other plugin classes derive from, are not entry points
 themselves.
 
@@ -640,8 +641,8 @@ The `Result:` line only counts what was checked. A `Missing privileges:` list fo
 6 entry points, 2 unreached methods, 9 tables, 14 table privileges (31 requirements counted per entry point and method), 5 unresolved
 Result: 27 granted, 4 missing
 Missing privileges:
-  ✘ ctx_orderline  Create  ApplicationUser  Integration App (--role)  in function:ProcessOrder, function:ResubmitOrder
-  ✘ ctx_orderline  Read    ApplicationUser  Integration App (--role)  in function:GetOrder
+  ✘ ctx_orderline  Create  ApplicationUser  Integration App (--role)  in function:Contoso.Functions/ProcessOrder, function:Contoso.Functions/ResubmitOrder
+  ✘ ctx_orderline  Read    ApplicationUser  Integration App (--role)  in function:Contoso.Functions/GetOrder
 Not checked: 5 unresolved operations (1 request without a rule, 3 custom API calls, 1 with an unknown table or request)
 ```
 

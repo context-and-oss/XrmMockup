@@ -311,14 +311,40 @@ public class EntryPointTests
             }
             """);
 
-        var process = manifest.Entry("function:ProcessOrder");
+        var process = manifest.Entry("function:Test/ProcessOrder");
         Assert.Equal(EntryPointKind.Function, process.Kind);
         Assert.Equal("HttpTrigger", process.Trigger?.Binding);
         Assert.Equal(["account:Create as ApplicationUser"], process.RequirementsWithIdentity());
 
-        var actForUser = manifest.Entry("function:ActForUser");
+        var actForUser = manifest.Entry("function:Test/ActForUser");
         Assert.Equal("TimerTrigger", actForUser.Trigger?.Binding);
         Assert.Equal(["contact:Delete as ImpersonatedCaller"], actForUser.RequirementsWithIdentity());
+    }
+
+    [Fact]
+    public void FunctionsOfTheSameNameInTwoAppsAreSelectedByTheirAssembly()
+    {
+        const string Source = """
+            public class Functions
+            {
+                [Microsoft.Azure.Functions.Worker.Function("ProcessOrder")]
+                public void Run([Microsoft.Azure.Functions.Worker.HttpTrigger] object request)
+                {
+                    var client = new Microsoft.PowerPlatform.Dataverse.Client.ServiceClient("AuthType=ClientSecret");
+                    client.Create(new Account());
+                }
+            }
+            """;
+        Manifest Select(string function)
+        {
+            var builder = new ManifestBuilder(Analyze.Root);
+            builder.Add(Analyze.Compile(Source, "Contoso.Orders"));
+            builder.Add(Analyze.Compile(Source, "Contoso.Returns"));
+            return builder.Build(scope: EntryPointSelector.Function(function));
+        }
+
+        Assert.Equal(["function:Contoso.Orders/ProcessOrder", "function:Contoso.Returns/ProcessOrder"], Select("processorder").EntryPoints.Select(e => e.Id));
+        Assert.Equal(["function:Contoso.Returns/ProcessOrder"], Select("Contoso.Returns/ProcessOrder").EntryPoints.Select(e => e.Id));
     }
 
     [Fact]
@@ -360,7 +386,7 @@ public class EntryPointTests
         Assert.True(builder.Add(functions));
         var manifest = builder.Build(["account"]);
 
-        Assert.Equal(["account:Write as ApplicationUser (assumed)"], manifest.Entry("function:DeleteTemplate").RequirementsWithIdentity());
+        Assert.Equal(["account:Write as ApplicationUser (assumed)"], manifest.Entry("function:Contoso.Functions/DeleteTemplate").RequirementsWithIdentity());
         Assert.Empty(manifest.Unreached);
     }
 

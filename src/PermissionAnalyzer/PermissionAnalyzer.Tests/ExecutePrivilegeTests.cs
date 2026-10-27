@@ -151,7 +151,7 @@ public class ExecutePrivilegeTests
                 }
             }
             """);
-        var actForUser = manifest.Entry("function:ActForUser");
+        var actForUser = manifest.Entry("function:Test/ActForUser");
 
         var global = Assert.Single(actForUser.GlobalRequirements);
         Assert.Equal(

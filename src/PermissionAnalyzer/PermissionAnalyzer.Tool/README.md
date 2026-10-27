@@ -108,7 +108,7 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 | `--basis` | | Only report requirements with these bases, such as `filter-unknown`. Comma-separated or repeatable |
 | `--plugin` | | Only one plugin, or one of its steps: `<type>[:<message>[:<stage>]]`, such as `AccountPostPlugin:Update` |
 | `--custom-api` | | Only one custom API, by unique name |
-| `--function` | | Only one Azure Function, by function name |
+| `--function` | | Only one Azure Function, by function name, or as `<assembly>/<name>` when several apps have one of that name |
 | `--entry` | | Analyze a method as an entry point, such as `Contoso.Sync.Importer.Run`, and show only that. Repeatable |
 | `--operation` | | Only a user operation on a table and the plugin steps it fires: `"<message> <table>"`, such as `"Update account"` (see [User operations](#user-operations)) |
 | `--attributes` | | The columns the `--operation` sets, such as `name,statecode`. Comma-separated or repeatable |
@@ -263,7 +263,8 @@ fork pull requests neither.
 
 Entry point ids look like `plugin:Contoso.AccountPostPlugin:Update:account:PostOperation` (the table
 is `any` for steps on every table), `custom-api:ctx_DoThing`, `activity:Contoso.MyActivity`,
-`function:ProcessOrder`, `method:Contoso.Sync.Importer.Run(IOrganizationService)` and
+`function:Contoso.Functions/ProcessOrder` (the app's assembly and the function's name),
+`method:Contoso.Sync.Importer.Run(IOrganizationService)` and
 `operation:Update account(name,statecode)`.
 
 From each entry point, the tool follows calls into the rest of the solution, including across
@@ -665,13 +666,13 @@ Missing from Integration App (--role), for ApplicationUser:
 
   By entry point:
 
-    function:CancelOrder
-    function:SubmitOrder
+    function:Contoso.Functions/CancelOrder
+    function:Contoso.Functions/SubmitOrder
       annotation  Create, Append
       contact     Read
       salesorder  Read
 
-    function:ProcessOrder
+    function:Contoso.Functions/ProcessOrder
       account  Write
 
 3 entry points, 0 unreached methods, 4 tables, 8 table privileges (15 requirements counted per entry point and method), 0 unresolved

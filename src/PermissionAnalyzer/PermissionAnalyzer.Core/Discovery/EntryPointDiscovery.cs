@@ -317,7 +317,7 @@ internal sealed class EntryPointDiscovery(Compilation compilation, XrmSymbols sy
         if (binding is not null) binding = binding.Substring(0, binding.Length - "Attribute".Length);
 
         Entries.Add(new EntryCandidate(
-            EntryPointIds.Function(name),
+            EntryPointIds.Function(compilation.AssemblyName, name),
             EntryPointKind.Function,
             ReflectionName(method.ContainingType),
             compilation.AssemblyName,

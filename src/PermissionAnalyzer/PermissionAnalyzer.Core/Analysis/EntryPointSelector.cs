@@ -39,8 +39,12 @@ public sealed class EntryPointSelector
     public static EntryPointSelector CustomApi(string name) =>
         new($"--custom-api {name}", e => e.Kind == EntryPointKind.CustomApi && Same(e.Trigger?.Message, name));
 
+    /// <summary>
+    /// Functions by name, in any app, or by their app's assembly and name, such as <c>Contoso.Functions/ProcessOrder</c>.
+    /// </summary>
     public static EntryPointSelector Function(string name) =>
-        new($"--function {name}", e => e.Kind == EntryPointKind.Function && Same(EntryPointIds.FunctionName(e.Id), name));
+        new($"--function {name}", e => e.Kind == EntryPointKind.Function
+            && (Same(EntryPointIds.FunctionName(e.Id), name) || Same(EntryPointIds.QualifiedFunctionName(e.Id), name)));
 
     /// <summary>
     /// Methods added with <see cref="ManifestBuilder.AddEntryMethods"/>, by the same names.

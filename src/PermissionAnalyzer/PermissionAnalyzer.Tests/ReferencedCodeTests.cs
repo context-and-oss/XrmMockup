@@ -44,7 +44,7 @@ public class ReferencedCodeTests
 
         var manifest = builder.Build();
 
-        Assert.Equal(["lead:Delete"], manifest.Entry("function:PurgeLead").Requirements());
+        Assert.Equal(["lead:Delete"], manifest.Entry("function:Functions/PurgeLead").Requirements());
         Assert.Empty(manifest.Unreached);
     }
 
@@ -54,7 +54,7 @@ public class ReferencedCodeTests
         var builder = new ManifestBuilder(Analyze.Root);
         builder.AddReferencedCode(Analyze.Compile(Function, "Functions", references: Analyze.Compile(Library, "Shared")));
 
-        Assert.Equal(["function:PurgeLead"], builder.Build().EntryPoints.Select(e => e.Id));
+        Assert.Equal(["function:Functions/PurgeLead"], builder.Build().EntryPoints.Select(e => e.Id));
     }
 
     [Fact]

@@ -80,7 +80,7 @@ public class ContextTests
                 new PluginStepRegistration("Contoso.ContactQuery", "Contoso", "RetrieveMultiple", "contact", 20, null),
             ]));
 
-        var function = manifest.Entry("function:Contacts");
+        var function = manifest.Entry("function:Test/Contacts");
         Assert.Equal(["account:Read as ApplicationUser", "contact:Read as ApplicationUser"], function.RequirementsWithIdentity());
         Assert.Equal(["plugin:Contoso.AccountQuery:RetrieveMultiple:account:PreOperation"], function.Triggers);
     }

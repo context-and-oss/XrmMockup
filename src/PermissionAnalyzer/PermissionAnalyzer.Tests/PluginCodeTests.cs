@@ -58,7 +58,7 @@ public class PluginCodeTests
         var manifest = Build();
 
         var function = Assert.Single(manifest.EntryPoints);
-        Assert.Equal("function:ProcessOrder", function.Id);
+        Assert.Equal("function:Functions/ProcessOrder", function.Id);
         Assert.Equal([Step], function.Triggers);
         Assert.Equal(["ctx_order:Create", "lead:Delete"], function.Requirements());
         Assert.Empty(manifest.Unreached);
@@ -67,7 +67,7 @@ public class PluginCodeTests
     [Fact]
     public void PluginCodePathsAreRelativeToTheAnalyzedSolution()
     {
-        var lead = Assert.Single(Build().Entry("function:ProcessOrder").Requirements, r => r.Table == "lead");
+        var lead = Assert.Single(Build().Entry("function:Functions/ProcessOrder").Requirements, r => r.Table == "lead");
 
         Assert.Equal("../plugins/Code.cs", Assert.Single(lead.Sources).Location.File);
     }
@@ -85,7 +85,7 @@ public class PluginCodeTests
     {
         var manifest = Build(setup: builder => builder.AddPluginSteps([new PluginStepRegistration("Plugins.AccountPlugin", "Plugins", "Update", "account", 40, null)]));
 
-        Assert.Equal(["function:ProcessOrder"], manifest.EntryPoints.Select(e => e.Id));
+        Assert.Equal(["function:Functions/ProcessOrder"], manifest.EntryPoints.Select(e => e.Id));
         Assert.Equal(
             ["plugin:Plugins.AccountPlugin:Update:account:PostOperation"],
             Build(EntryPointSelector.Plugin("AccountPlugin"), builder => builder.AddPluginSteps([new PluginStepRegistration("Plugins.AccountPlugin", "Plugins", "Update", "account", 40, null)]))

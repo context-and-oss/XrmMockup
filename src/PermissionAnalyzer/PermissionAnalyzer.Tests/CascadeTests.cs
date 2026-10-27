@@ -46,7 +46,7 @@ public class CascadeTests
                 }
             }
             """ + Plugins);
-        var function = manifest.Entry("function:ProcessOrder");
+        var function = manifest.Entry("function:Test/ProcessOrder");
 
         Assert.Equal(
             ["account:Write as ApplicationUser", "contact:Create as ApplicationUser", "lead:Delete as ApplicationUser"],
@@ -88,7 +88,7 @@ public class CascadeTests
 
         Assert.Equal(
             ["contact:Delete as ImpersonatedCaller", "task:Delete as ImpersonatedCaller"],
-            manifest.Entry("function:ActForUser").RequirementsWithIdentity());
+            manifest.Entry("function:Test/ActForUser").RequirementsWithIdentity());
     }
 
     [Fact]

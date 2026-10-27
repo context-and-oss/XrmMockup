@@ -28,7 +28,11 @@ internal static class EntryPointIds
 
     public static string Activity(string type) => ActivityPrefix + type;
 
-    public static string Function(string name) => FunctionPrefix + name;
+    /// <summary>
+    /// A function, by its app's assembly, since two apps can have functions of the same name: such as
+    /// <c>function:Contoso.Functions/ProcessOrder</c>, the form <c>Principals</c> names it by.
+    /// </summary>
+    public static string Function(string? assembly, string name) => FunctionPrefix + (assembly is null ? "" : assembly + "/") + name;
 
     public static string Method(string methodId) => MethodPrefix + methodId;
 
@@ -45,9 +49,15 @@ internal static class EntryPointIds
         OperationPrefix + display + (columns is null ? "" : $"({string.Join(",", columns)})");
 
     /// <summary>
-    /// The name of the function <paramref name="id"/> is the id of; <c>null</c> for any other id.
+    /// The name of the function <paramref name="id"/> is the id of, without its assembly; <c>null</c> for any other id.
     /// </summary>
-    public static string? FunctionName(string id) => After(id, FunctionPrefix);
+    public static string? FunctionName(string id) => After(id, FunctionPrefix) is { } qualified ? qualified.Substring(qualified.LastIndexOf('/') + 1) : null;
+
+    /// <summary>
+    /// The assembly and name of the function <paramref name="id"/> is the id of, such as
+    /// <c>Contoso.Functions/ProcessOrder</c>; <c>null</c> for any other id.
+    /// </summary>
+    public static string? QualifiedFunctionName(string id) => After(id, FunctionPrefix);
 
     /// <summary>
     /// The method id of the method entry <paramref name="id"/> is the id of; <c>null</c> for any other id.

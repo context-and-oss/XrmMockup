@@ -117,7 +117,7 @@ public class CoverageTests
         };
         var report = CoverageEvaluator.Evaluate(manifest, options);
 
-        var process = manifest.Entry("function:ProcessOrder");
+        var process = manifest.Entry("function:Test/ProcessOrder");
         Assert.Equal(["account:Create as ApplicationUser: Granted Organization"], Results(report, process));
         Assert.Equal("Integration App (Principals: Test/ProcessOrder)", Assert.Single(report.For(process).Identities).Roles?.ToString());
         Assert.True(report.UsesConfiguredRoles);
@@ -134,7 +134,7 @@ public class CoverageTests
         };
         var report = CoverageEvaluator.Evaluate(manifest, options);
 
-        Assert.Equal(["account:Create as ApplicationUser: Missing"], Results(report, manifest.Entry("function:ProcessOrder")));
+        Assert.Equal(["account:Create as ApplicationUser: Missing"], Results(report, manifest.Entry("function:Test/ProcessOrder")));
         Assert.False(report.UsesConfiguredRoles);
         Assert.Empty(report.UnusedPrincipals);
     }
@@ -172,7 +172,7 @@ public class CoverageTests
         var manifest = Analyze.Code(FunctionSource, Governed);
         var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { CallerRoles = RoleSet.Combine([Integration], "--caller-role") });
 
-        var process = manifest.Entry("function:ProcessOrder");
+        var process = manifest.Entry("function:Test/ProcessOrder");
         Assert.Equal(["account:Create as ApplicationUser: NotChecked"], Results(report, process));
         Assert.Equal("not checked: pass --role, or map Test in XrmMockup:Permissions:Principals", Assert.Single(report.For(process).Identities).Note);
         Assert.True(report.Summary.Passed(strict: false));
@@ -184,7 +184,7 @@ public class CoverageTests
     {
         var manifest = Analyze.Code(FunctionSource, Governed);
         var withoutCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
-        var actForUser = manifest.Entry("function:ActForUser");
+        var actForUser = manifest.Entry("function:Test/ActForUser");
 
         Assert.Equal(["contact:Delete as ImpersonatedCaller: NotChecked"], Results(withoutCallerRoles, actForUser));
         Assert.StartsWith("not checked: acts for the user in CallerId", withoutCallerRoles.For(actForUser).Identities.Single(i => i.RunsAs.Kind == RunsAsKind.ImpersonatedCaller).Note);
@@ -199,7 +199,7 @@ public class CoverageTests
 
         // The roles come from metadata without global privileges, so the privilege to impersonate can't be checked
         Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Unverifiable"], GlobalResults(withCallerRoles, actForUser));
-        Assert.Empty(manifest.Entry("function:ProcessOrder").GlobalRequirements);
+        Assert.Empty(manifest.Entry("function:Test/ProcessOrder").GlobalRequirements);
         Assert.Equal(1, withCallerRoles.Summary.Unverifiable);
     }
 
@@ -207,13 +207,13 @@ public class CoverageTests
     public void ImpersonationIsCheckedAgainstGlobalPrivileges()
     {
         var manifest = Analyze.Code(FunctionSource, Governed);
-        var actForUser = manifest.Entry("function:ActForUser");
+        var actForUser = manifest.Entry("function:Test/ActForUser");
 
         var missing = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([WithGlobal(Integration)], "--role") });
         Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Missing"], GlobalResults(missing, actForUser));
         var global = Assert.Single(missing.MissingGlobal);
         Assert.Equal((GlobalRequirement.ActOnBehalfOfAnotherUser, RunsAs.ApplicationUser), (global.Privilege, global.RunsAs));
-        Assert.Equal(["function:ActForUser"], global.In);
+        Assert.Equal(["function:Test/ActForUser"], global.In);
         Assert.Equal(0, missing.Summary.Unverifiable);
         Assert.False(missing.Summary.Passed(strict: false));
 
@@ -234,7 +234,7 @@ public class CoverageTests
             Suppress = [CoverageSetup.Suppression(new SuppressionConfiguration { Privilege = "prvActOnBehalfOfAnotherUser", Reason = "set up by hand" }, 0)],
         });
 
-        Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Suppressed"], GlobalResults(report, manifest.Entry("function:ActForUser")));
+        Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Suppressed"], GlobalResults(report, manifest.Entry("function:Test/ActForUser")));
         Assert.Empty(report.MissingGlobal);
     }
 
