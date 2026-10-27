@@ -42,7 +42,7 @@ Caller needs:
   contact  Create
 
 1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
-Not shown: entry points, sources and requirements with nothing to fix. --verbosity compact adds the entry points, normal the sources, detailed everything
+Not shown: entry points, sources and requirements with nothing to fix. --detail compact adds the entry points, normal the sources, detailed everything
 ```
 
 The output lists the privileges each identity needs (see [Runs as](#runs-as)), a line per table
@@ -50,7 +50,7 @@ with its privileges in the order the role editor shows them; SYSTEM needs no rol
 listed. The last line but one counts distinct table privileges, and separately each requirement
 once per entry point or unreached method that needs it.
 
-`--verbosity compact` adds the entry points that need the privileges, and `--verbosity normal` lists
+`--detail compact` adds the entry points that need the privileges, and `--detail normal` lists
 each entry point's requirements with where the call is:
 
 ```
@@ -66,27 +66,27 @@ Privileges per table
   task      Create
 
 1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
-Not shown: every source and call path. --verbosity full adds them
+Not shown: every source and call path. --detail full adds them
 ```
 
 At `normal`, each entry point lists its requirements with the identity they run as and where the
-call is, up to three locations. With `--verbosity full`, every location is listed, and a call
+call is, up to three locations. With `--detail full`, every location is listed, and a call
 in another method shows the call path from the entry point after it, such as
 `(AccountPostPlugin.ctor (lambda, line 16) → ContactService.CreateFor)`. See
-[Verbosity and filters](#verbosity-and-filters) for what each level shows.
+[Detail and filters](#detail-and-filters) for what each level shows.
 
 - Lines starting with `?` are calls whose table can't be determined statically, shown from
-  `--verbosity normal`; below it they are only counted. They are listed with
+  `--detail normal`; below it they are only counted. They are listed with
   the reason instead of being dropped, so the result never hides a call.
 - Lines starting with `~` are assumptions the analysis had to make, such as the identity of a
-  service passed in from outside. They are listed from `--verbosity detailed`.
+  service passed in from outside. They are listed from `--detail detailed`.
 - `Not reached from any entry point` lists methods that make service calls but that no entry point
   calls. Add them with `--entry` or `EntryPoints` if something outside the solution calls them.
 
 ## Usage
 
 ```bash
-xrmmockup-permissions [scope] [--role <name>] [--fail-on-missing] [options]
+xrmmockup-permissions [scope] [--role <name>] [--fail-on-missing | --strict] [options]
 ```
 
 Lists the privileges each entry point needs and, when there are roles to check against, whether the
@@ -95,13 +95,13 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
-| `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/` |
+| `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/`. Default: `MetadataDirectory`, then `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` next to the configuration file when it exists |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
 | `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
-| `--config` | `-c` | Path to `appsettings.json` (default: the current directory) |
+| `--config` | `-c` | Configuration file; `appsettings.{DOTNET_ENVIRONMENT}.json` in the same folder applies over it (see [Configuration](#configuration)). Default: `appsettings.json` in the current directory, when it exists |
 | `--format` | `-f` | `text` (default), `json`, `markdown` or `sarif` (see [Output](#output)) |
 | `--output` | `-o` | Write to a file instead of standard output |
-| `--verbosity` | `-v` | How much of the text report to show: `minimal` (default), `compact`, `normal`, `detailed` or `full` (see [Verbosity and filters](#verbosity-and-filters)) |
+| `--detail` | `-d` | How much of the text report to show (text only): `minimal` (default), `compact`, `normal`, `detailed` or `full` (see [Detail and filters](#detail-and-filters)) |
 | `--table` | | Only report requirements on these tables. Comma-separated or repeatable |
 | `--privilege` | | Only report these privileges, such as `Write` or `prvBulkDelete`. Comma-separated or repeatable |
 | `--runs-as` | | Only report requirements of these identities, such as `ApplicationUser`. Comma-separated or repeatable |
@@ -148,12 +148,12 @@ Missing from Salesperson (--role), for Caller:
 1 entry point, 0 unreached methods, 3 tables, 3 table privileges (3 requirements counted per entry point and method), 1 unresolved
 Result: 1 granted, 1 missing, 1 as SYSTEM
 Not checked: 1 unresolved operation (1 with an unknown table)
-Not shown: entry points, sources and requirements with nothing to fix. --verbosity compact adds the entry points, normal the sources, detailed everything
+Not shown: entry points, sources and requirements with nothing to fix. --detail compact adds the entry points, normal the sources, detailed everything
 ```
 
 Each block is the privileges a set of roles lacks, merged over every entry point and identity that
 uses it, so it reads as the changes to make to the roles. Requirements whose identity has no roles get
-a block of their own, with how to give it some. With `--verbosity normal`, the requirements that need
+a block of their own, with how to give it some. With `--detail normal`, the requirements that need
 attention are listed per entry point, with where each call is:
 
 ```
@@ -167,10 +167,10 @@ Result: 1 granted, 1 missing, 1 as SYSTEM
 Missing privileges:
   ✘ contact  Create  Caller  Salesperson (--role)  in plugin:Contoso.Plugins.AccountPostPlugin:Update:account:PostOperation
 Not checked: 1 unresolved operation (1 with an unknown table)
-Not shown: 2 requirements with nothing to fix. --verbosity detailed lists them, full also adds every source and call path
+Not shown: 2 requirements with nothing to fix. --detail detailed lists them, full also adds every source and call path
 ```
 
-With `--verbosity detailed`, the requirements the roles
+With `--detail detailed`, the requirements the roles
 grant and those running as SYSTEM are listed too:
 
 ```
@@ -502,7 +502,9 @@ type parameter as the unresolved reason.
 ## Configuration
 
 The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings are under
-`XrmMockup:Permissions`:
+`XrmMockup:Permissions`. Note that `Solution` (and `-s`) here is the path of a `.sln` or `.csproj`
+file, while `XrmMockup:Metadata:Solutions` (and `-s` in `xrmmockup-metadata`) are Dataverse solution
+names:
 
 ```json
 {
@@ -538,10 +540,10 @@ The tool reads the same `appsettings.json` as `xrmmockup-metadata`. Its settings
 | Setting | Description |
 |---------|-------------|
 | `Solution` | Solution or project to analyze. Without it, the tool uses the single `.sln`/`.slnx` in the current directory |
-| `MetadataDirectory` | Metadata folder. Defaults to `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` |
+| `MetadataDirectory` | Metadata folder. Defaults to `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` when it exists |
 | `ExcludeProjects` | Projects to leave out, such as test projects. See below |
 | `PluginSolutions` | Solutions or projects with plugin code that the analyzed code fires, used for plugin cascades only. `--plugin-solution` adds to these. See [Plugin code in another solution](#plugin-code-in-another-solution) |
-| `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds to these. A name that matches no method is reported as a warning |
+| `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds a method to these and also limits the report to the `--entry` methods. A name that matches no method is reported as a warning |
 | `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given |
 | `Users` | The roles of specific users by user id, such as the impersonating user of a plugin step. `Name` is shown in the output |
 | `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table, or leave out `Table` to accept a privilege not tied to a table by its name. Suppressed privileges are shown but don't fail `--fail-on-missing` |
@@ -617,10 +619,10 @@ grants them. `--role`, `--caller-role` and the roles in `Principals` and `Users`
 
 ## Output
 
-### Verbosity and filters
+### Detail and filters
 
 On a real solution most requirements are already granted, so the text report starts with only what
-to change, and `--verbosity` shows more:
+to change, and `--detail` shows more:
 
 | Level | Shows |
 |-------|-------|
@@ -653,7 +655,7 @@ Missing from Integration App (--role), for ApplicationUser:
 
 3 entry points, 0 unreached methods, 4 tables, 8 table privileges (15 requirements counted per entry point and method), 0 unresolved
 Result: 6 granted, 9 missing
-Not shown: sources and requirements with nothing to fix. --verbosity normal adds the sources, detailed everything
+Not shown: sources and requirements with nothing to fix. --detail normal adds the sources, detailed everything
 ```
 
 `minimal` stops before `By entry point`.
@@ -666,7 +668,7 @@ analysis.
 function needs `Write` on `account`:
 
 ```bash
-xrmmockup-permissions --function ProcessOrder --role "Integration App" --table account --privilege Write --verbosity full
+xrmmockup-permissions --function ProcessOrder --role "Integration App" --table account --privilege Write --detail full
 ```
 
 Each takes several values, comma-separated or repeated, and matches any of them ignoring case;
@@ -683,7 +685,7 @@ computed, counted or checked changes.
 
 `--format json` writes the same content as an object with `entryPoints` (each with its `id`, `kind`,
 `trigger`, `requirements`, `unresolved`, `assumptions` and `triggers`, the ids of the steps it fires),
-`unreached` and `notRoleGoverned`. JSON is complete at every `--verbosity`, with every source and
+`unreached` and `notRoleGoverned`. JSON is complete at every `--detail`, with every source and
 call path. Filters narrow it like the text: requirements and unresolved operations they don't match
 are left out, so are entry points and methods left without any, and `missing` lists only what a matching
 requirement is missing. `result` stays the count of the whole analysis.
@@ -705,7 +707,7 @@ it). Without roles, none of these are written.
 job summary: a heading with the result (`✘ 28 missing privileges`), the `Result` line and the
 `Not checked` line as a warning, then a table per set of roles with what it lacks, as in `minimal`.
 The entry points that need each block's privileges, as in `compact`, and the unresolved operations
-are folded away in `<details>`. It ends with the counts. Markdown ignores `--verbosity`; filters
+are folded away in `<details>`. It ends with the counts. Markdown ignores `--detail`; filters
 narrow it like the text. Role names, reasons and ids are escaped, so they show as written.
 
 ```yaml
@@ -728,7 +730,7 @@ related locations:
 | `not-checked` | note | A privilege of an identity without roles |
 | `unverifiable` | note | A privilege not tied to a table that the role metadata predates |
 
-Without roles, only unresolved operations are results. Filters narrow it; `--verbosity` doesn't
+Without roles, only unresolved operations are results. Filters narrow it; `--detail` doesn't
 apply. Each result has `properties` with the `table`, `privilege`, `runsAs`, `roles` and
 `entryPoints`. Locations are relative to `%SRCROOT%`, the root of the git repository the solution
 is in, so code scanning finds the files; outside a repository they are relative to the solution.

@@ -18,7 +18,7 @@ internal enum ReportFormat
 /// <summary>
 /// How much of the text report to show.
 /// </summary>
-internal enum Verbosity
+internal enum Detail
 {
     /// <summary>
     /// Only what to change: per role set, the privileges it lacks, a line per table. No entry points or sources.
@@ -51,9 +51,9 @@ internal enum Verbosity
 
 /// <summary>
 /// What the report shows. Both apply after analysis, so they never change what is computed, the counts or the exit
-/// code. JSON ignores <see cref="Verbosity"/>, so it is always complete, but is narrowed by <see cref="Filter"/>.
+/// code. JSON ignores <see cref="Detail"/>, so it is always complete, but is narrowed by <see cref="Filter"/>.
 /// </summary>
-internal sealed record ReportOptions(Verbosity Verbosity = Verbosity.Minimal, ReportFilter? Filter = null)
+internal sealed record ReportOptions(Detail Detail = Detail.Minimal, ReportFilter? Filter = null)
 {
     public static ReportOptions Default { get; } = new();
 

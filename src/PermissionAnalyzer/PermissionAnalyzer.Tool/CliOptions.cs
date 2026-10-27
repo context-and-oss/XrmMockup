@@ -16,7 +16,7 @@ internal static class CliOptions
     {
         public const string Primary = "--metadata";
         public const string Alias = "-m";
-        public const string Description = "XrmMockup metadata folder. Default: XrmMockup:Permissions:MetadataDirectory, else XrmMockup:Metadata:OutputDirectory";
+        public const string Description = "XrmMockup metadata folder. Default: XrmMockup:Permissions:MetadataDirectory, else XrmMockup:Metadata:OutputDirectory, else ./Metadata next to the configuration when it exists";
     }
 
     internal static class Exclude
@@ -36,14 +36,14 @@ internal static class CliOptions
     {
         public const string Primary = "--config";
         public const string Alias = "-c";
-        public const string Description = "Path to appsettings.json configuration file";
+        public const string Description = "Configuration file. appsettings.{DOTNET_ENVIRONMENT}.json in its folder and environment variables apply over it. Default: appsettings.json in the current directory, when it exists";
     }
 
     internal static class Format
     {
         public const string Primary = "--format";
         public const string Alias = "-f";
-        public const string Description = "Output format: text (default), json, markdown (for a pull request comment or job summary) or sarif (for code scanning)";
+        public const string Description = "Output format: text, json, markdown (for a pull request comment or job summary) or sarif (for code scanning)";
         public static readonly string[] AllowedValues = Enum.GetNames<Tool.Output.ReportFormat>().Select(n => n.ToLowerInvariant()).ToArray();
     }
 
@@ -63,7 +63,7 @@ internal static class CliOptions
     internal static class CustomApi
     {
         public const string Primary = "--custom-api";
-        public const string Description = "Only analyze one custom API, by name";
+        public const string Description = "Only analyze one custom API, by unique name";
     }
 
     internal static class Function
@@ -103,12 +103,12 @@ internal static class CliOptions
         public const string Description = "Security role of the user that app code acts for by setting CallerId, by name. Repeatable";
     }
 
-    internal static class Verbosity
+    internal static class Detail
     {
-        public const string Primary = "--verbosity";
-        public const string Alias = "-v";
-        public const string Description = "How much of the text report to show: minimal (default) shows only the privileges to change per role, compact adds the entry points that need them, normal shows what needs attention with its sources, detailed adds granted requirements and assumptions, full adds every source and call path. JSON is always complete";
-        public static readonly string[] AllowedValues = Enum.GetNames<Tool.Output.Verbosity>().Select(n => n.ToLowerInvariant()).ToArray();
+        public const string Primary = "--detail";
+        public const string Alias = "-d";
+        public const string Description = "How much of the text report to show: minimal shows only the privileges to change per role, compact adds the entry points that need them, normal shows what needs attention with its sources, detailed adds granted requirements and assumptions, full adds every source and call path. Text only; the other formats ignore it";
+        public static readonly string[] AllowedValues = Enum.GetNames<Tool.Output.Detail>().Select(n => n.ToLowerInvariant()).ToArray();
     }
 
     internal static class Table

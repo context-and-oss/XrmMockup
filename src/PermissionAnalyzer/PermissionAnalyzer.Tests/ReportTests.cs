@@ -75,7 +75,7 @@ public class ReportTests
     [Fact]
     public void NormalShowsOnlyWhatNeedsAttention()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Normal)));
+        var lines = Lines(Text(new ReportOptions(Detail.Normal)));
 
         Assert.Contains(lines, l => Row(l, "✘ contact +Create +Caller +missing +Code.cs:36"));
         Assert.Contains(lines, l => Row(l, @"✘ account +Delete +Caller \(assumed\) +missing +Code.cs:41"));
@@ -86,13 +86,13 @@ public class ReportTests
         Assert.DoesNotContain(lines, l => l.Contains(" → ", StringComparison.Ordinal));
         Assert.Contains("Result: 2 granted, 2 missing, 1 as SYSTEM", lines);
         Assert.Contains("Missing privileges:", lines);
-        Assert.Equal("Not shown: 3 requirements with nothing to fix, 1 assumption. --verbosity detailed lists them, full also adds every source and call path", lines[^2]);
+        Assert.Equal("Not shown: 3 requirements with nothing to fix, 1 assumption. --detail detailed lists them, full also adds every source and call path", lines[^2]);
     }
 
     [Fact]
     public void DetailedAddsGrantedRequirementsButNotCallPaths()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Detailed)));
+        var lines = Lines(Text(new ReportOptions(Detail.Detailed)));
 
         Assert.Contains(lines, l => Row(l, "✔ account +Read +Caller +User +Code.cs:23, Code.cs:28"));
         Assert.Contains(lines, l => Row(l, "· contact +Delete +System +SYSTEM +Code.cs:30"));
@@ -100,7 +100,7 @@ public class ReportTests
         Assert.Contains(lines, l => l.StartsWith(CreateStep, StringComparison.Ordinal));
         Assert.Contains("Privileges per table", lines);
         Assert.DoesNotContain(lines, l => l.Contains(" → ", StringComparison.Ordinal));
-        Assert.Equal("Not shown: every source and call path. --verbosity full adds them", lines[^2]);
+        Assert.Equal("Not shown: every source and call path. --detail full adds them", lines[^2]);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class ReportTests
     {
         var lines = Lines(Text(ReportOptions.Default));
 
-        Assert.Equal(Verbosity.Minimal, ReportOptions.Default.Verbosity);
+        Assert.Equal(Detail.Minimal, ReportOptions.Default.Detail);
         Assert.Equal(
             [
                 "Missing from Salesperson (--role), for Caller:",
@@ -120,13 +120,13 @@ public class ReportTests
         Assert.DoesNotContain(lines, l => l.Contains(UpdateStep, StringComparison.Ordinal) || l.Contains("Code.cs", StringComparison.Ordinal));
         Assert.DoesNotContain("Missing privileges:", lines);
         Assert.Contains("Result: 2 granted, 2 missing, 1 as SYSTEM", lines);
-        Assert.Equal("Not shown: entry points, sources and requirements with nothing to fix. --verbosity compact adds the entry points, normal the sources, detailed everything", lines[^2]);
+        Assert.Equal("Not shown: entry points, sources and requirements with nothing to fix. --detail compact adds the entry points, normal the sources, detailed everything", lines[^2]);
     }
 
     [Fact]
     public void CompactAddsTheEntryPointsThatNeedEachPrivilege()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Compact)));
+        var lines = Lines(Text(new ReportOptions(Detail.Compact)));
 
         Assert.Equal(
             [
@@ -144,7 +144,7 @@ public class ReportTests
                 "",
             ],
             lines.Take(12));
-        Assert.Equal("Not shown: sources and requirements with nothing to fix. --verbosity normal adds the sources, detailed everything", lines[^2]);
+        Assert.Equal("Not shown: sources and requirements with nothing to fix. --detail normal adds the sources, detailed everything", lines[^2]);
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class ReportTests
         // Deleting a contact fires the contact Delete step, so both Update steps also need Delete on lead
         var manifest = Analyze.Code(source, ["account", "contact", "lead"]);
         using var output = new StringWriter();
-        new TextManifestWriter(new ReportOptions(Verbosity.Compact)).Write(manifest, null, output);
+        new TextManifestWriter(new ReportOptions(Detail.Compact)).Write(manifest, null, output);
 
         Assert.Equal(
             [
@@ -198,7 +198,7 @@ public class ReportTests
     [Fact]
     public void FullShowsCallPathsAndNothingIsLeftOut()
     {
-        var text = Text(new ReportOptions(Verbosity.Full));
+        var text = Text(new ReportOptions(Detail.Full));
 
         Assert.Contains("P.Execute → Store.Save", text);
         Assert.DoesNotContain("Not shown", text);
@@ -207,7 +207,7 @@ public class ReportTests
     [Fact]
     public void WithoutRolesNormalShowsEveryRequirement()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Normal), roles: false));
+        var lines = Lines(Text(new ReportOptions(Detail.Normal), roles: false));
 
         Assert.Contains(lines, l => Row(l, "account +Read +Caller +Code.cs:23, Code.cs:28"));
         Assert.Contains(lines, l => Row(l, "contact +Delete +System +Code.cs:30"));
@@ -218,7 +218,7 @@ public class ReportTests
     [Fact]
     public void TableFilterNarrowsTheSectionsAndMissingPrivilegesButNotTheCounts()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Detailed, Filter(tables: ["CONTACT"]))));
+        var lines = Lines(Text(new ReportOptions(Detail.Detailed, Filter(tables: ["CONTACT"]))));
 
         Assert.DoesNotContain(lines, l => l.StartsWith("  ✔ account", StringComparison.Ordinal) || l.StartsWith("  ✘ account", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.StartsWith(CreateStep, StringComparison.Ordinal));
@@ -233,7 +233,7 @@ public class ReportTests
     [Fact]
     public void MinimalIsNarrowedByTheFilter()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Minimal, Filter(tables: ["account"]))));
+        var lines = Lines(Text(new ReportOptions(Detail.Minimal, Filter(tables: ["account"]))));
 
         Assert.DoesNotContain(lines, l => l.Contains("contact", StringComparison.Ordinal));
         Assert.Contains("  account  Delete", lines);
@@ -253,7 +253,7 @@ public class ReportTests
     [Fact]
     public void IdentityAndPrivilegeFiltersCombine()
     {
-        var lines = Lines(Text(new ReportOptions(Verbosity.Detailed, Filter(privileges: ["delete"], identities: [RunsAsKind.System]))));
+        var lines = Lines(Text(new ReportOptions(Detail.Detailed, Filter(privileges: ["delete"], identities: [RunsAsKind.System]))));
 
         var rows = lines.Where(l => l.StartsWith("  · ", StringComparison.Ordinal) || l.StartsWith("  ✔ ", StringComparison.Ordinal) || l.StartsWith("  ✘ ", StringComparison.Ordinal));
         Assert.True(Row(Assert.Single(rows), "· contact +Delete +System +SYSTEM +Code.cs:30"));
@@ -283,11 +283,11 @@ public class ReportTests
         var command = new RootCommand();
         var options = new AnalysisOptions();
         options.AddTo(command);
-        var result = command.Parse(["--table", "account,contact", "--table", "lead", "--runs-as", "system", "--basis", "filter-unknown", "-v", "full"]);
+        var result = command.Parse(["--table", "account,contact", "--table", "lead", "--runs-as", "system", "--basis", "filter-unknown", "-d", "full"]);
 
         Assert.Empty(result.Errors);
         var report = options.Read(result).Report!;
-        Assert.Equal(Verbosity.Full, report.Verbosity);
+        Assert.Equal(Detail.Full, report.Detail);
         Assert.Equal("--table account, contact, lead; --runs-as System; --basis filter-unknown", report.Filter.ToString());
     }
 

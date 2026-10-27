@@ -8,7 +8,7 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// identity they serve, since a role is changed once whatever needs it. Requirements that can't be checked get a block
 /// per identity, and without roles, a block is every requirement of an identity that needs a role. Each block also
 /// has the entry points and methods that need its privileges, those that need the same ones together. The text
-/// report shows the blocks below <see cref="Verbosity.Normal"/>, and Markdown always does.
+/// report shows the blocks below <see cref="Detail.Normal"/>, and Markdown always does.
 /// </summary>
 internal static class RoleChanges
 {

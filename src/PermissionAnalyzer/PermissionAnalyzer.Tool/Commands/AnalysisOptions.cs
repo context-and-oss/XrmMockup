@@ -32,30 +32,33 @@ internal sealed class AnalysisOptions
     private readonly Option<string[]> _runsAs = new(CliOptions.RunsAs.Primary) { Description = CliOptions.RunsAs.Description };
     private readonly Option<string[]> _basis = new(CliOptions.Basis.Primary) { Description = CliOptions.Basis.Description };
     private readonly Option<string> _format;
-    private readonly Option<string> _verbosity;
+    private readonly Option<string> _detail;
 
     public AnalysisOptions()
     {
         _format = new Option<string>(CliOptions.Format.Primary, CliOptions.Format.Alias)
         {
             Description = CliOptions.Format.Description,
+            HelpName = string.Join("|", CliOptions.Format.AllowedValues),
             DefaultValueFactory = _ => CliOptions.Format.AllowedValues[0]
         };
         _format.AcceptOnlyFromAmong(CliOptions.Format.AllowedValues);
-        _verbosity = new Option<string>(CliOptions.Verbosity.Primary, CliOptions.Verbosity.Alias)
+        _detail = new Option<string>(CliOptions.Detail.Primary, CliOptions.Detail.Alias)
         {
-            Description = CliOptions.Verbosity.Description,
-            DefaultValueFactory = _ => CliOptions.Verbosity.AllowedValues[0]
+            Description = CliOptions.Detail.Description,
+            HelpName = string.Join("|", CliOptions.Detail.AllowedValues),
+            DefaultValueFactory = _ => CliOptions.Detail.AllowedValues[0]
         };
-        _verbosity.AcceptOnlyFromAmong(CliOptions.Verbosity.AllowedValues);
+        _detail.AcceptOnlyFromAmong(CliOptions.Detail.AllowedValues);
     }
 
     /// <summary>
-    /// Adds the options and their validation to <paramref name="command"/>, scope, roles and failing first.
+    /// Adds the options and their validation to <paramref name="command"/>, in the order the README lists them: input,
+    /// output, filters, scope, roles and failing.
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _noRoles, _failOnMissing, _strict, _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _verbosity, _table, _privilege, _runsAs, _basis })
+        foreach (var option in new Option[] { _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _noRoles, _failOnMissing, _strict })
         {
             command.Options.Add(option);
         }
@@ -126,7 +129,7 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_failOnMissing) || parseResult.GetValue(_strict),
             parseResult.GetValue(_strict),
             new ReportOptions(
-                Enum.Parse<Verbosity>(parseResult.GetValue(_verbosity)!, ignoreCase: true),
+                Enum.Parse<Detail>(parseResult.GetValue(_detail)!, ignoreCase: true),
                 new ReportFilter(
                     Values(parseResult.GetValue(_table)),
                     Values(parseResult.GetValue(_privilege)),

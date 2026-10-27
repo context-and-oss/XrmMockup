@@ -38,7 +38,7 @@ public class DeterminismTests
         twice.Add(Analyze.Compile(Source));
         twice.Add(Analyze.Compile(Source));
 
-        foreach (var writer in new IManifestWriter[] { new TextManifestWriter(), new TextManifestWriter(new ReportOptions(Verbosity.Compact)), new TextManifestWriter(new ReportOptions(Verbosity.Normal)), new TextManifestWriter(new ReportOptions(Verbosity.Full)), new JsonManifestWriter(), new MarkdownManifestWriter(), new SarifManifestWriter() })
+        foreach (var writer in new IManifestWriter[] { new TextManifestWriter(), new TextManifestWriter(new ReportOptions(Detail.Compact)), new TextManifestWriter(new ReportOptions(Detail.Normal)), new TextManifestWriter(new ReportOptions(Detail.Full)), new JsonManifestWriter(), new MarkdownManifestWriter(), new SarifManifestWriter() })
         {
             Assert.Equal(Write(writer, once), Write(writer, twice));
         }
@@ -55,7 +55,7 @@ public class DeterminismTests
         backward.Add(Analyze.Compile(Source, "Contoso.B"));
         backward.Add(Analyze.Compile(Source, "Contoso.A"));
 
-        foreach (var writer in new IManifestWriter[] { new TextManifestWriter(), new TextManifestWriter(new ReportOptions(Verbosity.Compact)), new TextManifestWriter(new ReportOptions(Verbosity.Normal)), new TextManifestWriter(new ReportOptions(Verbosity.Full)), new JsonManifestWriter(), new MarkdownManifestWriter(), new SarifManifestWriter() })
+        foreach (var writer in new IManifestWriter[] { new TextManifestWriter(), new TextManifestWriter(new ReportOptions(Detail.Compact)), new TextManifestWriter(new ReportOptions(Detail.Normal)), new TextManifestWriter(new ReportOptions(Detail.Full)), new JsonManifestWriter(), new MarkdownManifestWriter(), new SarifManifestWriter() })
         {
             Assert.Equal(Write(writer, forward), Write(writer, backward));
         }

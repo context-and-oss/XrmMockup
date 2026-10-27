@@ -520,12 +520,14 @@ and checks it against roles when there are any (§6.2). Options:
 
 | Option | Meaning |
 |---|---|
-| `--solution <path>` | Solution (`.sln`/`.slnx`) or project (`.csproj`, with the projects it references) to analyze (default: the single `.sln`/`.slnx` in the current directory) |
-| `--metadata <dir>` | XrmMockup `Metadata/` folder (security roles, plugin steps, entity metadata). Default: `XrmMockup:Metadata:OutputDirectory` from `appsettings.json` |
+| `--solution <path>` / `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`, with the projects it references) to analyze (default: `XrmMockup:Permissions:Solution`, else the single `.sln`/`.slnx` in the current directory) |
+| `--metadata <dir>` / `-m` | XrmMockup `Metadata/` folder (security roles, plugin steps, workflows, entity metadata). Default: `XrmMockup:Permissions:MetadataDirectory`, else `XrmMockup:Metadata:OutputDirectory`, else `./Metadata` next to the configuration file when it exists |
+| `--exclude <pattern>` / `-x` | Leave out projects matching the pattern; repeatable, adds to `XrmMockup:Permissions:ExcludeProjects` |
+| `--plugin-solution <path>` | A solution or project with plugin code the analyzed code fires but doesn't include, loaded for plugin cascades only; repeatable, adds to `XrmMockup:Permissions:PluginSolutions` |
 | `--config <file>` / `-c` | Path to `appsettings.json`, same as `xrmmockup-metadata` (§6.3) |
-| `--format text\|json\|markdown\|sarif` | Output format (default `text`; `markdown` for pull request comments and job summaries, `sarif` for GitHub code scanning; phase 6, §10) |
-| `--output <file>` | Write report to file |
-| `--verbosity minimal\|compact\|normal\|detailed\|full` / `-v` | How much of the text report to show (phase 5.5, §10): `minimal` (default) shows only the privileges to change per set of roles, `compact` adds the entry points that need them, `normal` shows what needs attention with its sources, `detailed` adds what is granted, `full` adds every source and call path |
+| `--format text\|json\|markdown\|sarif` / `-f` | Output format (default `text`; `markdown` for pull request comments and job summaries, `sarif` for GitHub code scanning; phase 6, §10) |
+| `--output <file>` / `-o` | Write report to file |
+| `--detail minimal\|compact\|normal\|detailed\|full` / `-d` | How much of the text report to show (phase 5.5, §10): `minimal` (default) shows only the privileges to change per set of roles, `compact` adds the entry points that need them, `normal` shows what needs attention with its sources, `detailed` adds what is granted, `full` adds every source and call path |
 | `--table <list>`, `--privilege <list>`, `--runs-as <list>`, `--basis <list>` | Only show requirements on the given tables, with the given privileges, identities or bases (§5.2); filtering is applied after analysis, so it never changes what is computed |
 | `--role <name>` / `-r`, `--caller-role <name>` | Roles to check against (§6.2); repeatable |
 | `--no-roles` | Don't check against the `Principals` and `Users` settings (§6.2) |
@@ -794,7 +796,7 @@ results point at the source location of each missing privilege; see phase 6 in �
 | 3.5 | Execute rule table (§5.3): built-in rules, `Rules` setting, `ExecuteMultiple`/`ExecuteTransaction` and `*Multiple` requests, requests and request collections followed through the call graph, requests needing no table privilege, custom API calls recognized; Append/AppendTo via relationship metadata | Requests and lookups checked; what is left under `Not checked` is what static analysis can't see |
 | 4 | Plugin cascade expansion (done: steps and custom APIs fired by direct calls and requests, from every entry point including Azure Functions and app code, identity, unknown tables reported, steps without code, FilteredAttributes, `--operation` scope, plugin code loaded from other solutions (§5.6)) | "What does a user need to do X"; a function's roles checked against the plugins it fires |
 | 5 | LINQ and `OrganizationServiceContext` (§5.2, done, with type parameters of generic types); privilege catalog + global privileges in the metadata generator, custom API execute privileges (§5.7), `prvActOnBehalfOfAnotherUser` checked; requests needing privileges by name, bypass parameters and `overriddencreatedon` (§5.3) (done) | Near-complete coverage |
-| 5.5 | Output clean-up (below, done): filtering, and verbosity levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
+| 5.5 | Output clean-up (below, done): filtering, and detail levels where the default shows only the privileges to change and the full detail, such as requirements the roles already grant, is available on request | Output short enough to act on, with the full picture still available |
 | 6 | SARIF/Markdown output (below, done), docs, NuGet tool packaging alongside `xrmmockup-metadata` (done: `XrmMockup.PermissionAnalyzer`, versioned from its CHANGELOG by CI and `release.yml`, first version `1.0.0-rc.1`) | Release |
 | Later | Role verification for scenarios in XrmMockup core (below), not yet decided: a core feature that changes XrmMockup365 itself, so tests can run a scenario as a principal and compare what was checked, granted and denied with the analyzer's output. Role suggestions (which single role, or smallest combination of downloaded roles, covers a requirement), minimum required depth, stopping at impersonated calls without `--caller-role` (opt-in, see below), roles from a user's assignments and privileges the roles grant but nothing uses (see below), IDE `DiagnosticAnalyzer` package on Core, analyzing the steps of workflows (fired workflows are reported as unresolved until then) | |
 
@@ -805,7 +807,7 @@ account". On a sample Azure Functions app, the text report went from 454 lines (
 20,000 characters from call paths) to 15 lines at the default `minimal`: ten tables to change in one role, the counts, `Result` and
 what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
 
-- **Verbosity**: `--verbosity minimal|compact|normal|detailed|full`. `minimal` (the default)
+- **Detail**: `--detail minimal|compact|normal|detailed|full`. `minimal` (the default)
   replaces the sections and the `Missing privileges` list with the changes to make, without
   sources: a block per set of roles (`Missing from Order API (--role), for
   ApplicationUser:`) with what it lacks, merged over every entry point and identity that uses
@@ -821,7 +823,7 @@ what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
   points and methods that have any. Sources are shown as up to three locations, without call
   paths. With roles, `Privileges per table` is left out, since `Missing privileges` says what to
   change. A last line says what was left out (`Not shown: 242 requirements with nothing to fix,
-  73 assumptions. --verbosity detailed lists them, ...`). `detailed` adds the granted, not
+  73 assumptions. --detail detailed lists them, ...`). `detailed` adds the granted, not
   governed, suppressed and SYSTEM requirements, every section, assumptions, the steps each entry
   point fires and the privileges per table. `full` is the output from before the phase, byte for
   byte, with every source and its call path.
@@ -831,10 +833,10 @@ what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
   table or basis, so only the identity and privilege filters apply to it, and a privilege filter
   keeps it when it has no privileges or one of them matches. `Missing privileges` keeps the
   merged privileges that some matching requirement is missing, so a basis filter, which merged
-  privileges don't carry, narrows it too. Filters, like verbosity, apply after analysis: the
+  privileges don't carry, narrows it too. Filters, like the detail level, apply after analysis: the
   counts line, `Result`, `Not checked` and the exit code are those of the whole analysis, and a
   `Filtered by ...: n of m requirements match` line says how much matched.
-- **JSON** ignores the verbosity, so tools and a later role verification always get the full
+- **JSON** ignores the detail level, so tools and a later role verification always get the full
   result with every call path. Filters apply to it: requirements and unresolved operations they
   don't match are left out, as are sections left without any, and `missing` is narrowed as in
   the text. `result` stays the count of the whole analysis.
@@ -843,7 +845,7 @@ what was left out. `compact` is 47 lines and `normal` 69 (9 KB).
   leaving out assumptions and fired steps.
 
 **Output formats (phase 6, done).** Two more formats, for CI rather than a terminal. Both ignore
-the verbosity, take the filters, and keep the output deterministic.
+the detail level, take the filters, and keep the output deterministic.
 
 - **Markdown** (`--format markdown`) is for a pull request comment or a job summary: a heading
   with the result, `Result` and `Not checked` (as a warning callout), then the `minimal` blocks as
@@ -892,16 +894,16 @@ two:
    for example `Create account` and `Update contact`: `--operation "Create account" --role
    Salesperson`, which fires the same plugins as the impersonated call would.
 
-What the output shows of the impersonated calls, by verbosity (§10, phase 5.5):
+What the output shows of the impersonated calls, by detail level (§10, phase 5.5):
 
 - `minimal`: one line with the number of impersonated operations not followed, and the
-  verbosity that lists them, like the hint for assumptions.
+  detail level that lists them, like the hint for assumptions.
 - `compact`: the operations, merged per message and table with the columns set when they are
   known, written so they can be used as `--operation` (and `--attributes`) values for the second
   check.
 - `normal`: each operation with the sources where it is made and where `CallerId` is set.
 - `detailed` and `full`: the call paths as well.
-- JSON lists them in full, whatever the verbosity; Markdown lists them like `compact`, and SARIF
+- JSON lists them in full, whatever the detail level; Markdown lists them like `compact`, and SARIF
   perhaps as `note` results.
 
 It is opt-in, with a flag whose name is still to be decided. Without the flag the impersonated

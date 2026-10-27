@@ -13,5 +13,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: Workflows from the metadata that an operation fires are reported as unresolved, since their steps aren't analyzed
 * Add: Scopes to analyze one entry point or user operation (`--plugin`, `--custom-api`, `--function`, `--entry`, `--operation`)
 * Add: Roles per identity from `--role`, `--caller-role` and the `Principals` and `Users` settings, with `Suppress` and `Rules` for custom messages, under `XrmMockup:Permissions` in `appsettings.json`
-* Add: Text, JSON, Markdown and SARIF output (`--format`), with `--verbosity` levels and `--table`, `--privilege`, `--runs-as` and `--basis` filters. The default shows only the privileges to change per role
+* Add: Text, JSON, Markdown and SARIF output (`--format`), with `--detail` levels and `--table`, `--privilege`, `--runs-as` and `--basis` filters. The default shows only the privileges to change per role
 * Add: Operations whose table can't be determined are reported as unresolved, with the reason

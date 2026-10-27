@@ -8,8 +8,8 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// The report as GitHub-flavored Markdown, for a pull request comment or a job summary: the result, the privileges to
 /// change per role set (<see cref="RoleChanges"/>) as a table, with the entry points that need them and the
 /// unresolved operations folded away, then the counts. A filter narrows the changes and the unresolved operations; the
-/// counts and the result stay those of the whole analysis. There are no verbosity levels: the folded sections hold
-/// what <see cref="Verbosity.Compact"/> adds to the text report.
+/// counts and the result stay those of the whole analysis. There are no detail levels: the folded sections hold
+/// what <see cref="Detail.Compact"/> adds to the text report.
 /// </summary>
 internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null) : IManifestWriter
 {
