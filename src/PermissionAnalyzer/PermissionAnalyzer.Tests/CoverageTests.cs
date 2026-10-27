@@ -397,6 +397,19 @@ public class CoverageTests
     }
 
     [Fact]
+    public void RoleOptionReplacesPrincipalsWithoutLookingThemUp()
+    {
+        var configuration = new PermissionsConfiguration
+        {
+            Principals = new() { ["Contoso.Functions"] = new PrincipalConfiguration { Roles = ["Integration"] } },
+        };
+        var options = CoverageSetup.Create([Integration], ["Integration App"], [], configuration, requireRoles: true);
+
+        Assert.NotNull(options!.Roles);
+        Assert.Empty(options.Principals);
+    }
+
+    [Fact]
     public void FailingNeedsRolesAndAPlainRunDoesnt()
     {
         Assert.Null(CoverageSetup.Create([Salesperson], [], [], new PermissionsConfiguration(), requireRoles: false));

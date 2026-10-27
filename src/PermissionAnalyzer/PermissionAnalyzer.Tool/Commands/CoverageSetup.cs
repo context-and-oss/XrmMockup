@@ -43,7 +43,8 @@ internal static class CoverageSetup
         {
             Roles = roleNames.Count > 0 ? Resolve(catalog, roleNames, CliOptions.Role.Primary, CliOptions.Role.Primary) : null,
             CallerRoles = callerRoleNames.Count > 0 ? Resolve(catalog, callerRoleNames, CliOptions.CallerRole.Primary, CliOptions.CallerRole.Primary) : null,
-            Principals = configuration.Principals
+            // --role replaces the principals, so a stale mapping among them doesn't stop the run
+            Principals = roleNames.Count > 0 ? new Dictionary<string, RoleSet>(StringComparer.OrdinalIgnoreCase) : configuration.Principals
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
                 .ToDictionary(
                     p => p.Key,
