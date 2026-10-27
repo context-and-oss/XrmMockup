@@ -1,41 +1,19 @@
-using System.Runtime.Serialization;
-using System.Xml;
 using DG.Tools.XrmMockup;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Metadata;
 
 /// <summary>
-/// Reads the plugin steps in <c>Metadata/Metadata.xml</c>, written by the metadata tool. Only the
-/// <c>Plugins</c> element is read, since the file also holds all entity metadata.
+/// Turns the plugin steps that <see cref="MetadataFileLoader"/> reads into registrations.
 /// </summary>
 internal static class PluginStepLoader
 {
-    public const string MetadataFile = "Metadata.xml";
-
     // The mode of an sdkmessageprocessingstep: 0 is synchronous, 1 asynchronous
     private const int AsynchronousMode = 1;
 
-    // The data contract namespace of the XrmMockup metadata files
-    internal const string Namespace = "http://schemas.datacontract.org/2004/07/DG.Tools.XrmMockup";
-
     /// <summary>
-    /// Every plugin step in the metadata folder. Empty when there's no metadata file or it has no steps.
+    /// The plugin steps with a plugin type and message, sorted by type, message, table and stage.
     /// </summary>
-    public static IReadOnlyList<PluginStepRegistration> Load(string metadataDirectory)
-    {
-        var path = Path.Combine(metadataDirectory, MetadataFile);
-        if (!File.Exists(path)) return [];
-
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings { IgnoreWhitespace = true });
-        if (!reader.ReadToFollowing("Plugins", Namespace)) return [];
-
-        var serializer = new DataContractSerializer(typeof(List<MetaPlugin>), "Plugins", Namespace);
-        var plugins = serializer.ReadObject(reader) as List<MetaPlugin> ?? [];
-        return Convert(plugins);
-    }
-
     internal static IReadOnlyList<PluginStepRegistration> Convert(IEnumerable<MetaPlugin> plugins) =>
         plugins
             .Where(p => !string.IsNullOrEmpty(p.AssemblyName) && !string.IsNullOrEmpty(p.MessageName))

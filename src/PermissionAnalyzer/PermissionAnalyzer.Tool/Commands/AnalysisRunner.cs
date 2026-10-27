@@ -42,9 +42,9 @@ internal static class AnalysisRunner
                 : CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, request.FailOnMissing);
 
             var root = Path.GetDirectoryName(settings.Target)!;
-            var lookups = settings.MetadataDirectory is { } lookupDirectory ? LoadLookups(lookupDirectory, logger) : [];
-            var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), lookups);
-            if (settings.MetadataDirectory is { } metadataDirectory) AddMetadata(builder, metadataDirectory, logger);
+            var metadataFile = settings.MetadataDirectory is { } fileDirectory ? LoadMetadataFile(fileDirectory, logger) : null;
+            var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), metadataFile?.Lookups);
+            if (settings.MetadataDirectory is { } metadataDirectory) AddMetadata(builder, metadataDirectory, metadataFile?.PluginSteps ?? [], logger);
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
@@ -161,20 +161,22 @@ internal static class AnalysisRunner
         return ExitCodes.MissingPrivileges;
     }
 
-    private static IReadOnlyList<LookupColumn> LoadLookups(string metadataDirectory, ILogger logger)
+    /// <summary>
+    /// The lookup columns and plugin steps of the metadata files, which are read together because they're large.
+    /// </summary>
+    private static MetadataFileContents LoadMetadataFile(string metadataDirectory, ILogger logger)
     {
-        var lookups = LookupLoader.Load(metadataDirectory);
-        logger.LogInformation("Loaded {Count} lookup columns from {Directory}", lookups.Count, metadataDirectory);
-        return lookups;
+        var contents = MetadataFileLoader.Load(metadataDirectory);
+        logger.LogInformation("Loaded {Count} lookup columns from {Directory}", contents.Lookups.Count, metadataDirectory);
+        logger.LogInformation("Loaded {Count} plugin steps from {Directory}", contents.PluginSteps.Count, metadataDirectory);
+        return contents;
     }
 
     /// <summary>
-    /// The plugin steps, the workflows and the privilege catalog of the metadata folder.
+    /// The plugin steps, and the workflows and the privilege catalog of the metadata folder.
     /// </summary>
-    private static void AddMetadata(ManifestBuilder builder, string metadataDirectory, ILogger logger)
+    private static void AddMetadata(ManifestBuilder builder, string metadataDirectory, IReadOnlyList<PluginStepRegistration> steps, ILogger logger)
     {
-        var steps = PluginStepLoader.Load(metadataDirectory);
-        logger.LogInformation("Loaded {Count} plugin steps from {Directory}", steps.Count, metadataDirectory);
         builder.AddPluginSteps(steps);
 
         var workflows = WorkflowLoader.Load(metadataDirectory);

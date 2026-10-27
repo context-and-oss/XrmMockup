@@ -352,11 +352,11 @@ public class LookupTests
     [Fact]
     public void LoaderReadsXrmMockupMetadataFiles()
     {
-        var columns = LookupLoader.Load(XrmMockupMetadataDirectory());
+        var columns = MetadataFileLoader.Load(XrmMockupMetadataDirectory()).Lookups;
 
         var parent = Assert.Single(columns, c => c.Table == "contact" && c.Column == "parentcustomerid");
         Assert.Equal(["account", "contact"], parent.Targets);
-        Assert.Empty(LookupLoader.Load(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())));
+        Assert.Empty(MetadataFileLoader.Load(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())).Lookups);
     }
 
     private static EntryPoint Single(string source)
