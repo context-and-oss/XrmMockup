@@ -276,6 +276,23 @@ public class ExtractionTests
         Assert.False(new Core.Analysis.ManifestBuilder(Analyze.Root).Add(compilation));
     }
 
+    [Theory]
+    [InlineData("public void Run(IOrganizationService service) => service.Create(new Entity(\"account\"));", false)]
+    [InlineData("public void Run(IOrganizationService service) => service.Create(Missing.Account());", true)]
+    [InlineData("public void Run(IOrganizationService service) => service.NoSuchMethod();", true)]
+    [InlineData("public void Run(Missing service) { var x = service; }", true)]
+    public void AddSaysWhenCodeDoesNotBind(string member, bool unbound)
+    {
+        var compilation = Analyze.Compile("namespace Contoso { public class Clean { } }");
+        compilation = compilation.AddSyntaxTrees(Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+            $"using Microsoft.Xrm.Sdk; namespace Contoso {{ public class Importer {{ {member} }} }}",
+            path: Path.Combine(Analyze.Root, "Importer.cs")));
+
+        var builder = new Core.Analysis.ManifestBuilder(Analyze.Root);
+        Assert.True(builder.Add(compilation));
+        Assert.Equal(unbound, builder.LastAddedHasUnboundCode);
+    }
+
     [Fact]
     public void TablesWithoutRoleAreListed()
     {

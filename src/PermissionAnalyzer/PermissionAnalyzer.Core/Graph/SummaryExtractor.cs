@@ -30,6 +30,12 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
     private readonly HashSet<ILocalSymbol> _visiting = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<IMethodSymbol, TableResolver> _resolvers = new(SymbolEqualityComparer.Default);
 
+    /// <summary>
+    /// Whether a body or initializer has code the compiler couldn't bind, such as a call to a method or on a type it
+    /// didn't find. Its calls are missing from the graph. Set by <see cref="Extract"/>.
+    /// </summary>
+    public bool HasUnboundCode { get; private set; }
+
     public CallGraph Extract(CancellationToken cancellationToken = default)
     {
         // Binding the bodies is most of the work and a semantic model is thread-safe, so declarations are bound in
@@ -80,6 +86,8 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
 
     private void Visit(Declaration declaration)
     {
+        HasUnboundCode = HasUnboundCode || declaration.Operation is { } bound && bound.DescendantsAndSelf().Any(IsUnbound);
+
         switch (declaration.Kind)
         {
             case DeclarationKind.Body:
@@ -97,6 +105,9 @@ internal sealed class SummaryExtractor(Compilation compilation, XrmSymbols symbo
                 break;
         }
     }
+
+    private static bool IsUnbound(IOperation operation) =>
+        operation.Kind == OperationKind.Invalid || operation.Type is { TypeKind: TypeKind.Error };
 
     private void Body(IMethodSymbol? symbol, IOperation? body)
     {

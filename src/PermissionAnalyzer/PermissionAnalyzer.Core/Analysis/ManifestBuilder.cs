@@ -63,14 +63,25 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     /// </summary>
     public bool AddPluginCode(Compilation compilation, CancellationToken cancellationToken = default) => Add(compilation, AddedCode.PluginCode, cancellationToken);
 
+    /// <summary>
+    /// Whether the code the last <c>Add</c>, <c>AddReferencedCode</c> or <c>AddPluginCode</c> call added has code the
+    /// compiler couldn't bind, such as a call to a method or on a type it didn't find. Operations in that code are
+    /// missed. Its compile errors are worth reporting then; without it, the declarations and syntax are what's left to
+    /// check.
+    /// </summary>
+    public bool LastAddedHasUnboundCode { get; private set; }
+
     private enum AddedCode { Analyzed, Referenced, PluginCode }
 
     private bool Add(Compilation compilation, AddedCode added, CancellationToken cancellationToken)
     {
         var cascadesOnly = added == AddedCode.PluginCode;
+        LastAddedHasUnboundCode = false;
         if (XrmSymbols.Create(compilation) is not { } symbols) return false;
 
-        var summaries = new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups).Extract(cancellationToken);
+        var extractor = new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups);
+        var summaries = extractor.Extract(cancellationToken);
+        LastAddedHasUnboundCode = extractor.HasUnboundCode;
         if (added == AddedCode.Analyzed) _reportedNodes.UnionWith(summaries.Nodes.Keys);
         _graph.Merge(summaries);
 

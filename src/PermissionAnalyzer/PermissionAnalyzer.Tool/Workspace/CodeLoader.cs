@@ -122,6 +122,8 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger) : IDisposable
                 continue;
             }
 
+            // Logged before compiling, which is most of the time spent per project, so a slow project shows
+            logger.LogInformation(pluginCode ? "Analyzing {Project} for plugin cascades" : "Analyzing {Project}", project.Name);
             var compilation = await project.GetCompilationAsync(cancellationToken)
                 ?? throw new ToolException($"Could not compile {project.Name}");
             compilation = compilation.WithOptions(compilation.Options
@@ -161,20 +163,21 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger) : IDisposable
             }
             analyzed++;
 
-            // Calls the compiler can't bind are invisible to the analysis, so say how much is affected
-            var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-            if (errors.Count > 0)
+            // Calls the compiler can't bind are invisible to the analysis, so say how much is affected. Getting every
+            // diagnostic binds all the method bodies again, so it's only done when the analysis found code that
+            // didn't bind, or the cheaper syntax and declaration checks find errors
+            if (builder.LastAddedHasUnboundCode || HasErrors(compilation.GetParseDiagnostics(cancellationToken)) || HasErrors(compilation.GetDeclarationDiagnostics(cancellationToken)))
             {
-                var first = string.Concat(errors.Take(3).Select(e => Environment.NewLine + "  " + e));
-                logger.LogWarning(
-                    "{Project} has {Count} compile errors; operations in code that doesn't compile may be missed. Restore and build the project first. The first:{Errors}",
-                    project.Name,
-                    errors.Count,
-                    first);
-            }
-            else
-            {
-                logger.LogInformation(pluginCode ? "Analyzed {Project} for plugin cascades" : "Analyzed {Project}", project.Name);
+                var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+                if (errors.Count > 0)
+                {
+                    var first = string.Concat(errors.Take(3).Select(e => Environment.NewLine + "  " + e));
+                    logger.LogWarning(
+                        "{Project} has {Count} compile errors; operations in code that doesn't compile may be missed. Restore and build the project first. The first:{Errors}",
+                        project.Name,
+                        errors.Count,
+                        first);
+                }
             }
         }
 
@@ -208,6 +211,8 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger) : IDisposable
         }
         return found.Values;
     }
+
+    private static bool HasErrors(IEnumerable<Diagnostic> diagnostics) => diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);
 
     private static bool IsSolution(string path) =>
         path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase);
