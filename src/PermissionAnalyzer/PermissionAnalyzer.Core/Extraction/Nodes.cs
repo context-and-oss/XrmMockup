@@ -13,6 +13,12 @@ internal static class Nodes
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters);
 
+    // Parameter types with their namespaces, for overloads that only differ in those
+    private static readonly SymbolDisplayFormat QualifiedParameterFormat = new(
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes | SymbolDisplayMiscellaneousOptions.UseAsterisksInMultiDimensionalArrays);
+
     private static readonly SymbolDisplayFormat ShortTypeFormat = new(
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters);
@@ -22,8 +28,10 @@ internal static class Nodes
     private static readonly ConditionalWeakTable<ISymbol, string> TypeIds = new();
 
     /// <summary>
-    /// A stable id such as <c>Contoso.Plugins.AccountPlugin.Execute(IServiceProvider)</c>. A lambda adds its
-    /// position to the id of the member that contains it: <c>Contoso.Plugins.AccountPlugin..ctor()=>12:9</c>.
+    /// A stable id such as <c>Contoso.Plugins.AccountPlugin.Execute(IServiceProvider)</c>, with the type parameters
+    /// of a generic method (<c>Load&lt;T&gt;(IOrganizationService)</c>), and with namespaces on the parameter types
+    /// when another overload would have the same id without them. A lambda adds its position to the id of the
+    /// member that contains it: <c>Contoso.Plugins.AccountPlugin..ctor()=>12:9</c>.
     /// </summary>
     public static string Id(ISymbol symbol)
     {
@@ -125,11 +133,21 @@ internal static class Nodes
             MethodKind.StaticConstructor => ".cctor",
             _ => method.Name,
         };
-        var parameters = method.Parameters.Select(p =>
-            (p.RefKind == RefKind.None ? "" : p.RefKind.ToString().ToLowerInvariant() + " ")
-            + p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
-        return $"{type}.{name}({string.Join(", ", parameters)})";
+        if (method.TypeParameters.Length > 0) name += $"<{string.Join(", ", method.TypeParameters.Select(t => t.Name))}>";
+
+        var parameters = Parameters(method, SymbolDisplayFormat.MinimallyQualifiedFormat);
+        var clashes = method.ContainingType.GetMembers(method.Name)
+            .OfType<IMethodSymbol>()
+            .Any(other => !SymbolEqualityComparer.Default.Equals(other, method)
+                && other.TypeParameters.Length == method.TypeParameters.Length
+                && Parameters(other, SymbolDisplayFormat.MinimallyQualifiedFormat) == parameters);
+        if (clashes) parameters = Parameters(method, QualifiedParameterFormat);
+        return $"{type}.{name}({parameters})";
     }
+
+    private static string Parameters(IMethodSymbol method, SymbolDisplayFormat format) =>
+        string.Join(", ", method.Parameters.Select(p =>
+            (p.RefKind == RefKind.None ? "" : p.RefKind.ToString().ToLowerInvariant() + " ") + p.Type.ToDisplayString(format)));
 
     private static string Position(ISymbol symbol)
     {

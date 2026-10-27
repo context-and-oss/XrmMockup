@@ -86,6 +86,39 @@ public class DeterminismTests
     }
 
     [Fact]
+    public void OverloadsThatOnlyDifferInGenericsOrNamespacesHaveTheirOwnIds()
+    {
+        const string Source = """
+            namespace Contoso.A { class Record { } }
+            namespace Contoso.B { class Record { } }
+            namespace Contoso
+            {
+                class Sync
+                {
+                    void Run(IOrganizationService s) { s.Delete("account", Guid.Empty); }
+                    void Run<T>(IOrganizationService s) { s.Delete("contact", Guid.Empty); }
+                    void Save(IOrganizationService s, A.Record r) { s.Delete("lead", Guid.Empty); }
+                    void Save(IOrganizationService s, B.Record r) { s.Delete("task", Guid.Empty); }
+                }
+            }
+            """;
+        var manifest = Analyze.Code(Source);
+
+        Assert.Equal(
+            [
+                "Contoso.Sync.Run(IOrganizationService): account:Delete",
+                "Contoso.Sync.Run<T>(IOrganizationService): contact:Delete",
+                "Contoso.Sync.Save(Microsoft.Xrm.Sdk.IOrganizationService, Contoso.A.Record): lead:Delete",
+                "Contoso.Sync.Save(Microsoft.Xrm.Sdk.IOrganizationService, Contoso.B.Record): task:Delete",
+            ],
+            manifest.Unreached.Select(m => m.Id + ": " + string.Join(", ", m.Requirements())));
+
+        // A method name matches its generic overloads too
+        var entries = Analyze.Code(Source, setup: builder => builder.AddEntryMethods(["Contoso.Sync.Run"]));
+        Assert.Equal(["method:Contoso.Sync.Run(IOrganizationService)", "method:Contoso.Sync.Run<T>(IOrganizationService)"], entries.EntryPoints.Select(e => e.Id));
+    }
+
+    [Fact]
     public void OutputUsesLineFeeds()
     {
         var builder = new ManifestBuilder(Analyze.Root);

@@ -410,10 +410,11 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
     }
 
     /// <summary>
-    /// A method name given to <see cref="AddEntryMethods"/> matches every overload of the method, or one by its full id.
+    /// A method name given to <see cref="AddEntryMethods"/> matches every overload of the method, generic ones too,
+    /// or one by its full id.
     /// </summary>
     internal static bool MatchesMethod(string id, string method) =>
-        id == method || id.StartsWith(method + "(", StringComparison.Ordinal);
+        id == method || id.StartsWith(method + "(", StringComparison.Ordinal) || id.StartsWith(method + "<", StringComparison.Ordinal);
 
     /// <summary>
     /// Method entries named in <see cref="AddEntryMethods"/> that match no method in the solution.
