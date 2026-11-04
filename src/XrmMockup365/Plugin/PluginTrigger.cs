@@ -29,14 +29,14 @@ namespace DG.Tools.XrmMockup
         internal int Order { get; }
         internal Guid? ImpersonatingUserId { get; }
 
-        readonly Dictionary<string, EntityMetadata> Metadata;
+        readonly SortedDictionary<string, EntityMetadata> Metadata;
         readonly HashSet<string> Attributes;
         readonly IEnumerable<IImageSpecification> Images;
 
         private string DebuggerDisplay => $"{Stage} {Operation} {EntityName} [{string.Join(", ", Attributes)}]";
 
-        public PluginTrigger(string operation, ExecutionStage stage,
-                Action<MockupServiceProviderAndFactory> pluginExecute, IPluginStepConfig pluginRegistration, Dictionary<string, EntityMetadata> metadata)
+        public  PluginTrigger(string operation, ExecutionStage stage,
+                Action<MockupServiceProviderAndFactory> pluginExecute, IPluginStepConfig pluginRegistration, SortedDictionary<string, EntityMetadata> metadata)
         {
             PluginExecute = pluginExecute;
             EntityName = pluginRegistration.EntityLogicalName;

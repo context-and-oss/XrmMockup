@@ -16,11 +16,11 @@ namespace DG.Tools.XrmMockup.Database {
     internal class XrmDb {
         // Using ConcurrentDictionary for thread-safe table access in parallel test scenarios
         private ConcurrentDictionary<string, DbTable> TableDict = new ConcurrentDictionary<string, DbTable>();
-        private readonly Dictionary<string, EntityMetadata> EntityMetadata;
+        private readonly SortedDictionary<string, EntityMetadata> EntityMetadata;
         private readonly IOnlineDataService OnlineDataService;
         private int sequence;
 
-        public XrmDb(Dictionary<string, EntityMetadata> entityMetadata, IOnlineDataService onlineDataService) {
+        public XrmDb(SortedDictionary<string, EntityMetadata> entityMetadata, IOnlineDataService onlineDataService) {
             this.EntityMetadata = entityMetadata;
             this.OnlineDataService = onlineDataService;
             sequence = 0;

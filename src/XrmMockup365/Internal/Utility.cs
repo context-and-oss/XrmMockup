@@ -187,7 +187,7 @@ namespace DG.Tools.XrmMockup.Internal
         }
 
 
-        public static EntityMetadata GetMetadata(this Dictionary<string, EntityMetadata> metadata, string logicalName)
+        public static EntityMetadata GetMetadata(this SortedDictionary<string, EntityMetadata> metadata, string logicalName)
         {
             if (!metadata.ContainsKey(logicalName))
             {
@@ -255,7 +255,7 @@ namespace DG.Tools.XrmMockup.Internal
             }
         }
 
-        internal static RelationshipMetadataBase GetRelationshipMetadataDefaultNull(Dictionary<string, EntityMetadata> entityMetadata, string name, Guid metadataId, EntityReference userRef)
+        internal static RelationshipMetadataBase GetRelationshipMetadataDefaultNull(SortedDictionary<string, EntityMetadata> entityMetadata, string name, Guid metadataId, EntityReference userRef)
         {
             if (name == null && metadataId == Guid.Empty)
             {
@@ -451,7 +451,7 @@ namespace DG.Tools.XrmMockup.Internal
             HandlePrecision(metadata, db, entity);
         }
 
-        internal static bool HasCircularReference(Dictionary<string, EntityMetadata> metadata, Entity entity)
+        internal static bool HasCircularReference(SortedDictionary<string, EntityMetadata> metadata, Entity entity)
         {
             if (!metadata.ContainsKey(entity.LogicalName)) return false;
             var attributeMetadata = metadata.GetMetadata(entity.LogicalName).Attributes;
@@ -622,7 +622,10 @@ namespace DG.Tools.XrmMockup.Internal
                     if (row != null)
                     {
                         var nameAttr = row.Metadata.PrimaryNameAttribute;
-                        eRef.Name = row.GetColumn<string>(nameAttr);
+                        if (!string.IsNullOrEmpty(nameAttr))
+                        {
+                            eRef.Name = row.GetColumn<string>(nameAttr);
+                        }
                     }
                 }
                 else if (attr.Value is AliasedValue aliasedValue && aliasedValue.Value is EntityReference aliasedRef)
@@ -654,7 +657,7 @@ namespace DG.Tools.XrmMockup.Internal
             return attribute;
         }
 
-        internal static RelationshipMetadataBase GetRelatedEntityMetadata(Dictionary<string, EntityMetadata> metadata, string entityType, string relationshipName)
+        internal static RelationshipMetadataBase GetRelatedEntityMetadata(SortedDictionary<string, EntityMetadata> metadata, string entityType, string relationshipName)
         {
             if (!metadata.ContainsKey(entityType))
             {
@@ -877,6 +880,11 @@ namespace DG.Tools.XrmMockup.Internal
             if (metadataAtt is BooleanAttributeMetadata booleanAttributeMetadata)
             {
                 var booleanOptions = booleanAttributeMetadata.OptionSet;
+                if (booleanOptions.TrueOption == null && booleanOptions.FalseOption == null)
+                {
+                    return $"{value}";
+                }
+
                 var label = (bool)value ? booleanOptions.TrueOption.Label : booleanOptions.FalseOption.Label;
                 return label.UserLocalizedLabel.Label;
             }
