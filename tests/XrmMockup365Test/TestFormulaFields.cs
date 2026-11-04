@@ -55,28 +55,45 @@ namespace DG.XrmMockupTest
         [ClassData(typeof(FunctionCases))]
         public async TTask CanEvaluateFunction(string formula, object expected)
         {
-            var evaluator = new FormulaFieldEvaluator(serviceFactory);
-            var result = await evaluator.Evaluate(formula, new Account(), TimeSpan.Zero);
+            var previousCulture = CultureInfo.CurrentCulture;
+            var previousUiCulture = CultureInfo.CurrentUICulture;
 
-            if (result is ErrorValue error && expected is string errorString)
+            try
             {
-                var errorMessage = string.Join("\n", error.Errors.Select(e => e.Message));
-                Assert.Contains(errorString, errorMessage);
+                var culture = CultureInfo.GetCultureInfo("en-US");
+                CultureInfo.CurrentCulture = culture;
+                CultureInfo.CurrentUICulture = culture;
+                {
+                    var evaluator = new FormulaFieldEvaluator(serviceFactory);
+                    var result = await evaluator.Evaluate(formula, new Account(), TimeSpan.Zero);
+
+                    if (result is ErrorValue error && expected is string errorString)
+                    {
+                        var errorMessage = string.Join("\n", error.Errors.Select(e => e.Message));
+                        Assert.Contains(errorString, errorMessage);
+                    }
+                    else if (result is DateTime resultDateTime)
+                    {
+                        var expectedDateTime = (expected is DateTime dt)
+                            ? dt
+                            : (expected is "DateTime.Now")
+                                ? DateTime.Now
+                                : throw new InvalidOperationException("Expected value is not a DateTime or 'DateTime.Now'");
+                        Assert.Equal(expectedDateTime, resultDateTime, TimeSpan.FromSeconds(1));
+                    }
+                    else
+                    {
+                        Assert.Equal(expected, result);
+                    }
+                }
             }
-            else if (result is DateTime resultDateTime)
+            finally
             {
-                var expectedDateTime = (expected is DateTime dt)
-                    ? dt
-                    : (expected is "DateTime.Now")
-                        ? DateTime.Now
-                        : throw new InvalidOperationException("Expected value is not a DateTime or 'DateTime.Now'");
-                    Assert.Equal(expectedDateTime, resultDateTime, TimeSpan.FromSeconds(1));
-            }
-            else
-            {
-                Assert.Equal(expected, result);
+                CultureInfo.CurrentCulture = previousCulture;
+                CultureInfo.CurrentUICulture = previousUiCulture;
             }
         }
+
 
         [Theory]
         [ClassData(typeof(TextFunctionCases))]
