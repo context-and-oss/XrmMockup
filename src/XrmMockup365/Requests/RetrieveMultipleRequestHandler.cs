@@ -40,6 +40,9 @@ namespace DG.Tools.XrmMockup
 
             FillAliasIfEmpty(queryExpr);
 
+            var isAggregate = QueryExpressionAggregation.IsAggregate(queryExpr);
+            if (isAggregate) QueryExpressionAggregation.Validate(queryExpr, metadata.EntityMetadata);
+
             // Reject up-front any filter that references an attribute that does not exist on the
             // targeted entity, mirroring Dataverse (which faults instead of silently ignoring the
             // condition). Run after FillAliasIfEmpty so link-criteria conditions carry their alias.
@@ -104,53 +107,65 @@ namespace DG.Tools.XrmMockup
                 }
             });
 
-            var orders = queryExpr.Orders;
-            IOrderedEnumerable<KeyValuePair<DbRow, Entity>> tempSortedList;
-
-            // TODO: Check the order that the orders are executed in is correct
-            if (orders == null || orders.Count == 0)
+            IEnumerable<Entity> entitiesToReturn;
+            if (isAggregate)
             {
-                tempSortedList = collection.OrderBy(x => x.Key.Sequence);
+                // Aggregate the filtered, security-trimmed rows before projecting columns or
+                // limiting the result set. Aggregate rows have aliases only, not record IDs.
+                var aggregateRows = collection.OrderBy(x => x.Key.Sequence).Select(x => x.Value).ToArray();
+                Parallel.ForEach(aggregateRows, entity => core.ExecuteFormulaFields(entityMetadata, entity, formulaNeeded).GetAwaiter().GetResult());
+                entitiesToReturn = QueryExpressionAggregation.Aggregate(queryExpr, aggregateRows, db, metadata.EntityMetadata);
             }
             else
             {
-                Func<KeyValuePair<DbRow, Entity>, object> selector = x => x.Value.Attributes.TryGetValue(orders[0].AttributeName, out var a) ? Utility.GetComparableAttribute(a) : null;
-                if (orders.First().OrderType == OrderType.Ascending)
-                    tempSortedList = collection.OrderBy(selector);
-                else
-                    tempSortedList = collection.OrderByDescending(selector);
+                var orders = queryExpr.Orders;
+                IOrderedEnumerable<KeyValuePair<DbRow, Entity>> tempSortedList;
 
-                foreach (var order in orders.Skip(1))
+                // TODO: Check the order that the orders are executed in is correct
+                if (orders == null || orders.Count == 0)
                 {
-                    selector = (x => x.Value.Attributes.TryGetValue(order.AttributeName, out var a) ? Utility.GetComparableAttribute(a) : null);
-                    if (order.OrderType == OrderType.Ascending)
-                        tempSortedList = tempSortedList.ThenBy(selector);
-                    else
-                        tempSortedList = tempSortedList.ThenByDescending(selector);
-
+                    tempSortedList = collection.OrderBy(x => x.Key.Sequence);
                 }
-                tempSortedList = tempSortedList.ThenBy(x => x.Key.Sequence);
-            }
+                else
+                {
+                    Func<KeyValuePair<DbRow, Entity>, object> selector = x => x.Value.Attributes.TryGetValue(orders[0].AttributeName, out var a) ? Utility.GetComparableAttribute(a) : null;
+                    if (orders.First().OrderType == OrderType.Ascending)
+                        tempSortedList = collection.OrderBy(selector);
+                    else
+                        tempSortedList = collection.OrderByDescending(selector);
 
-            // Convert to array to lock-in the ordering (if we are ordering by something that doesn't exist in the columnset, the ordering will fail afterwards)
-            var orderedEntities = tempSortedList.Select(x => x.Value).ToArray();
+                    foreach (var order in orders.Skip(1))
+                    {
+                        selector = (x => x.Value.Attributes.TryGetValue(order.AttributeName, out var a) ? Utility.GetComparableAttribute(a) : null);
+                        if (order.OrderType == OrderType.Ascending)
+                            tempSortedList = tempSortedList.ThenBy(selector);
+                        else
+                            tempSortedList = tempSortedList.ThenByDescending(selector);
 
-            // Calculate formula fields before we filter the fetched columns
-            Parallel.ForEach(orderedEntities, entity => core.ExecuteFormulaFields(entityMetadata, entity, formulaNeeded).GetAwaiter().GetResult());
+                    }
+                    tempSortedList = tempSortedList.ThenBy(x => x.Key.Sequence);
+                }
 
-            // Refine and filter the columns
-            var entitiesToReturn = RefineEntityAttributes(orderedEntities, queryExpr.ColumnSet);
+                // Convert to array to lock-in the ordering (if we are ordering by something that doesn't exist in the columnset, the ordering will fail afterwards)
+                var orderedEntities = tempSortedList.Select(x => x.Value).ToArray();
 
-            // Populate EntityReference names after column filtering
-            foreach (var entity in entitiesToReturn)
-            {
-                Utility.PopulateEntityReferenceNames(entity, db);
-            }
+                // Calculate formula fields before we filter the fetched columns
+                Parallel.ForEach(orderedEntities, entity => core.ExecuteFormulaFields(entityMetadata, entity, formulaNeeded).GetAwaiter().GetResult());
 
-            if (queryExpr.Distinct)
-            {
-                var uniqueIds = new HashSet<Guid>();
-                entitiesToReturn = entitiesToReturn.Where(entity => uniqueIds.Add(entity.Id));
+                // Refine and filter the columns
+                entitiesToReturn = RefineEntityAttributes(orderedEntities, queryExpr.ColumnSet);
+
+                // Populate EntityReference names after column filtering
+                foreach (var entity in entitiesToReturn)
+                {
+                    Utility.PopulateEntityReferenceNames(entity, db);
+                }
+
+                if (queryExpr.Distinct)
+                {
+                    var uniqueIds = new HashSet<Guid>();
+                    entitiesToReturn = entitiesToReturn.Where(entity => uniqueIds.Add(entity.Id));
+                }
             }
 
             if (queryExpr.TopCount.HasValue || (queryExpr.PageInfo?.Count ?? 0) > 0)
@@ -182,9 +197,12 @@ namespace DG.Tools.XrmMockup
         private List<Entity> GetAliasedValuesFromLinkentity(LinkEntity linkEntity, Entity parent, Entity toAdd, XrmDb db)
         {
             var collection = new List<Entity>();
+            var calculatedNeeded = GetNeededAttributesForCalculatedFields(linkEntity);
+            var formulaNeeded = GetRequestedAttributes(linkEntity.Columns);
             foreach (var linkedRow in db[linkEntity.LinkToEntityName])
             {
                 var linkedEntity = linkedRow.ToEntity();
+                core.ExecuteCalculatedFields(linkedRow.Metadata, linkedEntity, calculatedNeeded);
 
                 if (linkedEntity.Attributes.ContainsKey(linkEntity.LinkToAttributeName) &&
                     parent.Attributes.ContainsKey(linkEntity.LinkFromAttributeName))
@@ -196,6 +214,9 @@ namespace DG.Tools.XrmMockup
 
                     if (linkedAttr.Equals(entAttr))
                     {
+                        // Project requested formula fields before copying this link's aliases.
+                        // Nested links follow the same path, so their aggregates see computed data too.
+                        core.ExecuteFormulaFields(linkedRow.Metadata, linkedEntity, formulaNeeded).GetAwaiter().GetResult();
                         var aliasedEntity = GetEntityWithAliasAttributes(linkEntity.EntityAlias, toAdd,
                                 metadata.EntityMetadata.GetMetadata(toAdd.LogicalName), linkedEntity.Attributes);
 
@@ -352,7 +373,7 @@ namespace DG.Tools.XrmMockup
         {
             if (query.ColumnSet == null || query.ColumnSet.AllColumns) return null;
 
-            var set = new HashSet<string>(query.ColumnSet.Columns, StringComparer.OrdinalIgnoreCase);
+            var set = new HashSet<string>(GetRequestedAttributes(query.ColumnSet), StringComparer.OrdinalIgnoreCase);
             CollectFilterAttributes(query.Criteria, set);
             foreach (var order in query.Orders)
             {
@@ -365,10 +386,24 @@ namespace DG.Tools.XrmMockup
             return set;
         }
 
+        private static ISet<string> GetNeededAttributesForCalculatedFields(LinkEntity link)
+        {
+            var requested = GetRequestedAttributes(link.Columns);
+            if (requested == null) return null;
+            var needed = new HashSet<string>(requested, StringComparer.OrdinalIgnoreCase);
+            needed.Add(link.LinkToAttributeName);
+            CollectFilterAttributes(link.LinkCriteria, needed);
+            foreach (var nested in link.LinkEntities)
+            {
+                if (!string.IsNullOrEmpty(nested.LinkFromAttributeName)) needed.Add(nested.LinkFromAttributeName);
+            }
+            return needed;
+        }
+
         private static ISet<string> GetRequestedAttributes(ColumnSet columnSet)
         {
             if (columnSet == null || columnSet.AllColumns) return null;
-            return new HashSet<string>(columnSet.Columns, StringComparer.OrdinalIgnoreCase);
+            return new HashSet<string>(columnSet.Columns.Concat(columnSet.AttributeExpressions.Select(expression => expression.AttributeName)), StringComparer.OrdinalIgnoreCase);
         }
 
         // Validates that every attribute referenced in the query's filters exists on the entity it
