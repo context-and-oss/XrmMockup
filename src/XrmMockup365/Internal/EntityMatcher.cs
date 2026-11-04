@@ -151,9 +151,9 @@ namespace DG.Tools.XrmMockup.Internal
                     return DateTimeCompareNow(attr, op, values);
 
                 case ConditionOperator.In:
-                    if (values is not null && attr is OptionSetValueCollection optionSetValueCollection)
+                    if (values != null && attr is OptionSetValueCollection optionSetValueCollection)
                     {
-                        return string.Join(',', values.Order()) == string.Join(',', optionSetValueCollection.ToList().Select(_ => _.Value).Order());
+                        return string.Join(",", values.OrderBy(v => v)) == string.Join(",", optionSetValueCollection.Select(v => v.Value).OrderBy(v => v));
                     }
                     return values.Contains(ValueConverter.ConvertTo(attr, values.FirstOrDefault()?.GetType()));
 
