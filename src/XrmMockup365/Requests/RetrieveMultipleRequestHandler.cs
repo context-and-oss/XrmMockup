@@ -41,7 +41,7 @@ namespace DG.Tools.XrmMockup
             FillAliasIfEmpty(queryExpr);
 
             var isAggregate = QueryExpressionAggregation.IsAggregate(queryExpr);
-            if (isAggregate) QueryExpressionAggregation.Validate(queryExpr);
+            if (isAggregate) QueryExpressionAggregation.Validate(queryExpr, metadata.EntityMetadata);
 
             // Reject up-front any filter that references an attribute that does not exist on the
             // targeted entity, mirroring Dataverse (which faults instead of silently ignoring the
@@ -114,7 +114,7 @@ namespace DG.Tools.XrmMockup
                 // limiting the result set. Aggregate rows have aliases only, not record IDs.
                 var aggregateRows = collection.OrderBy(x => x.Key.Sequence).Select(x => x.Value).ToArray();
                 Parallel.ForEach(aggregateRows, entity => core.ExecuteFormulaFields(entityMetadata, entity, formulaNeeded).GetAwaiter().GetResult());
-                entitiesToReturn = QueryExpressionAggregation.Aggregate(queryExpr, aggregateRows);
+                entitiesToReturn = QueryExpressionAggregation.Aggregate(queryExpr, aggregateRows, db, metadata.EntityMetadata);
             }
             else
             {
@@ -197,9 +197,12 @@ namespace DG.Tools.XrmMockup
         private List<Entity> GetAliasedValuesFromLinkentity(LinkEntity linkEntity, Entity parent, Entity toAdd, XrmDb db)
         {
             var collection = new List<Entity>();
+            var calculatedNeeded = GetNeededAttributesForCalculatedFields(linkEntity);
+            var formulaNeeded = GetRequestedAttributes(linkEntity.Columns);
             foreach (var linkedRow in db[linkEntity.LinkToEntityName])
             {
                 var linkedEntity = linkedRow.ToEntity();
+                core.ExecuteCalculatedFields(linkedRow.Metadata, linkedEntity, calculatedNeeded);
 
                 if (linkedEntity.Attributes.ContainsKey(linkEntity.LinkToAttributeName) &&
                     parent.Attributes.ContainsKey(linkEntity.LinkFromAttributeName))
@@ -211,6 +214,9 @@ namespace DG.Tools.XrmMockup
 
                     if (linkedAttr.Equals(entAttr))
                     {
+                        // Project requested formula fields before copying this link's aliases.
+                        // Nested links follow the same path, so their aggregates see computed data too.
+                        core.ExecuteFormulaFields(linkedRow.Metadata, linkedEntity, formulaNeeded).GetAwaiter().GetResult();
                         var aliasedEntity = GetEntityWithAliasAttributes(linkEntity.EntityAlias, toAdd,
                                 metadata.EntityMetadata.GetMetadata(toAdd.LogicalName), linkedEntity.Attributes);
 
@@ -378,6 +384,20 @@ namespace DG.Tools.XrmMockup
                 if (!string.IsNullOrEmpty(link.LinkFromAttributeName)) set.Add(link.LinkFromAttributeName);
             }
             return set;
+        }
+
+        private static ISet<string> GetNeededAttributesForCalculatedFields(LinkEntity link)
+        {
+            var requested = GetRequestedAttributes(link.Columns);
+            if (requested == null) return null;
+            var needed = new HashSet<string>(requested, StringComparer.OrdinalIgnoreCase);
+            needed.Add(link.LinkToAttributeName);
+            CollectFilterAttributes(link.LinkCriteria, needed);
+            foreach (var nested in link.LinkEntities)
+            {
+                if (!string.IsNullOrEmpty(nested.LinkFromAttributeName)) needed.Add(nested.LinkFromAttributeName);
+            }
+            return needed;
         }
 
         private static ISet<string> GetRequestedAttributes(ColumnSet columnSet)
