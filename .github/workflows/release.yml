@@ -40,6 +40,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
+    defaults:
+      run:
+        working-directory: release-source
     outputs:
       product: ${{ steps.prepare.outputs.product }}
       tag: ${{ steps.prepare.outputs.tag }}
@@ -48,10 +52,21 @@ jobs:
       project: ${{ steps.prepare.outputs.project }}
       reuse: ${{ steps.prepare.outputs.reuse }}
     steps:
-      - uses: actions/checkout@v7
+      # Privileged helpers always come from the trusted default branch.
+      - name: Check out trusted release automation
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: release-tools
+          persist-credentials: false
+      # Inspect this checkout only; never execute its scripts with a write token.
+      - name: Check out requested source as data
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_ref || github.ref }}
+          path: release-source
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -62,11 +77,11 @@ jobs:
           PRODUCT: ${{ inputs.product }}
           VERSION: ${{ inputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: node scripts/release/prepare-release.mjs
+        run: node ../release-tools/scripts/release/prepare-release.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: prepared-${{ steps.prepare.outputs.tag }}
-          path: .release/
+          path: release-source/.release/
           include-hidden-files: true
           if-no-files-found: error
 
@@ -139,6 +154,9 @@ jobs:
     needs: build
     if: needs.build.outputs.dry_run == 'false'
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: release-source
     env:
       RELEASE_TAG: ${{ needs.build.outputs.tag }}
     permissions:
@@ -146,9 +164,17 @@ jobs:
       id-token: write
       actions: write
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out trusted publication helpers
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: release-tools
+          persist-credentials: false
+      - name: Check out frozen source as data
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.build.outputs.source_sha }}
+          path: release-source
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -157,20 +183,20 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: release-${{ needs.build.outputs.tag }}
-          path: .release/
+          path: release-source/.release/
       - name: Create/reuse draft and attach frozen artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/publish-release.mjs draft
+        run: node ../release-tools/scripts/release/publish-release.mjs draft
       - name: Check prior NuGet publication
         id: probe
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/publish-release.mjs probe
+        run: node ../release-tools/scripts/release/publish-release.mjs probe
       - name: Verify an existing NuGet version against frozen package content
         if: steps.probe.outputs.package_exists == 'true'
         shell: pwsh
-        run: '& ./scripts/release/validate-packages.ps1 -Existing'
+        run: '& ../release-tools/scripts/release/validate-packages.ps1 -Existing'
       - name: Log in to NuGet just before publishing
         if: steps.probe.outputs.publication_complete != 'true'
         id: nuget-login
@@ -198,12 +224,12 @@ jobs:
       - name: Record successful package and symbol publication
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/publish-release.mjs record
+        run: node ../release-tools/scripts/release/publish-release.mjs record
       - name: Publish GitHub release after successful NuGet publication
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/publish-release.mjs complete
+        run: node ../release-tools/scripts/release/publish-release.mjs complete
       - name: Request tracked changelog history finalization
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/publish-release.mjs notify
+        run: node ../release-tools/scripts/release/publish-release.mjs notify

@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { products, renderChangelog, makeSnapshot, applyRelease, hash, releaseMarker } from './model.mjs';
 
@@ -16,6 +16,7 @@ async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'xrmmockup-release-')), work = join(root, 'work'), remote = join(root, 'origin.git');
   mkdirSync(work); g(work, 'init', '-b', 'master');
   g(work, 'config', 'user.name', 'maintainer'); g(work, 'config', 'user.email', 'maintainer@example.test');
+  write(work, '.gitignore', '.release/\n');
   for (const config of Object.values(products)) write(work, config.changelog, '### 1.0.0 - archive\n* Historical release\n');
   g(work, 'add', '.'); g(work, 'commit', '-m', 'Baseline');
   const baselineSha = g(work, 'rev-parse', 'HEAD');
@@ -39,18 +40,19 @@ async function fixture(t) {
       const number = /^\/pulls\/(\d+)$/.exec(path)?.[1];
       if (number) return json(pullRequests.find(pr => pr.number === Number(number)));
       if (path === '/check-runs') return json({ id: 1 });
-      if (path === '/releases' && req.method === 'GET') return json(releases);
+      if (path === '/releases' && req.method === 'GET') { const start = (Number(url.searchParams.get('page') ?? 1) - 1) * 100; return json(releases.slice(start, start + 100)); }
       if (path === '/releases' && req.method === 'POST') {
-        const release = { id: releases.length + 1, created_at: '2026-11-05T10:00:00Z', ...body, upload_url: `${base}/repos/owner/repo/upload{?name,label}` };
+        const release = { id: releases.length + 1, created_at: '2026-11-05T10:00:00Z', ...body, upload_url: `${base}/repos/owner/repo/upload/${releases.length + 1}{?name,label}` };
         releases.push(release); return json(release);
       }
-      if (path.startsWith('/releases/tags/')) { const release = releases.find(r => r.tag_name === decodeURIComponent(path.slice('/releases/tags/'.length))); if (release) return json(release); res.statusCode = 404; return res.end('Not found'); }
+      if (path.startsWith('/releases/tags/')) { const release = releases.find(r => !r.draft && r.tag_name === decodeURIComponent(path.slice('/releases/tags/'.length))); if (release) return json(release); res.statusCode = 404; return res.end('Not found'); }
       const assetList = /^\/releases\/(\d+)\/assets$/.exec(path);
       if (assetList) return json([...assets.values()].filter(a => a.releaseId === Number(assetList[1])).map(({ bytes, ...a }) => a));
       const assetId = /^\/releases\/assets\/(\d+)$/.exec(path)?.[1];
       if (assetId) { const asset = assets.get(Number(assetId)); res.end(asset.bytes); return; }
-      if (path === '/upload') {
-        const id = assets.size + 1, name = url.searchParams.get('name'); assets.set(id, { id, name, bytes, releaseId: releases[0].id }); return json({ id, name });
+      const uploadId = /^\/upload\/(\d+)$/.exec(path)?.[1];
+      if (uploadId) {
+        const id = assets.size + 1, name = url.searchParams.get('name'); assets.set(id, { id, name, bytes, releaseId: Number(uploadId) }); return json({ id, name });
       }
       const releaseId = /^\/releases\/(\d+)$/.exec(path)?.[1];
       if (releaseId && req.method === 'PATCH') { Object.assign(releases.find(r => r.id === Number(releaseId)), body); return json(releases.find(r => r.id === Number(releaseId))); }
@@ -192,4 +194,182 @@ test('retry preparation recovers the original draft bytes rather than rebuilding
   assert.equal(JSON.parse(readFileSync(snapPath, 'utf8')).sourceSha, sourceSha);
   assert.match(readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /reuse=true/);
   assert.ok(!f.requests.some(r => r.method !== 'GET'));
+});
+
+async function frozenDraft(f, version = '1.20.3', product = 'core') {
+  const sourceSha = g(f.work, 'rev-parse', 'HEAD'), tag = `${product}-v${version}`;
+  g(f.work, 'tag', tag); g(f.work, 'push', 'origin', '--tags');
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: tag });
+  const snapshot = JSON.parse(readFileSync(join(f.work, '.release/release-snapshot.json'), 'utf8'));
+  snapshot.packages = ['nupkg', 'snupkg'].map(ext => {
+    const name = `${products[product].packageId}.${version}.${ext}`;
+    write(f.work, `.release/packages/${name}`, ext);
+    return { name, sha512: hash(Buffer.from(ext)), contentHash: hash(Buffer.from(ext)) };
+  });
+  write(f.work, '.release/release-snapshot.json', snapshot);
+  await f.run('publish-release.mjs', ['draft']);
+  g(f.work, 'checkout', '--', ...Object.values(products).map(p => p.changelog));
+  return snapshot;
+}
+function successfulRelease(f, snapshot) {
+  const id = f.releases.length + 1;
+  f.releases.push({ id, tag_name: snapshot.tag, draft: false, body: releaseMarker });
+  const bytes = Buffer.from(JSON.stringify(snapshot, null, 2) + '\n');
+  let assetId = f.assets.size + 1;
+  f.assets.set(assetId, { id: assetId, name: 'release-snapshot.json', releaseId: id, bytes });
+  assetId++;
+  f.assets.set(assetId, { id: assetId, name: 'nuget-publication.json', releaseId: id, bytes: Buffer.from(JSON.stringify({ tag: snapshot.tag, snapshotHash: hash(bytes) })) });
+  g(f.work, 'tag', snapshot.tag, snapshot.sourceSha); g(f.work, 'push', 'origin', '--tags');
+}
+function restoreFrozenSource(f, snapshot) {
+  g(f.work, 'checkout', '--force', '--detach', snapshot.sourceSha);
+  write(f.work, '.release/release-snapshot.json', snapshot);
+  for (const pkg of snapshot.packages) write(f.work, `.release/packages/${pkg.name}`, pkg.name.endsWith('.snupkg') ? 'snupkg' : 'nupkg');
+}
+
+test('trusted preparation rejects an unmerged source without executing its replacement script', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  g(f.work, 'checkout', '-b', 'unmerged');
+  write(f.work, 'scripts/release/prepare-release.mjs', "import fs from 'node:fs'; fs.writeFileSync('untrusted-executed', 'bad');\n");
+  g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Replace privileged preparation'); g(f.work, 'push', 'origin', 'HEAD:refs/heads/unmerged');
+  f.requests.length = 0;
+  await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' }), /master ancestry/);
+  assert.equal(existsSync(join(f.work, 'untrusted-executed')), false);
+  assert.equal(f.requests.length, 0, 'Reject unmerged sources before any API or artifact operations');
+});
+
+test('checkpoint reconciliation makes no PR API requests on self-pushes or unchanged previews', async t => {
+  const f = await fixture(t), first = f.feature(); await f.run('update-changelogs.mjs');
+  assert.equal(f.readState().checkpointSha, first.merge_commit_sha);
+  const checkpointCommit = g(f.work, 'rev-parse', 'HEAD');
+  f.requests.length = 0; await f.run('update-changelogs.mjs');
+  assert.equal(g(f.work, 'rev-parse', 'HEAD'), checkpointCommit);
+  assert.ok(!f.requests.some(r => r.path.startsWith('/commits/') || r.path.startsWith('/pulls/')));
+  const next = f.feature(['product:metadata'], 'Add: Metadata addition');
+  f.requests.length = 0; await f.run('update-changelogs.mjs');
+  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${next.merge_commit_sha}/pulls`]);
+  assert.equal(f.readState().checkpointSha, next.merge_commit_sha);
+  f.requests.length = 0;
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' });
+  assert.ok(!f.requests.some(r => r.path.startsWith('/commits/') || r.path.startsWith('/pulls/')));
+});
+
+test('checkpoint optimization still detects a new unclassified direct commit', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  g(f.work, 'config', 'user.name', 'maintainer'); g(f.work, 'config', 'user.email', 'maintainer@example.test');
+  write(f.work, 'direct.txt', 'unclassified'); g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Direct update');
+  const directSha = g(f.work, 'rev-parse', 'HEAD'); g(f.work, 'push', 'origin', 'HEAD:master');
+  f.requests.length = 0;
+  await assert.rejects(f.run('update-changelogs.mjs'), /no classified merged master PR/);
+  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${directSha}/pulls`]);
+});
+
+test('a manually advanced checkpoint cannot hide an earlier unclassified direct commit', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  g(f.work, 'config', 'user.name', 'maintainer'); g(f.work, 'config', 'user.email', 'maintainer@example.test');
+  write(f.work, 'hidden-direct.txt', 'must not be skipped'); g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Unclassified direct commit');
+  const directSha = g(f.work, 'rev-parse', 'HEAD'); g(f.work, 'push', 'origin', 'HEAD:master');
+  const forged = f.readState(); forged.checkpointSha = directSha; write(f.work, '.github/release-state.json', forged);
+  f.feature(['product:none'], 'Chore: Manually edit the checkpoint'); f.requests.length = 0;
+  await assert.rejects(f.run('update-changelogs.mjs'), /no classified merged master PR/);
+  assert.ok(f.requests.some(r => r.path === `/commits/${directSha}/pulls`));
+});
+
+test('a checkpoint outside source ancestry fails before PR API access', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  const master = g(f.work, 'rev-parse', 'HEAD'); g(f.work, 'checkout', '-b', 'checkpoint-side');
+  write(f.work, 'side.txt', 'side'); g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Side commit');
+  const side = g(f.work, 'rev-parse', 'HEAD'); g(f.work, 'checkout', '--detach', master);
+  const invalid = f.readState(); invalid.checkpointSha = side; write(f.work, '.github/release-state.json', invalid);
+  f.requests.length = 0;
+  await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' }), /checkpoint.*ancestry/);
+  assert.equal(f.requests.length, 0);
+});
+
+test('draft-only paginated lookup works across separate draft, probe, and preparation invocations', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  for (let i = 0; i < 100; i++) f.releases.push({ id: i + 1, tag_name: `unrelated-${i}`, draft: true });
+  const frozen = await frozenDraft(f);
+  const mock = join(f.root, 'mock-nuget.mjs');
+  writeFileSync(mock, `const original = globalThis.fetch; globalThis.fetch = (url, options) => String(url).startsWith('https://api.nuget.org/') ? Promise.resolve(new Response(null, { status: 404 })) : original(url, options);`);
+  await f.run('publish-release.mjs', ['probe'], { NODE_OPTIONS: `--import=${pathToFileURL(mock).href}` });
+  assert.match(readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /publication_complete=false/);
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: frozen.tag });
+  assert.match(readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /reuse=true/);
+  assert.ok(!f.requests.some(r => r.path.startsWith('/releases/tags/')));
+  assert.equal(f.releases.filter(r => r.tag_name === frozen.tag).length, 1);
+});
+
+for (const scenario of ['newer version', 'already consumed PRs', 'newer source']) {
+  test(`obsolete drafts are rejected in preparation and publish-only retries: ${scenario}`, async t => {
+    const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+    const frozen = await frozenDraft(f, scenario === 'newer version' ? '1.20.3' : '1.20.5');
+    if (scenario !== 'already consumed PRs') {
+      f.feature(['product:core'], 'Add: Later core work'); await f.run('update-changelogs.mjs');
+    }
+    const newer = makeSnapshot(f.readState(), 'core', '1.20.4', g(f.work, 'rev-parse', 'HEAD'), 'owner/repo', '2026-11-05');
+    newer.packages = ['nupkg', 'snupkg'].map(ext => ({ name: `XrmMockup365.1.20.4.${ext}`, sha512: hash(Buffer.from(ext)), contentHash: hash(Buffer.from(ext)) }));
+    successfulRelease(f, newer); restoreFrozenSource(f, frozen); f.requests.length = 0;
+    await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: frozen.tag }), /Obsolete draft/);
+    for (const phase of ['draft', 'probe', 'record', 'complete', 'notify']) {
+      await assert.rejects(f.run('publish-release.mjs', [phase]), /Obsolete draft/);
+    }
+    assert.ok(f.requests.every(r => r.method === 'GET'), 'Reject obsolete snapshots before upload, publication or dispatch side effects');
+  });
+}
+
+test('completed release recovery is still permitted after a newer same-product release', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs'); const completed = await frozenDraft(f);
+  await f.run('publish-release.mjs', ['record']); await f.run('publish-release.mjs', ['complete']);
+  f.feature(['product:core'], 'Add: Next release work'); await f.run('update-changelogs.mjs');
+  const newer = makeSnapshot(f.readState(), 'core', '1.20.4', g(f.work, 'rev-parse', 'HEAD'), 'owner/repo', '2026-11-05');
+  newer.packages = ['nupkg', 'snupkg'].map(ext => ({ name: `XrmMockup365.1.20.4.${ext}`, sha512: hash(Buffer.from(ext)), contentHash: hash(Buffer.from(ext)) }));
+  successfulRelease(f, newer); restoreFrozenSource(f, completed); f.requests.length = 0;
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: completed.tag });
+  await f.run('publish-release.mjs', ['complete']); await f.run('publish-release.mjs', ['notify']);
+  assert.equal(f.releases.find(r => r.tag_name === completed.tag).draft, false);
+  assert.ok(!f.requests.some(r => r.method === 'PATCH'));
+});
+
+test('a later metadata release does not invalidate an independent core draft', async t => {
+  const f = await fixture(t); f.feature(['product:core', 'product:metadata']); await f.run('update-changelogs.mjs');
+  const frozen = await frozenDraft(f); f.feature(['product:metadata'], 'Add: Metadata-only work'); await f.run('update-changelogs.mjs');
+  const metadata = makeSnapshot(f.readState(), 'metadata', '1.2.1', g(f.work, 'rev-parse', 'HEAD'), 'owner/repo', '2026-11-05');
+  metadata.packages = ['nupkg', 'snupkg'].map(ext => ({ name: `XrmMockup.MetadataGenerator.1.2.1.${ext}`, sha512: hash(Buffer.from(ext)), contentHash: hash(Buffer.from(ext)) }));
+  successfulRelease(f, metadata); restoreFrozenSource(f, frozen);
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: frozen.tag });
+  await f.run('publish-release.mjs', ['draft']);
+});
+test('a writer-looking author does not cause a human-committed ledger PR to be skipped', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  g(f.work, 'config', 'user.name', 'maintainer'); g(f.work, 'config', 'user.email', 'maintainer@example.test');
+  const edited = f.readState(); edited.manualAudit = true; write(f.work, '.github/release-state.json', edited);
+  g(f.work, 'add', '.'); g(f.work, 'commit', '--author=release-changelog-bot <release-changelog-bot@users.noreply.github.com>', '-m', 'Chore: Review ledger metadata');
+  const sha = g(f.work, 'rev-parse', 'HEAD'), number = f.pullRequests.length + 1;
+  f.pullRequests.push({ number, title: 'Chore: Review ledger metadata', labels: [{ name: 'product:none' }], merged: true, merged_at: '2026-11-05T11:00:00Z', merge_commit_sha: sha, base: { ref: 'master' }, head: { sha } });
+  g(f.work, 'push', 'origin', 'HEAD:master'); f.requests.length = 0;
+  await f.run('update-changelogs.mjs');
+  assert.ok(f.requests.some(r => r.path === `/commits/${sha}/pulls`));
+  assert.ok(f.readState().entries.some(entry => entry.number === number));
+});
+
+test('completed-release recovery refuses a changed frozen snapshot before any side effects', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs'); const frozen = await frozenDraft(f);
+  await f.run('publish-release.mjs', ['record']); await f.run('publish-release.mjs', ['complete']);
+  write(f.work, '.release/release-snapshot.json', { ...frozen, date: '2026-11-06' });
+  f.requests.length = 0;
+  await assert.rejects(f.run('publish-release.mjs', ['complete']), /Completed release differs/);
+  assert.ok(f.requests.every(r => r.method === 'GET'));
+});
+test('a reachable checkpoint on a merged side branch is not accepted as a first-parent boundary', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs');
+  g(f.work, 'config', 'user.name', 'maintainer'); g(f.work, 'config', 'user.email', 'maintainer@example.test');
+  g(f.work, 'checkout', '-b', 'side-boundary'); write(f.work, 'side-history.txt', 'side commit');
+  g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Side history'); const side = g(f.work, 'rev-parse', 'HEAD');
+  g(f.work, 'checkout', '-B', 'master', 'origin/master'); g(f.work, 'merge', '--no-ff', 'side-boundary', '-m', 'Merge side history');
+  g(f.work, 'push', 'origin', 'master');
+  const edited = f.readState(); edited.checkpointSha = side; write(f.work, '.github/release-state.json', edited);
+  f.feature(['product:none'], 'Chore: Review side boundary'); f.requests.length = 0;
+  await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' }), /checkpoint.*first-parent ancestry/);
+  assert.equal(f.requests.length, 0);
 });

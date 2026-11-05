@@ -35,3 +35,21 @@ test('API errors are reported and optional 404 returns null', async () => {
   assert.equal(await api.repo('/missing', { allow404: true }), null);
   await assert.rejects(api.repo('/missing'), /404/);
 });
+test('release lookup finds a draft beyond the first page without the published-only tag endpoint', async () => {
+  const urls = [], draft = { id: 101, tag_name: 'core-v1.20.3', draft: true };
+  const api = new GitHub({ repository: 'owner/repo', token: 'test', fetcher: async url => {
+    urls.push(url);
+    assert.equal(new URL(url).pathname, '/repos/owner/repo/releases');
+    return new Response(JSON.stringify(new URL(url).searchParams.get('page') === '1'
+      ? Array.from({ length: 100 }, (_, i) => ({ id: i, tag_name: `old-${i}`, draft: false })) : [draft]));
+  } });
+  assert.deepEqual(await api.releaseByTag(draft.tag_name), draft);
+  assert.equal(urls.length, 2);
+  assert.equal(new URL(urls[1]).searchParams.get('page'), '2');
+});
+test('release lookup refuses ambiguous duplicate tags instead of picking an arbitrary draft', async () => {
+  const api = new GitHub({ repository: 'owner/repo', token: 'test', fetcher: async () => new Response(JSON.stringify([
+    { id: 1, tag_name: 'core-v1.20.3', draft: true }, { id: 2, tag_name: 'core-v1.20.3', draft: true },
+  ])) });
+  await assert.rejects(api.releaseByTag('core-v1.20.3'), /Multiple releases\/drafts/);
+});

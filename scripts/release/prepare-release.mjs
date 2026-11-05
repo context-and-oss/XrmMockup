@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { materialize } from './workspace.mjs';
-import { GitHub, git, ancestor, output, summary, readState, discoverPrs, reconcileReleases } from './github.mjs';
+import { GitHub, git, fetchHistory, ancestor, assertPublicationCurrent, output, summary, readState, discoverPrs, reconcileReleases } from './github.mjs';
 import { products, parseTag, parseVersion, validateState, makeSnapshot, applyRelease, renderChangelog, notesFor, snapshotName, releaseMarker } from './model.mjs';
 
 const api = new GitHub();
@@ -15,7 +15,7 @@ const resolved = manual ? (() => {
 })() : parseTag(process.env.GITHUB_REF_NAME ?? '');
 const { product, version, tag } = resolved;
 const sourceSha = git('rev-parse', 'HEAD');
-git('fetch', 'origin', 'master', '--tags');
+fetchHistory();
 if (!ancestor(sourceSha, 'origin/master')) throw new Error('Release source must be on master ancestry.');
 if (!dryRun && git('rev-parse', '--verify', `refs/tags/${tag}^{commit}`) !== sourceSha) throw new Error('Publishing requires an existing matching tag at the selected source.');
 const state = validateState(readState());
@@ -28,7 +28,7 @@ for (const [p, config] of Object.entries(products)) {
 }
 mkdirSync('.release/packages', { recursive: true });
 let snapshot, reuse = false;
-const existing = await api.repo(`/releases/tags/${encodeURIComponent(tag)}`, { allow404: true });
+const existing = await api.releaseByTag(tag);
 if (existing) {
   if (!existing.body?.includes(releaseMarker)) throw new Error('An unmanaged GitHub release already exists for this tag.');
   snapshot = await api.snapshot(existing);
@@ -36,6 +36,7 @@ if (existing) {
     if (snapshot.sourceSha !== sourceSha || snapshot.baselineSha !== state.baselineSha || snapshot.tag !== tag || !snapshot.packages.length ||
         notesFor(state.entries.filter(e => snapshot.entryIds.includes(e.number)), product) !== snapshot.notes ||
         typeof snapshot.generatedChangelog !== 'string') throw new Error('Existing frozen release does not match tagged source/ledger.');
+    await assertPublicationCurrent(api, state, snapshot);
     const assets = await api.list(`/releases/${existing.id}/assets`);
     for (const pkg of snapshot.packages) {
       const asset = assets.find(a => a.name === pkg.name);

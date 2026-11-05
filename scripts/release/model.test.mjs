@@ -122,3 +122,10 @@ test('PR titles cannot inject generated-block markers or raw HTML into notes', (
   assert.match(rendered, /&lt;!-- END GENERATED RELEASE NOTES --&gt;/);
   assert.equal(renderChangelog(rendered, s, 'core'), rendered);
 });
+test('checkpoint schema accepts legacy absence but rejects malformed or coerced values', () => {
+  assert.doesNotThrow(() => validateState(state()));
+  assert.doesNotThrow(() => validateState({ ...state(), checkpointSha: baseline }));
+  for (const checkpointSha of [null, [baseline], 'not-a-commit', 'a'.repeat(39)]) {
+    assert.throws(() => validateState({ ...state(), checkpointSha }), /Invalid reconciliation checkpoint/);
+  }
+});

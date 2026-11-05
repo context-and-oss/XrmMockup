@@ -83,6 +83,7 @@ export function parseTag(tag) {
 }
 export function validateState(state) {
   if (state.schemaVersion !== 1 || !/^[a-f0-9]{40}$/.test(state.baselineSha ?? '')) throw new Error('Invalid release ledger/baseline.');
+  if (state.checkpointSha !== undefined && (typeof state.checkpointSha !== 'string' || !/^[a-f0-9]{40}$/.test(state.checkpointSha))) throw new Error('Invalid reconciliation checkpoint.');
   if (!Array.isArray(state.entries) || !Array.isArray(state.releases)) throw new Error('Invalid release ledger arrays.');
   for (const product of Object.keys(products)) parseVersion(state.baselineVersions?.[product] ?? '');
   const ids = new Set();

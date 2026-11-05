@@ -1,13 +1,15 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { GitHub, git, output, summary, readState } from './github.mjs';
+import { GitHub, git, fetchHistory, ancestor, assertPublicationCurrent, output, summary, readState } from './github.mjs';
 import { products, snapshotName, releaseMarker, validateSnapshot, validateState, notesFor, hash } from './model.mjs';
 
 const phase = process.argv[2];
 if (!['draft', 'probe', 'record', 'complete', 'notify'].includes(phase)) throw new Error('Unknown publication phase.');
 const api = new GitHub();
+fetchHistory();
 const snapshotBytes = readFileSync('.release/' + snapshotName);
 const snapshot = validateSnapshot(JSON.parse(snapshotBytes), api.repository);
 if (process.env.RELEASE_TAG && process.env.RELEASE_TAG !== snapshot.tag) throw new Error('Artifact tag does not match the workflow-selected product release.');
+if (!ancestor(snapshot.sourceSha, 'origin/master')) throw new Error('Release source must be on current master ancestry.');
 if (git('rev-parse', 'HEAD') !== snapshot.sourceSha) throw new Error('Artifact source differs from checked-out release source.');
 const ledger = validateState(readState());
 if (snapshot.baselineSha !== ledger.baselineSha || snapshot.entryIds.some(n => !ledger.entries.some(e => e.number === n && e.products.includes(snapshot.product))) ||
@@ -17,8 +19,9 @@ if (git('rev-parse', '--verify', `refs/tags/${snapshot.tag}^{commit}`) !== snaps
 for (const pkg of snapshot.packages) {
   if (hash(readFileSync(`.release/packages/${pkg.name}`)) !== pkg.sha512) throw new Error(`Package artifact changed: ${pkg.name}`);
 }
-let release = await api.repo(`/releases/tags/${encodeURIComponent(snapshot.tag)}`, { allow404: true });
+let release = await api.releaseByTag(snapshot.tag);
 if (release && !release.body?.includes(releaseMarker)) throw new Error('Refusing to alter an unmanaged GitHub release.');
+await assertPublicationCurrent(api, ledger, snapshot);
 async function upload(name, bytes, type) {
   const assets = await api.list(`/releases/${release.id}/assets`);
   const existing = assets.find(a => a.name === name);

@@ -46,3 +46,16 @@ test('release automation workflows consistently pin Node 24', () => {
     assert.ok(pins.every(version => version === '24'), `${name} must use Node 24 throughout`);
   }
 });
+test('privileged preparation and publication run default-branch helpers over isolated source data', () => {
+  const yaml = read('.github/workflows/release.yml');
+  const prepare = yaml.slice(yaml.indexOf('  prepare:\n'), yaml.indexOf('  build:\n'));
+  assert.match(prepare, /permissions:\n      contents: write\n      pull-requests: read/);
+  for (const section of [prepare, yaml.slice(yaml.indexOf('  publish:\n'))]) {
+    assert.match(section, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}\n          path: release-tools\n          persist-credentials: false/);
+    assert.match(section, /path: release-source\n          fetch-depth: 0\n          persist-credentials: false/);
+    assert.match(section, /working-directory: release-source/);
+    assert.ok(!section.includes('run: node scripts/release/'), 'Do not execute scripts from the selected source with a privileged token');
+  }
+  assert.match(prepare, /run: node \.\.\/release-tools\/scripts\/release\/prepare-release\.mjs/);
+  assert.match(yaml, /run: node \.\.\/release-tools\/scripts\/release\/publish-release\.mjs/);
+});

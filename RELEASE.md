@@ -83,7 +83,7 @@ There is a short asynchronous interval after a merge. **Wait for successful chan
 
 1. Confirm the selected product's pending notes are correct, the changelog updater has succeeded, and the source has passed verification.
 2. Choose that product's next version. Review breaking changes and prerelease intent; no automated version bump is inferred solely from category labels.
-3. Fetch current `master` and tags. Select the exact reconciled commit to release; do not unintentionally tag unrelated local work.
+3. Fetch current `master` and tags. Select the exact reconciled commit to release; do not unintentionally tag unrelated local work. Preparation and publication use trusted default-branch scripts to validate this separate source checkout.
 4. Optionally run a manual release preview with the product, version, source ref, and `dry_run: true`. Preview creates no release, obtains no NuGet credentials, and commits/pushes no tracked-file updates. Release files are generated only in its temporary build workspace.
 5. Create and push an annotated tag for the selected product:
 
@@ -117,11 +117,14 @@ After successful publication, the shared writer adds that exact versioned sectio
 
 - **Missing/invalid PR classification:** correct labels/title and rerun validation. If already merged through an exceptional bypass, reconcile the correction before releasing.
 - **Tag created before reconciliation:** no publication should occur. Complete reconciliation and select a valid source through the documented recovery path; never move a tag that has published artifacts. Prefer using the manual preview before creating another production tag.
+- **An unfinished draft has been superseded by a newer same-product release:** do not retry publication of its obsolete snapshot. Abandon/clean up that draft as appropriate and prepare a release from current reconciled source with a new version. Matching already-completed releases can still be recovered without republishing.
 - **Package publication fails:** the GitHub release remains a draft. Investigate and retry using the stored snapshot/artifacts; do not create a combined tag or accidentally publish the other product.
 - **Package published but GitHub finalization fails:** recover the existing release. Do not assume a newly rebuilt package is identical merely because NuGet rejects the existing version.
 - **Symbols uploaded but the publication receipt was not saved:** verify both successful uploads against the frozen artifacts/logs before recording the receipt and finalizing the same release. Symbol duplicates are not automatically ignored.
 - **Release published but tracked-file update fails:** rerun changelog reconciliation/finalization. A later reconciliation can recover successful snapshots. Do not republish the package or move its tag.
 
 Generated-file writes are serialized and restricted to the two changelogs and release ledger. Direct pushes to `master` are not a substitute for classified PRs; only the narrowly scoped automation identity receives the needed bypass.
+
+When deploying release-automation fixes, start retries from the updated `master` workflow. Re-running a historical workflow definition does not retroactively replace its old steps.
 
 For workflow requirements, security boundaries, migration baselines, recovery details, and acceptance tests, see [docs/release-flow.md](docs/release-flow.md).

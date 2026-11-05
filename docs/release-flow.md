@@ -105,11 +105,11 @@ This requires explicit repository/org setup for narrowly scoped branch-rule bypa
 ### Deterministic reconciliation
 
 1. Fetch current `master`, relevant tags, successful release records, and the existing ledger.
-2. Discover all unprocessed merged PRs whose merge commits are reachable from the source history. Handle the repository's actual merge strategies; do not use timestamps alone as inclusion boundaries.
+2. Discover unprocessed merged PRs after the ledger's `checkpointSha` (or the migration baseline for an older ledger). Validate the checkpoint against the selected source's first-parent ancestry and the recorded generated-writer commit. A manual ledger edit invalidates skipping and triggers a full baseline reconciliation. Verify generated bot commits locally before skipping their PR API calls. Handle the repository's actual merge strategies; do not use timestamps alone as inclusion boundaries.
 3. Resolve and validate product/category metadata. Freeze the first processed title, category, product selection, PR number, and merge/source commit in the ledger. Later label/title edits must not silently alter already recorded notes. Corrections need an explicit reviewed operation.
 4. Render `### Unreleased` at the top of each product's changelog, preserving existing preambles and immutable released history. Deduplicate by **product + PR number**; shared changes appear once in each file.
 5. Incorporate any newly successful release snapshots as described below, removing only the entries consumed by those releases from the appropriate pending section.
-6. Commit only changed generated files. Refresh/reconcile on a non-fast-forward push instead of overwriting newer work. Do not force-push `master`.
+6. Advance `checkpointSha` only after the complete scan succeeds; keep it unchanged on bot-only self-runs so they do not create checkpoint-only commit loops. Older ledgers acquire it on their next successful reconciliation. Commit only changed generated files. Refresh/reconcile on a non-fast-forward push instead of overwriting newer work. Do not force-push `master`.
 
 Use stable category ordering from the category table and oldest-first source order within a category, with PR number as a deterministic tie-breaker. Persist `product:none` decisions in the ledger for audit/reconciliation, but do not render them in either product file.
 
@@ -164,9 +164,11 @@ A failed documentation push after successful publication is recoverable independ
 - Publish the draft only after the selected NuGet package/symbol publication succeeds. Mark prereleases appropriately. Use `--verify-tag`; keep metadata releases from taking the core's global “Latest” designation with explicit latest handling. [S4]
 - Trigger shared tracked-file finalization after publication. Persist successful-release metadata before relying on a follow-up workflow.
 
+Draft recovery uses the authenticated, paginated release list, not the published-only release-by-tag endpoint. Multiple draft/release matches for one tag fail as ambiguous. On frozen-draft reuse and on **every publish script invocation**, refresh history and compare the snapshot's source, version, and PR set with current successful same-product snapshots. Reject already-consumed PRs, older/divergent sources, non-increasing versions, and changed pending sets before any upload/push/finalization side effect. A matching already-published snapshot with its verified publication receipt is allowed to recover without republishing, even after a newer release. Another product's release does not invalidate the selected product's draft.
+
 NuGet and GitHub publication are not atomic. Serialize publication per product with `cancel-in-progress: false`. Reuse drafts/snapshots on retry and do not blindly treat an existing NuGet version as identical to a rebuilt artifact. Verify prior successful upload state before skipping an existing version; otherwise fail for investigation instead of masking a collision with unconditional `--skip-duplicate`.
 
-Build/test jobs use read-only contents permissions. A separate metadata-only preparation job has contents write to recover draft releases (draft visibility requires push access); it does not build or execute project code and makes no publication API writes. Restrict `contents: write`, `id-token: write`, and bot write/bypass privileges to the jobs/identities that need them. Dry runs must not obtain NuGet credentials, create/upload/publish GitHub releases, or commit/push tracked-file updates. Temporary release-workspace transformations are still generated for preview packaging.
+Build/test jobs use read-only contents permissions. A separate metadata-only preparation job has contents write for draft visibility and `pull-requests: read` for commit/PR classification endpoints. Privileged preparation and publication check out their scripts from the trusted default branch under `release-tools` and inspect a separate `release-source` checkout. The requested source never supplies privileged executable scripts; trusted code validates ancestry before inspecting its ledger or generating artifacts. Checkout credentials are not persisted; trusted Git fetches receive authentication only in the subprocess environment. Preparation does not build project code or make publication API writes. Restrict `contents: write`, `id-token: write`, and bot write/bypass privileges to the jobs/identities that need them. Dry runs must not obtain NuGet credentials, create/upload/publish GitHub releases, or commit/push tracked-file updates. Temporary release-workspace transformations are still generated for preview packaging.
 
 Bot-created tags/releases using `GITHUB_TOKEN` do not automatically launch another push/release workflow. Use explicit orchestration/dispatch or an appropriately scoped GitHub App where needed; do not depend on recursive events. [S5]
 
@@ -207,6 +209,8 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 - Reconciliation commits generated files to `master`, preserves released history, and is a no-op on retry.
 - Concurrent merge/finalization runs lose neither pending notes nor successful release records.
 - A tag created before its notes are reconciled fails the freshness gate.
+- A current checkpoint/self-push makes no commit-to-PR API requests; a new unclassified commit remains detectable.
+- Invalid ancestry or a manually advanced checkpoint cannot hide source history.
 
 **Release:**
 
@@ -215,6 +219,9 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 - Notes use the selected product's recorded PRs and previous successful release.
 - Release finalization writes the correct versioned section while retaining later pending entries and the other product's notes.
 - Publication success followed by documentation failure is recoverable without moving tags or republishing packages.
+- Obsolete unfinished drafts are rejected in both preparation and publish-job-only retries; completed matching releases remain recoverable.
+- Drafts on subsequent release-list pages are recovered without rebuilding frozen artifacts.
+- An unmerged source containing modified preparation code is rejected without executing that code.
 - Invalid/unapproved tags and dry runs have no publication side effects; dry runs need no NuGet identity.
 - Legacy core generator assets and full solution test coverage remain intact.
 
