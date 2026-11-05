@@ -54,7 +54,7 @@ namespace DG.Tools.XrmMockup
             var statusOptionMeta = Utility.GetStatusOptionMetadata(entityMetadata);
 
             if (!statusOptionMeta.Any(o => (o as StatusOptionMetadata).Value == request.Status.Value
-                && (o as StatusOptionMetadata).State == 1))
+                && ((o as StatusOptionMetadata).State == 1 || (o as StatusOptionMetadata).State == 2)))
             {
                 throw new FaultException($"{request.Status.Value} is not a valid status code on incident with Id {incidentRef.Id}.");
             }
@@ -86,7 +86,9 @@ namespace DG.Tools.XrmMockup
 
             db.Add(request.IncidentResolution);
 
-            incident["statecode"] = new OptionSetValue(1);
+            var incidentStatecode = statusOptionMeta.Where(o => (o as StatusOptionMetadata).Value == request.Status.Value).Select(o => (o as StatusOptionMetadata).State).FirstOrDefault() ?? 1;
+
+            incident["statecode"] = new OptionSetValue(incidentStatecode);
             incident["statuscode"] = request.Status;
 
             var updateRequest = new UpdateRequest

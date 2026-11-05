@@ -304,5 +304,22 @@ namespace DG.XrmMockupTest
                 });
             Assert.Empty(retrieved.Entities);
         }
+
+        [Fact]
+        public void TestTagIsSharedVariableInAllStages()
+        {
+            crm.RegisterAdditionalPlugins(PluginRegistrationScope.Temporary, typeof(AccountTagPlugin));
+            crm.ClearTraceLog();
+
+            orgAdminService.Execute(new Microsoft.Xrm.Sdk.Messages.CreateRequest
+            {
+                Target = new Account { Name = "Tagged" },
+                ["tag"] = "my tag",
+            });
+
+            Assert.Contains("Stage 10: tag=my tag, inInputParameters=False", crm.TraceLog);
+            Assert.Contains("Stage 20: tag=my tag, inInputParameters=False", crm.TraceLog);
+            Assert.Contains("Stage 40: tag=my tag, inInputParameters=False", crm.TraceLog);
+        }
     }
 }

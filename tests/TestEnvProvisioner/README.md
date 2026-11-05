@@ -8,7 +8,7 @@ be migrated / un-skipped.
 It lives under `tests/` because it's part of the test suite, but it is **not** in `XrmMockup.slnx`
 and is **not** a test project — it's an on-demand console tool run against a live org. It
 authenticates exactly like the metadata generator (the `DataverseConnection` package, reading
-`DATAVERSE_URL`).
+`DataverseUrl` and `DataverseCredentialType`).
 
 ## Run
 
@@ -20,9 +20,27 @@ dotnet run --project tests/TestEnvProvisioner -- --config tests/appsettings.json
 dotnet run --project tests/TestEnvProvisioner -- --config tests/appsettings.json
 ```
 
-`--config` points at an appsettings.json containing `DATAVERSE_URL` (the same file the metadata
-generator uses). Alternatively set the `DATAVERSE_URL` environment variable and omit `--config`.
-The tool is idempotent — it skips components that already exist, so it is safe to re-run.
+`--config` points at an appsettings.json containing `DataverseUrl` (the same file the metadata
+generator uses). Alternatively set the `DataverseUrl` environment variable and omit `--config`, or
+pass `--dataverse-url <url>`. The legacy `DATAVERSE_URL` key still works. The tool is idempotent —
+it skips components that already exist, so it is safe to re-run.
+
+### Authentication
+
+Authentication defaults to an interactive browser sign-in (DataverseConnection's `browser`
+credential). Override it with `--credential-type`, or the `DataverseCredentialType` setting:
+
+```bash
+# No browser available (SSH, container):
+dotnet run --project tests/TestEnvProvisioner -- --config tests/appsettings.json --credential-type devicecode
+
+# Reuse an existing `az login` session:
+dotnet run --project tests/TestEnvProvisioner -- --config tests/appsettings.json --credential-type azcli
+```
+
+Valid values are `browser` (default), `devicecode` and `azcli` — see the
+[DataverseConnection configuration](https://github.com/context-and-oss/DataverseConnection#configuration)
+docs. CLI overrides take precedence over the config file and environment variables.
 
 ### Solution membership
 

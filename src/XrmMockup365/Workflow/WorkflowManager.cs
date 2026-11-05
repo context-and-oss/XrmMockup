@@ -36,7 +36,7 @@ namespace DG.Tools.XrmMockup {
         private List<Entity> synchronousWorkflows;
         private List<Entity> asynchronousWorkflows;
         private List<WaitInfo> waitingWorkflows;
-        private Dictionary<string, EntityMetadata> metadata;
+        private SortedDictionary<string, EntityMetadata> metadata;
         private Dictionary<string, CodeActivity> codeActivityTriggers;
         private Dictionary<Guid, WorkflowTree> parsedWorkflows;
 
@@ -47,7 +47,7 @@ namespace DG.Tools.XrmMockup {
         internal int ActionsCount => actions.Count;
         internal int CodeActivityCount => codeActivityTriggers.Count;
 
-        public WorkflowManager(ICoreOperations core, IEnumerable<Type> codeActivityInstances, bool? IncludeAllWorkflows, List<Entity> mixedWorkflows, Dictionary<string, EntityMetadata> metadata, ILogger logger = null) {
+        public WorkflowManager(ICoreOperations core, IEnumerable<Type> codeActivityInstances, bool? IncludeAllWorkflows, List<Entity> mixedWorkflows, SortedDictionary<string, EntityMetadata> metadata, ILogger logger = null) {
             _core = core;
             _logger = logger ?? NullLogger.Instance;
             this.metadata = metadata;

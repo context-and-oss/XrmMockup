@@ -18,7 +18,7 @@ internal sealed class EntityMetadataReader(
 {
     private readonly IOrganizationService _service = serviceProvider.Service;
 
-    public async Task<Dictionary<string, EntityMetadata>> GetEntityMetadataAsync(
+    public async Task<SortedDictionary<string, EntityMetadata>> GetEntityMetadataAsync(
         string[] solutions,
         string[] entities,
         CancellationToken ct = default)
@@ -55,11 +55,10 @@ internal sealed class EntityMetadataReader(
         }
 
         // Deduplicate by logical name
-        var result = allMetadata
-            .GroupBy(x => x.LogicalName)
-            .Select(x => x.First())
-            .ToDictionary(m => m.LogicalName, m => m);
-
+        var result = new SortedDictionary<string, EntityMetadata>(
+            allMetadata
+                .GroupBy(m => m.LogicalName)
+                .ToDictionary(g => g.Key, g => g.First()));
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.LogInformation("Retrieved entity metadata for: {Entities}", string.Join(", ", result.Keys));

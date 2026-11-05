@@ -6,6 +6,7 @@ using XrmMockup.MetadataGenerator.Core.Models;
 using XrmMockup.MetadataGenerator.Core.Services;
 using XrmMockup.MetadataGenerator.Tool;
 using XrmMockup.MetadataGenerator.Tool.Extensions;
+using XrmMockup.MetadataGenerator.Tool.Options;
 
 // Define CLI options
 var outputOption = new Option<string?>(CliOptions.Output.Primary, CliOptions.Output.Alias)
@@ -48,6 +49,38 @@ var allSecurityRolesOption = new Option<bool>(CliOptions.AllSecurityRoles.Primar
     Description = CliOptions.AllSecurityRoles.Description
 };
 
+var dataverseUrlOption = new Option<string?>(CliOptions.DataverseUrl.Primary, CliOptions.DataverseUrl.Alias)
+{
+    Description = CliOptions.DataverseUrl.Description,
+    Arity = ArgumentArity.ZeroOrOne
+};
+
+// Validated and normalised here so an unknown value fails at parse time with the valid values
+// listed, instead of surfacing later as a connection failure.
+var credentialTypeOption = new Option<string?>(CliOptions.CredentialType.Primary, CliOptions.CredentialType.Alias)
+{
+    Description = CliOptions.CredentialType.Description,
+    Arity = ArgumentArity.ExactlyOne,
+    HelpName = CliOptions.CredentialType.HelpName,
+    CustomParser = result =>
+    {
+        var value = result.Tokens.Count == 1 ? result.Tokens[0].Value.Trim() : string.Empty;
+        var match = Array.Find(
+            CliOptions.CredentialType.AllowedValues,
+            allowed => string.Equals(allowed, value, StringComparison.OrdinalIgnoreCase));
+
+        if (match is null)
+        {
+            result.AddError(
+                $"'{value}' is not a valid {CliOptions.CredentialType.Primary}. " +
+                $"Valid values: {string.Join(", ", CliOptions.CredentialType.AllowedValues)}.");
+            return null;
+        }
+
+        return match;
+    }
+};
+
 // Build root command
 var rootCommand = new RootCommand("XrmMockup Metadata Generator - Generate metadata from Dataverse for XrmMockup testing")
 {
@@ -57,7 +90,9 @@ var rootCommand = new RootCommand("XrmMockup Metadata Generator - Generate metad
     configOption,
     prettyPrintOption,
     securityRolesOption,
-    allSecurityRolesOption
+    allSecurityRolesOption,
+    dataverseUrlOption,
+    credentialTypeOption
 };
 
 rootCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -69,6 +104,8 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     var prettyPrint = parseResult.GetValue(prettyPrintOption);
     var securityRoles = parseResult.GetValue(securityRolesOption);
     var allSecurityRoles = parseResult.GetValue(allSecurityRolesOption);
+    var dataverseUrl = parseResult.GetValue(dataverseUrlOption);
+    var credentialType = parseResult.GetValue(credentialTypeOption);
 
     // If config path specified, change to that directory for config loading
     if (!string.IsNullOrEmpty(config))
@@ -80,6 +117,15 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         }
     }
 
+    // Connection settings are owned by DataverseConnection, so CLI values are fed back in as
+    // configuration rather than translated here. DataverseConnection reads DataverseUrl and
+    // DataverseCredentialType (legacy: DATAVERSE_URL, DATAVERSE_CREDENTIAL_TYPE) off IConfiguration.
+    var connectionOverrides = new Dictionary<string, string?>();
+    if (!string.IsNullOrWhiteSpace(dataverseUrl))
+        connectionOverrides[CliOptions.DataverseUrl.ConfigurationKey] = dataverseUrl;
+    if (!string.IsNullOrWhiteSpace(credentialType))
+        connectionOverrides[CliOptions.CredentialType.ConfigurationKey] = credentialType;
+
     // Build service provider
     var services = new ServiceCollection();
     services.AddMetadataGeneratorTool(metadataConfig => new GeneratorOptions
@@ -90,7 +136,8 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         SecurityRoles = ParseCommaSeparated(securityRoles) ?? metadataConfig.SecurityRoles,
         AllSecurityRoles = allSecurityRoles || metadataConfig.AllSecurityRoles,
         PrettyPrint = prettyPrint || metadataConfig.PrettyPrint
-    });
+    },
+    new ConfigurationOverrides(connectionOverrides));
 
     await using var serviceProvider = services.BuildServiceProvider();
 

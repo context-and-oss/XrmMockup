@@ -94,7 +94,8 @@ Tests consume metadata files from a `Metadata/` directory. Configure metadata ge
 
 ```json
 {
-  "DATAVERSE_URL": "https://org.crm4.dynamics.com",
+  "DataverseUrl": "https://org.crm4.dynamics.com",
+  "DataverseCredentialType": "browser",
   "XrmMockup": {
     "Metadata": {
       "OutputDirectory": "./Metadata",
@@ -104,6 +105,12 @@ Tests consume metadata files from a `Metadata/` directory. Configure metadata ge
   }
 }
 ```
+
+Connection settings (`DataverseUrl`, `DataverseCredentialType`) are owned by the
+[DataverseConnection](https://github.com/context-and-oss/DataverseConnection#configuration) package,
+sit at the root of the file, and also accept their legacy uppercase forms (`DATAVERSE_URL`,
+`DATAVERSE_CREDENTIAL_TYPE`). Authentication defaults to an interactive browser sign-in; override it
+per run with `--credential-type browser|devicecode|azcli` (`--dataverse-url` overrides the URL).
 
 ## Common Test Patterns
 

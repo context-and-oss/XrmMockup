@@ -46,7 +46,7 @@ $toolProjectPath = Join-Path $scriptDir "..\src\MetadataGen\MetadataGenerator.To
 $configPath = Join-Path $scriptDir "appsettings.json"
 
 # Keep in sync with src/MetadataGen/.config/dotnet-tools.json
-$xrmContextVersion = "4.0.0-beta.25"
+$xrmContextVersion = "4.0.0-beta.26"
 
 if (-not (Test-Path $configPath)) {
     Write-Error "appsettings.json not found at: $configPath"
@@ -67,7 +67,7 @@ if (-not $ContextOnly) {
     }
 
     Write-Host "Configuration:" -ForegroundColor Yellow
-    Write-Host "  Dataverse URL: $($config.DATAVERSE_URL)"
+    Write-Host "  Dataverse URL: $($config.DataverseUrl)"
     Write-Host "  Output Directory: $($config.XrmMockup.Metadata.OutputDirectory)"
     Write-Host "  Entities: $($config.XrmMockup.Metadata.Entities.Count) entities"
     Write-Host ""
@@ -140,18 +140,28 @@ if (-not $MetadataOnly) {
     # is not under src/MetadataGen, so ensure a local manifest exists here.
     Push-Location $scriptDir
     try {
-        $manifestPath = Join-Path $scriptDir ".config\dotnet-tools.json"
-        if (-not (Test-Path $manifestPath)) {
-            Write-Host "Creating local tool manifest and installing xrmcontext $xrmContextVersion..." -ForegroundColor Yellow
+        # `dotnet new tool-manifest` writes .config/dotnet-tools.json on older SDKs and
+        # dotnet-tools.json in the folder root on newer ones, so accept either.
+        $manifestPath = @(".config/dotnet-tools.json", "dotnet-tools.json") |
+            ForEach-Object { Join-Path $scriptDir $_ } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+        if (-not $manifestPath) {
+            Write-Host "Creating local tool manifest..." -ForegroundColor Yellow
             & dotnet new tool-manifest | Out-Null
-            & dotnet tool install xrmcontext --version $xrmContextVersion
             if ($LASTEXITCODE -ne 0) {
-                Write-Error "Failed to install xrmcontext"
+                Write-Error "Failed to create tool manifest"
                 exit 1
             }
         }
-        else {
-            & dotnet tool restore | Out-Null
+
+        # Always install the pinned version: on an existing manifest this rewrites the entry, so a
+        # bump to $xrmContextVersion takes effect instead of `dotnet tool restore` keeping the old one.
+        Write-Host "Installing xrmcontext $xrmContextVersion..." -ForegroundColor Yellow
+        & dotnet tool install xrmcontext --version $xrmContextVersion | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to install xrmcontext"
+            exit 1
         }
 
         Write-Host "Running XrmContext..." -ForegroundColor Yellow
