@@ -1,5 +1,6 @@
 ﻿using Microsoft.Xrm.Sdk;
 using System;
+using System.Globalization;
 
 namespace DG.Tools.XrmMockup.Internal
 {
@@ -68,6 +69,11 @@ namespace DG.Tools.XrmMockup.Internal
                 return numericValue != 0;
             }
 
+            if ((targetType == typeof(DateTime) && value is string str2 && DateTime.TryParse(str2, out var dateTimeValue)))
+            {
+                return dateTimeValue.ToUniversalTime();
+            }
+            
             // Can we convert from the value's type converter to the target type?
             var valueConverter = System.ComponentModel.TypeDescriptor.GetConverter(valueType);
             if (valueConverter.CanConvertTo(targetType))
@@ -79,7 +85,7 @@ namespace DG.Tools.XrmMockup.Internal
             var targetConverter = System.ComponentModel.TypeDescriptor.GetConverter(targetType);
             if (targetConverter.CanConvertFrom(valueType))
             {
-                return targetConverter.ConvertFrom(value);
+                return targetConverter.ConvertFrom(null, CultureInfo.InvariantCulture, value);
             }
 
             // Fallback to Convert.ChangeType which handles most IConvertible types

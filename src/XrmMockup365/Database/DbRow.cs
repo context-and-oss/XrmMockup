@@ -184,9 +184,13 @@ namespace DG.Tools.XrmMockup.Database
             if (attrMetadata is MoneyAttributeMetadata && dbValue is decimal dbValueDecimal) {
                 return new Money(dbValueDecimal);
             }
-            if (attrMetadata is IntegerAttributeMetadata ||
-                attrMetadata is BigIntAttributeMetadata) {
+            if (attrMetadata is IntegerAttributeMetadata)
+            {
                 return (int?)dbValue;
+            }
+            if (attrMetadata is BigIntAttributeMetadata)
+            {
+                return (long?)dbValue;
             }
             return dbValue;
         }
