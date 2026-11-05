@@ -22,14 +22,14 @@ for (const pkg of snapshot.packages) {
 let release = await api.releaseByTag(snapshot.tag);
 if (release && !release.body?.includes(releaseMarker)) throw new Error('Refusing to alter an unmanaged GitHub release.');
 await assertPublicationCurrent(api, ledger, snapshot);
-async function upload(name, bytes, type) {
+async function upload(name, bytes) {
   const assets = await api.list(`/releases/${release.id}/assets`);
   const existing = assets.find(a => a.name === name);
   if (existing) {
     if (hash(await api.asset(existing)) !== hash(bytes)) throw new Error(`Existing release asset differs: ${name}. Investigate the incomplete/colliding release; assets are never clobbered.`);
     return;
   }
-  await api.request(`${release.upload_url.replace(/\{.*$/, '')}?name=${encodeURIComponent(name)}`, { method: 'POST', body: bytes, headers: { 'content-type': type } });
+  await api.uploadAsset(snapshot.tag, name, bytes);
 }
 async function receipt() {
   if (!release) return null;
@@ -41,15 +41,13 @@ async function receipt() {
 }
 if (phase === 'draft') {
   if (!release) {
-    const parsed = snapshot.version.includes('-');
-    release = await api.repo('/releases', { method: 'POST', body: {
-      tag_name: snapshot.tag, name: `${snapshot.product === 'core' ? 'XrmMockup365' : 'MetadataGenerator'} ${snapshot.version}`,
-      body: `${snapshot.notes}\n\n${releaseMarker}`, draft: true, prerelease: parsed,
-    } });
+    release = await api.createRelease({ tag: snapshot.tag,
+      title: `${snapshot.product === 'core' ? 'XrmMockup365' : 'MetadataGenerator'} ${snapshot.version}`,
+      notes: `${snapshot.notes}\n\n${releaseMarker}`, prerelease: snapshot.version.includes('-') });
   }
-  for (const pkg of snapshot.packages) await upload(pkg.name, readFileSync(`.release/packages/${pkg.name}`), 'application/octet-stream');
+  for (const pkg of snapshot.packages) await upload(pkg.name, readFileSync(`.release/packages/${pkg.name}`));
   // Snapshot last: its presence means all frozen package assets were uploaded.
-  await upload(snapshotName, snapshotBytes, 'application/json');
+  await upload(snapshotName, snapshotBytes);
   summary(`Frozen assets attached to ${snapshot.tag}${release.draft ? ' (draft)' : ' (already published)'}.`);
 } else if (phase === 'probe') {
   if (!release) throw new Error('Draft release must exist before publication.');
@@ -67,15 +65,15 @@ if (phase === 'draft') {
   if (!release || !release.draft) {
     if (!await receipt()) throw new Error('Expected draft or verified prior publication.');
   } else {
-    await upload('nuget-publication.json', Buffer.from(JSON.stringify({ tag: snapshot.tag, snapshotHash: hash(snapshotBytes) }, null, 2) + '\n'), 'application/json');
+    await upload('nuget-publication.json', Buffer.from(JSON.stringify({ tag: snapshot.tag, snapshotHash: hash(snapshotBytes) }, null, 2) + '\n'));
   }
 } else if (phase === 'complete') {
   if (!await receipt()) throw new Error('Both package and symbol publication must succeed before finalizing GitHub release.');
   if (release.draft) {
-    await api.repo(`/releases/${release.id}`, { method: 'PATCH', body: { draft: false, make_latest: snapshot.product === 'core' && !snapshot.version.includes('-') ? 'true' : 'false' } });
+    await api.publishRelease(snapshot.tag, snapshot.product === 'core' && !snapshot.version.includes('-'));
   }
   summary(`Published ${snapshot.tag}. Tracked history finalization follows separately.`);
 } else {
-  await api.repo('/actions/workflows/update-changelogs.yml/dispatches', { method: 'POST', body: { ref: 'master' } });
+  await api.dispatch('update-changelogs.yml', 'master');
   summary('Requested tracked changelog/release-history reconciliation on master.');
 }

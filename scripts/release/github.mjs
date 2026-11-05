@@ -1,23 +1,24 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { runGh, ghEnvironment } from './gh-cli.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { hash, classify, products, generatedPaths, statePath, snapshotName, releaseMarker, parseTag, validateSnapshot, applyRelease, compareVersions, makeSnapshot, isChangelogPr } from './model.mjs';
 
 export function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }).replace(/\r\n/g, '\n').trim();
 }
-// Do not persist a privileged token in the requested source checkout. Authenticate
-// history refreshes only in this trusted subprocess's environment (not its argv).
+// Let gh handle Git credentials without persisting a write token in the source checkout.
 export function fetchHistory() {
-  const env = { ...process.env };
-  const token = env.GH_TOKEN ?? env.GITHUB_TOKEN;
-  if (token) {
-    const count = Number(env.GIT_CONFIG_COUNT ?? 0);
-    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid Git configuration environment.');
-    env.GIT_CONFIG_COUNT = String(count + 1);
-    env[`GIT_CONFIG_KEY_${count}`] = `http.${env.GITHUB_SERVER_URL ?? 'https://github.com'}/.extraheader`;
-    env[`GIT_CONFIG_VALUE_${count}`] = `AUTHORIZATION: basic ${Buffer.from('x-access-token:' + token).toString('base64')}`;
-  }
+  const host = new URL(process.env.GITHUB_SERVER_URL ?? 'https://github.com').host;
+  const env = ghEnvironment(process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN, host);
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid Git configuration environment.');
+  env.GIT_CONFIG_COUNT = String(count + 2);
+  for (let i = 0; i < 2; i++) env[`GIT_CONFIG_KEY_${count + i}`] = `credential.https://${host}.helper`;
+  env[`GIT_CONFIG_VALUE_${count}`] = '';
+  env[`GIT_CONFIG_VALUE_${count + 1}`] = '!gh auth git-credential';
   return execFileSync('git', ['fetch', 'origin', 'master', '--tags'], { env, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 export function ancestor(a, b) {
@@ -26,40 +27,85 @@ export function ancestor(a, b) {
   return result.status === 0;
 }
 export class GitHub {
-  constructor({ repository = process.env.GITHUB_REPOSITORY, token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN, fetcher = fetch } = {}) {
+  constructor({ repository = process.env.GITHUB_REPOSITORY, token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN,
+    runner = runGh, host = new URL(process.env.GITHUB_SERVER_URL ?? 'https://github.com').host, environment = {} } = {}) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '')) throw new Error('GITHUB_REPOSITORY is required.');
-    if (!token) throw new Error('A GitHub API token is required.');
-    this.repository = repository; this.token = token; this.fetcher = fetcher;
-    this.base = process.env.GITHUB_API_URL ?? 'https://api.github.com';
+    this.repository = repository; this.host = host; this.runner = runner;
+    this.environment = ghEnvironment(token, host, environment);
+    this.qualifiedRepo = `${host}/${repository}`;
   }
+  async cli(args, input) { return this.runner(args, { input, env: this.environment }); }
   async request(path, { method = 'GET', body, raw = false, allow404 = false, headers = {} } = {}) {
-    const url = /^https?:\/\//.test(path) ? path : `${this.base}${path}`;
-    // Only send credentials to the GitHub API / upload service, not arbitrary asset URLs.
-    if (![new URL(this.base).hostname, 'uploads.github.com'].includes(new URL(url).hostname)) throw new Error('Untrusted GitHub API host.');
-    const response = await this.fetcher(url, {
-      method, signal: AbortSignal.timeout(60000), headers: { authorization: `Bearer ${this.token}`, accept: raw ? 'application/octet-stream' : 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28', 'user-agent': 'xrmmockup-release', ...(body && !Buffer.isBuffer(body) ? { 'content-type': 'application/json' } : {}), ...headers },
-      ...(body ? { body: Buffer.isBuffer(body) ? body : JSON.stringify(body) } : {}),
-    });
-    if (allow404 && response.status === 404) return null;
-    if (!response.ok) throw new Error(`GitHub ${method} ${new URL(url).pathname}: ${response.status} ${(await response.text()).slice(0, 500)}`);
-    if (response.status === 204) return null;
-    return raw ? Buffer.from(await response.arrayBuffer()) : response.json();
+    if (!/^\/(?!\/)[^\s]+$/.test(path) || path.includes('://')) throw new Error('Untrusted GitHub API path: only relative endpoints are allowed.');
+    if (Buffer.isBuffer(body)) throw new Error('Use gh release upload for binary assets.');
+    const args = ['api', path, '--hostname', this.host, '--method', method, '--header', 'X-GitHub-Api-Version:2022-11-28'];
+    if (raw) args.push('--header', 'Accept:application/octet-stream');
+    for (const [name, value] of Object.entries(headers)) args.push('--header', `${name}:${value}`);
+    if (body !== undefined) args.push('--input', '-');
+    let bytes;
+    try { bytes = await this.cli(args, body === undefined ? undefined : JSON.stringify(body)); }
+    catch (error) {
+      if (allow404 && (String(error.stderr ?? '').trim().match(/\(HTTP (\d{3})\)$/)?.[1] === '404' || /^HTTP 404:/.test(String(error.stderr ?? '').trim()))) return null;
+      throw error;
+    }
+    if (raw) return Buffer.from(bytes);
+    const text = bytes.toString('utf8').trim();
+    return text ? JSON.parse(text) : null; // gh returns no body for a 204 response.
   }
   repo(path, options) { return this.request(`/repos/${this.repository}${path}`, options); }
-  async list(path) {
-    const all = [];
-    for (let page = 1; ; page++) {
-      const batch = await this.repo(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
-      all.push(...batch);
-      if (batch.length < 100) return all;
-    }
+  async list(path, selector = '.[] | @json') {
+    const endpoint = `/repos/${this.repository}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    // gh follows pagination links. One compact JSON record per line also works
+    // with older gh versions that do not yet provide --slurp.
+    const bytes = await this.cli(['api', endpoint, '--hostname', this.host, '--method', 'GET', '--paginate', '--jq', selector, '--header', 'X-GitHub-Api-Version:2022-11-28']);
+    return bytes.toString('utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   }
-  // The tag endpoint is for published releases. Authenticated listing includes drafts.
   async releaseByTag(tag) {
     const matches = (await this.list('/releases')).filter(release => release.tag_name === tag);
     if (matches.length > 1) throw new Error(`Multiple releases/drafts use tag ${tag}; resolve the ambiguity before retrying.`);
     return matches[0] ?? null;
+  }
+  async createPull({ title, body, head, base }) {
+    const bytes = await this.cli(['pr', 'create', '--repo', this.qualifiedRepo, '--head', head, '--base', base,
+      '--title', title, '--body-file', '-', '--label', 'product:none', '--label', 'change:chore'], body);
+    const url = new URL(bytes.toString('utf8').trim().split(/\r?\n/).at(-1));
+    const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)$/.exec(url.pathname);
+    if (url.host !== this.host || !match || `${match[1]}/${match[2]}` !== this.repository) throw new Error('gh pr create returned an unexpected repository/PR URL.');
+    return this.repo(`/pulls/${match[3]}`);
+  }
+  async editPull(pr, title, body) {
+    const args = ['pr', 'edit', String(pr.number), '--repo', this.qualifiedRepo, '--title', title, '--body-file', '-'];
+    const unwanted = (pr.labels ?? []).map(label => label.name).filter(name => /^(product|change):/.test(name) && !['product:none', 'change:chore'].includes(name));
+    for (const name of unwanted) args.push('--remove-label', name);
+    args.push('--add-label', 'product:none', '--add-label', 'change:chore');
+    await this.cli(args, body);
+  }
+  async closePull(number) { await this.cli(['pr', 'close', String(number), '--repo', this.qualifiedRepo]); }
+  async dispatch(workflow, ref, inputs) {
+    const args = ['workflow', 'run', workflow, '--repo', this.qualifiedRepo, '--ref', ref];
+    if (inputs) args.push('--json');
+    await this.cli(args, inputs ? JSON.stringify(inputs) : undefined);
+  }
+  async createRelease({ tag, title, notes, prerelease }) {
+    const args = ['release', 'create', tag, '--repo', this.qualifiedRepo, '--verify-tag', '--draft', '--title', title, '--notes-file', '-'];
+    if (prerelease) args.push('--prerelease');
+    await this.cli(args, notes);
+    return this.releaseByTag(tag);
+  }
+  async publishRelease(tag, latest) {
+    await this.cli(['release', 'edit', tag, '--repo', this.qualifiedRepo, '--draft=false', `--latest=${latest}`]);
+  }
+  async uploadAsset(tag, name, bytes) {
+    if (basename(name) !== name || /[\/\\#]/.test(name) || name.startsWith('-')) throw new Error('Invalid release asset filename.');
+    const directory = mkdtempSync(join(tmpdir(), 'xrmmockup-gh-upload-'));
+    try {
+      const path = join(directory, name); writeFileSync(path, bytes);
+      // No --clobber: the caller verifies matching existing bytes or fails first.
+      await this.cli(['release', 'upload', tag, path, '--repo', this.qualifiedRepo]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+  async upsertLabel(label) {
+    await this.cli(['label', 'create', label.name, '--repo', this.qualifiedRepo, '--color', label.color, '--description', label.description, '--force']);
   }
   async asset(asset) { return this.repo(`/releases/assets/${asset.id}`, { raw: true }); }
   async snapshot(release, requireReceipt = false) {
@@ -208,14 +254,10 @@ export async function validatePulls(api, event) {
   if (event.pull_request) return [await api.repo(`/pulls/${event.pull_request.number}`)];
   if (!event.merge_group) throw new Error('Expected a pull_request_target or merge_group event.');
   const group = event.merge_group, found = new Map();
-  for (let page = 1; ; page++) {
-    const comparison = await api.repo(`/compare/${group.base_sha}...${group.head_sha}?per_page=100&page=${page}`);
-    for (const commit of comparison.commits) {
-      for (const pr of await api.list(`/commits/${commit.sha}/pulls`)) {
-        if (pr.base?.ref === 'master' && !pr.merged_at) found.set(pr.number, pr);
-      }
+  for (const commit of await api.list(`/compare/${group.base_sha}...${group.head_sha}`, '.commits[] | @json')) {
+    for (const pr of await api.list(`/commits/${commit.sha}/pulls`)) {
+      if (pr.base?.ref === 'master' && !pr.merged_at) found.set(pr.number, pr);
     }
-    if (comparison.commits.length < 100) break;
   }
   if (!found.size) throw new Error('Cannot identify the PRs in this merge group; refusing to bypass classification.');
   return Promise.all([...found.keys()].map(n => api.repo(`/pulls/${n}`)));

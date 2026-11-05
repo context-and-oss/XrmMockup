@@ -70,5 +70,11 @@ test('changelog PR checks are explicitly dispatchable and the writer never pushe
   const script = read('scripts/release/update-changelogs.mjs');
   assert.ok(!script.includes('HEAD:refs/heads/master')); assert.ok(!script.includes('/merge'));
   assert.match(script, /state=open&base=master&head=/); assert.match(script, /force-with-lease/);
-  assert.match(script, /'product:none', 'change:chore'/);
+  assert.match(read('scripts/release/github.mjs'), /'--label', 'product:none', '--label', 'change:chore'/);
+});
+test('GitHub transport delegates to gh', () => {
+  const client = read('scripts/release/github.mjs');
+  assert.ok(!client.includes('fetch(')); assert.ok(!client.includes('authorization:'));
+  assert.match(client, /'pr', 'create'/); assert.match(client, /'release', 'upload'/);
+  assert.match(client, /'workflow', 'run'/); assert.match(client, /'label', 'create'/);
 });

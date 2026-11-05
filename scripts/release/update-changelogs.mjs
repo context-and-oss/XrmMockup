@@ -51,7 +51,7 @@ for (let attempt = 0; attempt < 3; attempt++) {
   const changed = git('diff', '--name-only', 'HEAD').split('\n').filter(Boolean);
   if (changed.some(path => !generatedPaths.includes(path))) throw new Error('Refusing to commit an unexpected generated path.');
   if (!changed.length) {
-    if (pr) await api.repo(`/pulls/${pr.number}`, { method: 'PATCH', body: { state: 'closed' } });
+    if (pr) await api.closePull(pr.number);
     summary('Master changelogs are current; no changelog PR needed.');
     break;
   }
@@ -69,16 +69,14 @@ for (let attempt = 0; attempt < 3; attempt++) {
       continue;
     }
   }
-  if (!pr) pr = await api.repo('/pulls', { method: 'POST', body: { title, body, head: changelogBranch, base: 'master' } });
-  else pr = await api.repo(`/pulls/${pr.number}`, { method: 'PATCH', body: { title, body } });
-  const unrelated = (pr.labels ?? []).map(label => label.name).filter(name => !name.startsWith('product:') && !name.startsWith('change:'));
-  await api.repo(`/issues/${pr.number}/labels`, { method: 'PUT', body: { labels: [...unrelated, 'product:none', 'change:chore'] } });
+  if (!pr) pr = await api.createPull({ title, body, head: changelogBranch, base: 'master' });
+  else await api.editPull(pr, title, body);
   // GITHUB_TOKEN-created events are not a reliable CI trigger. Explicit dispatch
   // runs the real classifiers and read-only build checks without an App or PAT.
   for (const workflow of ['pr-product-labels.yml', 'pr-change-category.yml']) {
-    await api.repo(`/actions/workflows/${workflow}/dispatches`, { method: 'POST', body: { ref: 'master', inputs: { pr_number: String(pr.number) } } });
+    await api.dispatch(workflow, 'master', { pr_number: String(pr.number) });
   }
-  await api.repo('/actions/workflows/ci.yml/dispatches', { method: 'POST', body: { ref: changelogBranch } });
+  await api.dispatch('ci.yml', changelogBranch);
   summary(`Updated changelog PR #${pr.number}. Merge it after required checks/review; master was not pushed.`);
   break;
 }

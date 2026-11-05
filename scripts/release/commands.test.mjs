@@ -66,7 +66,7 @@ async function fixture(t) {
         const pr = botPrs.find(pr => pr.number === Number(labelPr)); pr.labels = body.labels.map(name => ({ name })); return json(pr.labels);
       }
       if (path === '/check-runs') return json({ id: 1 });
-      if (path === '/releases' && req.method === 'GET') { const start = (Number(url.searchParams.get('page') ?? 1) - 1) * 100; return json(releases.slice(start, start + 100)); }
+      if (path === '/releases' && req.method === 'GET') { const start = (Number(url.searchParams.get('page') ?? 1) - 1) * 100; if (start + 100 < releases.length) res.setHeader('link', `<${base}/repos/owner/repo/releases?per_page=100&page=${start / 100 + 2}>; rel="next"`); return json(releases.slice(start, start + 100)); }
       if (path === '/releases' && req.method === 'POST') {
         const release = { id: releases.length + 1, created_at: '2026-11-05T10:00:00Z', ...body, upload_url: `${base}/repos/owner/repo/upload/${releases.length + 1}{?name,label}` };
         releases.push(release); return json(release);
@@ -89,7 +89,7 @@ async function fixture(t) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => { await new Promise(resolve => server.close(resolve)); rmSync(root, { recursive: true, force: true }); });
-  const env = { ...process.env, GITHUB_REPOSITORY: 'owner/repo', GH_TOKEN: 'test', GITHUB_API_URL: base, GITHUB_OUTPUT: join(root, 'outputs'), GITHUB_STEP_SUMMARY: join(root, 'summary') };
+  const env = { ...process.env, GITHUB_REPOSITORY: 'owner/repo', GH_TOKEN: 'test', TEST_GH_API_URL: base, NODE_OPTIONS: `--import=${new URL('./test-utils/inject-gh.mjs', import.meta.url).href}`, GITHUB_OUTPUT: join(root, 'outputs'), GITHUB_STEP_SUMMARY: join(root, 'summary') };
   function feature(labels = ['product:core'], title = 'Fix: A feature fix') {
     g(work, 'fetch', 'origin', 'master'); g(work, 'checkout', '-B', 'master', 'origin/master');
     g(work, 'config', 'user.name', 'maintainer'); g(work, 'config', 'user.email', 'maintainer@example.test');
@@ -112,7 +112,7 @@ async function fixture(t) {
     g(work, 'push', 'origin', 'master'); return pr;
   }
   async function run(script, args = [], overrides = {}) {
-    const result = await execute(process.execPath, [join(scriptDir, script), ...args], { cwd: work, env: { ...env, ...overrides }, maxBuffer: 5 * 1024 * 1024 });
+    const result = await execute(process.execPath, [join(scriptDir, script), ...args], { cwd: work, env: { ...env, ...overrides, NODE_OPTIONS: [env.NODE_OPTIONS, overrides.NODE_OPTIONS].filter(Boolean).join(' ') }, maxBuffer: 5 * 1024 * 1024 });
     // Most existing release tests need approved notes on master. Simulate the human
     // review/merge in the fixture only; production automation never merges its PR.
     if (script === 'update-changelogs.mjs' && overrides.MERGE_BOT_PR !== 'false') mergeBotPr();

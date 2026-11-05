@@ -2,11 +2,15 @@
 
 **Before first use:** complete the repository setup below. The workflows are implemented, but required checks, permission to create changelog PRs, and NuGet Trusted Publishing must be configured before production releases.
 
+## Tools
+
+Release automation uses **Node 24** for classification, rendering, and validation, and **GitHub CLI (`gh`)** for GitHub operations. For local use, install both tools and authenticate with `gh auth login`, or provide `GH_TOKEN`; set `GITHUB_REPOSITORY` to the intended `owner/repository`. GitHub-hosted runners already include `gh`.
+
 ## Repository setup
 
 1. Run **Set up release labels** (`setup-release-labels.yml`) from `master` to create/update the approved labels. For the initial implementation PR, create/apply the needed labels manually before merging.
 2. Require **`PR product labels`** and **`PR change category`** in the `master` branch ruleset. They are published against the PR head SHA. Keep normal branch protection and required reviews in place; merge-queue validation is included. No changelog automation bypass is needed.
-3. In **Settings → Actions → General → Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests** (and the organization-level permission if applicable). The pipeline uses the built-in `GITHUB_TOKEN`; it does not approve or automatically merge PRs. No GitHub App or bot PAT is required. The token writes only the reserved branch `automation/update-changelogs`, never `master`.
+3. In **Settings → Actions → General → Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests** (and the organization-level permission if applicable). The pipeline passes the built-in `GITHUB_TOKEN` to `gh` through `GH_TOKEN`; it does not approve or automatically merge PRs. No GitHub App or bot PAT is required. The token writes only the reserved branch `automation/update-changelogs`, never `master`.
 4. Keep **`NUGET_USER`** configured and verify the NuGet Trusted Publishing policy for `release.yml` and both package IDs. Restrict who may create the approved release tags.
 5. Run **Update product changelogs** manually, review and merge its generated PR after checks pass, and try a manual **Release** preview before creating production tags.
 
@@ -74,7 +78,7 @@ The required checks are **`PR product labels`** and **`PR change category`**. La
 2. It creates or refreshes **one combined PR** from `automation/update-changelogs`, titled **Chore: Update generated product changelogs**. Core notes, metadata notes, and release-history updates share this PR.
 3. Every additional merge into `master` updates that same open PR. Multiple merges do not create multiple changelog PRs.
 4. The bot applies `product:none` and `change:chore`. Its PR is excluded from both release notes and the ledger, so merging it does not generate another housekeeping PR.
-5. The workflow explicitly starts the PR product/category checks and CI using workflow dispatch. It does not rely on bot-created PR events to trigger checks.
+5. The workflow explicitly starts the PR product/category checks and CI using `gh workflow run`. It does not rely on bot-created PR events to trigger checks.
 6. A maintainer reviews and merges the PR through normal branch protection. Merge, squash, and rebase are supported. Only then do the tracked changelogs on `master` include the generated updates.
 
 A shared feature PR appears in both changelogs; an ordinary `product:none` maintenance PR appears in neither. The automation PR changes only the two changelogs and `.github/release-state.json`. Do not commit unrelated files or edit the reserved branch directly; the writer refuses to overwrite unowned changes.
