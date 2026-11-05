@@ -1,160 +1,94 @@
 # Release process
 
-**Before first use:** complete the repository setup below. The workflows are implemented, but required checks, permission to create changelog PRs, and NuGet Trusted Publishing must be configured before production releases.
-
-## Tools
-
-Release automation uses **Node 24** for classification, rendering, and validation, and **GitHub CLI (`gh`)** for GitHub operations. For local use, install both tools and authenticate with `gh auth login`, or provide `GH_TOKEN`; set `GITHUB_REPOSITORY` to the intended `owner/repository`. GitHub-hosted runners already include `gh`.
+Core and metadata releases are independent. A product tag chooses the package and its version; maintainers do not edit version headings or copy release descriptions manually.
 
 ## Repository setup
 
-1. Run **Set up release labels** (`setup-release-labels.yml`) from `master` to create/update the approved labels. For the initial implementation PR, create/apply the needed labels manually before merging.
-2. Require **`PR product labels`** and **`PR change category`** in the `master` branch ruleset. They are published against the PR head SHA. Keep normal branch protection and required reviews in place; merge-queue validation checks only the PRs in the actual group, not unqueued stacked PRs sharing commits. No changelog automation bypass is needed.
-3. In **Settings → Actions → General → Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests** (and the organization-level permission if applicable). The pipeline passes the built-in `GITHUB_TOKEN` to `gh` through `GH_TOKEN`; it does not approve or automatically merge PRs. No GitHub App or bot PAT is required. The token writes only the reserved branch `automation/update-changelogs`, never `master`.
-4. Keep **`NUGET_USER`** configured and verify the NuGet Trusted Publishing policy for `release.yml` and both package IDs. Restrict who may create the approved release tags.
-5. Run **Update product changelogs** manually, review and merge its generated PR after checks pass, and try a manual **Release** preview before creating production tags.
+1. Run **Set up release labels** from `master` to create the labels below. For the initial implementation PR, create/apply its labels manually before merging.
+2. Require **PR product labels**, **PR change category**, and the normal CI checks on `master`. Keep normal PR reviews and branch protection.
+3. Enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**, including the organization permission if applicable. The writer uses `GITHUB_TOKEN`; it creates PRs but does not approve or merge them. No App, PAT, or direct-master bypass is needed.
+4. Keep `NUGET_USER` and the NuGet Trusted Publishing policy configured for `release.yml` and the two packages. Restrict who can create release tags.
 
-The initial collection cutoff is `46f2af04b6d5dc4797f6069c31610c7101de3b47`, with baseline versions core `1.20.2` and metadata `1.2.0`. Historical notes remain intact; audit any older metadata changes not covered by its latest legacy release and record reviewed pending entries before the first new metadata release.
+Automation uses Node 24 and GitHub CLI (`gh`). For local use, install both and authenticate with `gh auth login` or `GH_TOKEN`; set `GITHUB_REPOSITORY` to `owner/repository`.
 
-## Products and release tags
+## Required PR labels
 
-The products have independent versions and independent releases:
+Every PR to `master` needs a product classification:
 
-| Git release tag | NuGet package | Changelog |
-| --- | --- | --- |
-| `core-v<VERSION>` | `XrmMockup365` | `RELEASE_NOTES.md` |
-| `metadata-v<VERSION>` | `XrmMockup.MetadataGenerator` | `src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md` |
-
-`VERSION` is a NuGet-compatible semantic version, such as `1.20.3` or `1.21.0-rc.1`. Release tags must use one of the two prefixes above. Combined tags, unprefixed versions, and historical tag formats are not approved for new releases. Do not rename or move existing release tags.
-
-PR product labels determine **which notes to include**. Git release tags determine **which product/version to publish**. Labelling or merging a feature PR does not publish a package.
-
-## Required PR classification
-
-Every PR targeting `master` must specify a product and category before merging, including bot and repository-maintenance PRs.
-
-### Product labels
-
-Choose at least one approved label:
-
-| PR label | Use for |
+| Labels | Meaning |
 | --- | --- |
-| `product:core` | Changes affecting the core package |
-| `product:metadata` | Changes affecting the modern metadata tool |
-| Both labels above | Shared changes affecting both products |
-| `product:none` | Repository maintenance with no product release-note entry |
+| `product:core` | Core package changes |
+| `product:metadata` | Metadata tool changes |
+| Both | Changes affecting both products |
+| `product:none` | Repository maintenance; no release-note entry |
 
-`product:none` must be used alone: do not combine it with either product label. It is not appropriate for a product change simply because no release is planned yet. An unknown product label does not satisfy validation.
+`product:none` is exclusive: do not combine it with a product label. Use the affected product even if you are not planning an immediate release.
 
-### Category labels or title prefixes
+Also choose one category label **or** start the title with its prefix:
 
-Choose exactly one approved category label **or** begin the PR title with its recognized prefix:
+| Category label | Title prefix |
+| --- | --- |
+| `change:feature` | `Add:` |
+| `change:fix` | `Fix:` |
+| `change:change` | `Change:` |
+| `change:breaking` | `Breaking:` |
+| `change:chore` | `Chore:` |
 
-| Category label | Alternative title prefix | Example title |
-| --- | --- | --- |
-| `change:feature` | `Add:` | `Add: Support aggregate queries` |
-| `change:fix` | `Fix:` | `Fix: Handle missing security roles` |
-| `change:change` | `Change:` | `Change: Update authentication defaults` |
-| `change:breaking` | `Breaking:` | `Breaking: Drop an unsupported target framework` |
-| `change:chore` | `Chore:` | `Chore: Refresh CI configuration` |
+Prefixes are case-insensitive and require descriptive text. Multiple category labels or a conflicting prefix fail validation. Maintenance PRs also need a category. The title supplies the user-facing note, for example `* Fix: Handle missing roles (#123)`.
 
-A recognized title prefix makes the category label optional. Prefix matching is case-insensitive and requires descriptive text after the colon. If you use both, they must agree. Multiple category labels or a conflicting title fail validation.
+## Changelog PR
 
-These category rules **also apply to `product:none`**. For example, a maintenance PR can use `product:none` with the title `Chore: Update issue templates`, without a category label.
+After merges to `master`, the writer regenerates pending notes from merged PRs since each product's previous **successful GitHub release**. It creates/updates **one combined PR** on `automation/update-changelogs`. Additional merges and published-release history updates refresh that same open PR.
 
-The PR title supplies the user-facing release-note text, rendered as:
+The bot PR has `product:none` and `change:chore`, so it does not appear in its own notes. It changes only `RELEASE_NOTES.md` and `src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md`. The writer explicitly dispatches its label checks and CI; maintainers review and merge it normally.
 
-```markdown
-* Fix: Handle missing security roles (#123)
-```
+Labels and titles are read when notes are regenerated. Correct them before merging feature PRs; a deliberate later correction can update pending notes. Published history is preserved in the files, not rewritten from current PR metadata. Do not edit the generated branch by hand.
 
-Write descriptive titles and review product classification before merging. Shared-source fixes often need both product labels. Categories describe the change; the maintainer still chooses the release version.
+**Merge the changelog PR covering your source before tagging.** The release workflow rejects stale notes. If more changes merge, let the open PR refresh, or merge the next PR if the previous one already merged.
 
-The required checks are **`PR product labels`** and **`PR change category`**. Labels and title edits rerun validation. Both checks must be configured as required on `master`; the workflow files alone are not merge protection.
+The initial notes collection cutoff is `46f2af04b6d5dc4797f6069c31610c7101de3b47`; existing core `1.20.2` and metadata `1.2.0` history is retained. Audit any old metadata changes not covered by that legacy release before the first new metadata release.
 
-## What happens after a merge
+## Release a product
 
-1. **Update product changelogs** runs after merges into `master`.
-2. It creates or refreshes **one combined PR** from `automation/update-changelogs`, titled **Chore: Update generated product changelogs**. Core notes, metadata notes, and release-history updates share this PR.
-3. Every additional merge into `master` updates that same open PR. Multiple merges do not create multiple changelog PRs.
-4. The bot applies `product:none` and `change:chore`. Its PR is excluded from both release notes and the ledger, so merging it does not generate another housekeeping PR.
-5. The workflow explicitly starts the PR product/category checks and CI using `gh workflow run`. It does not rely on bot-created PR events to trigger checks.
-6. A maintainer reviews and merges the PR through normal branch protection. Merge, squash, and rebase are supported. Only then do the tracked changelogs on `master` include the generated updates.
+| Tag | NuGet package |
+| --- | --- |
+| `core-v<VERSION>` | `XrmMockup365` |
+| `metadata-v<VERSION>` | `XrmMockup.MetadataGenerator` |
 
-A shared feature PR appears in both changelogs; an ordinary `product:none` maintenance PR appears in neither. The automation PR changes only the two changelogs and `.github/release-state.json`. Do not commit unrelated files or edit the reserved branch directly; the writer refuses to overwrite unowned changes.
+Use semantic versions such as `1.20.3` or `1.3.0-rc.1`. No combined-version tags are used for new releases.
 
-Pending note metadata is frozen when first generated, including while the changelog PR awaits review. Later edits to the originating PR's title/labels do not silently rewrite it; use an explicitly reviewed ledger/source correction if needed. Existing historical sections are preserved.
-
-**Before tagging, wait for the changelog PR's checks, review it, and merge it.** Pending PR content is not treated as released source. If more feature PRs merge before you tag, let the same changelog PR refresh (or merge the next one if the previous PR has already merged). A source missing required PR records fails release validation.
-
-## Maintainer release checklist
-
-1. Confirm the selected product's pending notes are correct and the changelog PR covering the source has been reviewed and merged. Required checks must pass; an open changelog PR is not enough.
-2. Choose that product's next version. Review breaking changes and prerelease intent; no automated version bump is inferred solely from category labels.
-3. Fetch current `master` and tags. Select the exact reconciled commit to release; do not unintentionally tag unrelated local work. Preparation and publication use trusted default-branch scripts to validate this separate source checkout.
-4. Optionally run a manual release preview with the product, version, source ref, and `dry_run: true`. Preview creates no release, obtains no NuGet credentials, and commits/pushes no tracked-file updates. Release files are generated only in its temporary build workspace.
-5. Create and push an annotated tag for the selected product:
+1. Review and merge the changelog PR; confirm source CI is green.
+2. Choose a version newer than the previous successful release of that product.
+3. Optionally run **Release** manually with product, version, source ref, and `dry_run: true`. This builds a preview without NuGet login, publication, or repository writes.
+4. Fetch current refs, choose the exact reviewed source, and create/push an annotated tag:
 
 ```bash
 git fetch origin master --tags
-
-# Replace the version and source SHA with the chosen values.
-# These are examples, not a request to publish these versions.
-git tag -a core-v1.20.3 <reconciled-commit-sha> -m "XrmMockup365 1.20.3"
+git tag -a core-v1.20.3 <reviewed-source-sha> -m "XrmMockup365 1.20.3"
 git push origin core-v1.20.3
 
-# A separate metadata release, possibly from the same reconciled commit:
-git tag -a metadata-v1.2.1 <reconciled-commit-sha> -m "MetadataGenerator 1.2.1"
+# A separate metadata release, possibly at the same commit:
+git tag -a metadata-v1.2.1 <reviewed-source-sha> -m "MetadataGenerator 1.2.1"
 git push origin metadata-v1.2.1
 ```
 
-6. Monitor the selected product's release workflow. It builds/tests the solution, stages the frozen draft, publishes only that product to NuGet, then finalizes GitHub and requests the changelog history PR.
-7. Confirm the NuGet publication and finalized GitHub release/assets. Review and merge the changelog PR containing the versioned history update afterward.
+These versions are examples. Releasing both products means two tags and two releases.
 
-Releasing both products requires two tags and produces two GitHub releases. There is no need to edit either changelog's version, manually create a GitHub release, or copy a release description.
+The workflow checks out the exact source, builds/tests the solution, packs only the selected product, and makes **one NuGet push**. The matching `.snupkg` is packed beside the `.nupkg` and published automatically by that same command. Both files are retained as artifacts and attached to the GitHub release. Only after that push succeeds does it create the GitHub release, attach the package, and request the changelog PR's versioned history update. Review/merge that PR afterward. The published tag is not moved to include this later history commit.
 
-## Release notes and tracked history
+## Failed release
 
-Each release freezes the selected product's unreleased PR entries at the tagged source. The same snapshot supplies its GitHub release body and NuGet release notes. The pipeline generates a version/date section in the release workspace and stores the generated notes/snapshot as release artifacts.
+If the NuGet push fails, the run stops and no GitHub release is created. Fix the cause, remove the failed tag remotely and locally, then create it again at the corrected/reconciled source:
 
-After successful publication, the shared writer adds that exact versioned section to the same open changelog PR, or creates the next PR if the previous one has merged. Review and merge it to update history on `master`. It removes only that release's consumed pending entries; newer merged changes and the other product's notes remain untouched. Multiple publication/merge updates are combined into one open PR.
-
-**The tag itself retains its reconciled `Unreleased` source file.** The release artifacts contain the generated versioned file, and `master` receives the historical section afterward. This is intentional: never move a published tag to include the later generated documentation commit.
-
-## Auditing an emergency direct push
-
-Direct pushes remain exceptional and blocked until reviewed. If one was unavoidable:
-
-1. Create a corrective PR against `master` and obtain its PR number.
-2. In `.github/release-state.json`, add a record under `corrections`, keyed by the emergency commit's **full 40-character SHA**:
-
-```json
-"corrections": {
-  "<full-emergency-commit-sha>": {
-    "reviewPr": 123,
-    "reason": "Why the emergency push was necessary and what was reviewed"
-  }
-}
+```bash
+git push origin --delete core-v1.20.3
+git tag -d core-v1.20.3
 ```
 
-3. Replace `123` with **this corrective PR's number**, not an unrelated PR. Use the affected product label(s) and a category/title describing the emergency change; those supply its release note. Use `product:none` only for genuine repository maintenance.
-4. Review and merge the corrective PR through normal branch protection. The record must be introduced or updated by that PR, and its merge must follow the emergency commit. Unmerged PRs, other repositories, and inherited audit references are rejected.
-5. Rerun **Update product changelogs**, then review and merge its generated PR before previewing/tagging a release.
+**Check NuGet first if the failure was a timeout, a symbol upload failure, or happened after the push.** The regular package is uploaded before its symbols, so it may have been accepted even if symbol publishing failed; published versions cannot be overwritten. In that case, upload the saved matching `.snupkg` manually if needed, then complete the matching GitHub release using the saved artifacts, or choose a new package version. Do not blindly rebuild/push the same version or ignore duplicates.
 
-Do not invent a PR entry for the direct SHA or advance the checkpoint to hide it. Each emergency commit needs its own audit record; one corrective PR may review several SHA-keyed records, but produces one release-note entry. Already reviewed metadata remains in the ledger for audit.
+If GitHub release creation or changelog PR updating fails after NuGet succeeds, recover those steps manually using the saved notes/package. Do not move a successful tag or republish the package. Rerunning **Update product changelogs** can refresh the pending history PR.
 
-## Failures and recovery
+Use PRs for normal source changes. If someone bypasses protection with an emergency direct push, it has no automatic PR-derived note; document/classify the change through a follow-up PR and handle its release manually as needed.
 
-- **Missing/invalid PR classification:** correct labels/title and rerun validation. If already merged through an exceptional bypass, reconcile the correction before releasing.
-- **Tag created before reconciliation:** no publication should occur. Complete reconciliation and select a valid source through the documented recovery path; never move a tag that has published artifacts. Prefer using the manual preview before creating another production tag.
-- **An unfinished draft has been superseded by a newer same-product release:** do not retry publication of its obsolete snapshot. Abandon/clean up that draft as appropriate and prepare a release from current reconciled source with a new version. Matching already-completed releases can still be recovered without republishing.
-- **Package publication fails:** the GitHub release remains a draft. Investigate and retry using the stored snapshot/artifacts; do not create a combined tag or accidentally publish the other product.
-- **Package published but GitHub finalization fails:** recover the existing release. Do not assume a newly rebuilt package is identical merely because NuGet rejects the existing version.
-- **Symbols uploaded but the publication receipt was not saved:** verify both successful uploads against the frozen artifacts/logs before recording the receipt and finalizing the same release. Symbol duplicates are not automatically ignored.
-- **Release published but changelog PR creation/update fails:** rerun **Update product changelogs**. It can recover successful snapshots and update the same PR. Do not republish the package or move its tag. Merge the resulting PR to finish tracked history.
-
-Generated-file writes are serialized and restricted to the two changelogs and release ledger on the reserved bot branch. Updates use a lease when refreshing that branch to avoid overwriting unexpected concurrent edits. The pipeline never pushes to `master`, approves its own PR, or bypasses required checks/reviews.
-
-When deploying release-automation fixes, start retries from the updated `master` workflow. Re-running a historical workflow definition does not retroactively replace its old steps.
-
-For workflow requirements, security boundaries, migration baselines, recovery details, and acceptance tests, see [docs/release-flow.md](docs/release-flow.md).
+See [the release-flow specification](docs/release-flow.md) for workflow boundaries and tests.

@@ -1,5 +1,4 @@
 // Pure release policy and rendering. Shared by validation, reconciliation and release.
-import { createHash } from 'node:crypto';
 
 export const products = {
   core: { label: 'product:core', packageId: 'XrmMockup365', project: 'src/XrmMockup365/XrmMockup365.csproj', changelog: 'RELEASE_NOTES.md', versionProperty: 'CoreReleaseVersion' },
@@ -19,12 +18,12 @@ export function isChangelogPr(pr) {
     typeof pr.base?.repo?.full_name === 'string' && pr.head?.repo?.full_name === pr.base.repo.full_name;
 }
 
-export const statePath = '.github/release-state.json';
-export const generatedPaths = [statePath, ...Object.values(products).map(p => p.changelog)];
-export const snapshotName = 'release-snapshot.json';
+// Start PR-based notes after the existing manually maintained release history.
+export const historyBaseline = '46f2af04b6d5dc4797f6069c31610c7101de3b47';
+export const baselineVersions = { core: '1.20.2', metadata: '1.2.0' };
+export const generatedPaths = Object.values(products).map(p => p.changelog);
 const begin = '<!-- BEGIN GENERATED RELEASE NOTES -->';
 const end = '<!-- END GENERATED RELEASE NOTES -->';
-export const releaseMarker = '<!-- xrmmockup-product-release:v1 -->';
 
 function labelsOf(pr) {
   return new Set((pr.labels ?? []).map(label => typeof label === 'string' ? label : label.name));
@@ -90,115 +89,38 @@ export function parseTag(tag) {
   parseVersion(match[2]);
   return { product: match[1], version: match[2], tag, prerelease: match[2].includes('-') };
 }
-export function validateState(state) {
-  if (state.schemaVersion !== 1 || !/^[a-f0-9]{40}$/.test(state.baselineSha ?? '')) throw new Error('Invalid release ledger/baseline.');
-  if (state.checkpointSha !== undefined && (typeof state.checkpointSha !== 'string' || !/^[a-f0-9]{40}$/.test(state.checkpointSha))) throw new Error('Invalid reconciliation checkpoint.');
-  if (!Array.isArray(state.entries) || !Array.isArray(state.releases)) throw new Error('Invalid release ledger arrays.');
-  for (const product of Object.keys(products)) parseVersion(state.baselineVersions?.[product] ?? '');
-  const corrections = state.corrections === undefined ? {} : state.corrections;
-  if (!corrections || typeof corrections !== 'object' || Array.isArray(corrections)) throw new Error('Invalid emergency corrections.');
-  for (const [sha, correction] of Object.entries(corrections)) {
-    if (!/^[a-f0-9]{40}$/.test(sha) || !correction || !Number.isSafeInteger(correction.reviewPr) || correction.reviewPr < 1 ||
-        typeof correction.reason !== 'string' || !correction.reason.trim()) throw new Error('Emergency corrections require a full SHA, reviewPr, and audit reason.');
-  }
-  const ids = new Set();
-  for (const entry of state.entries) {
-    if (!Number.isSafeInteger(entry.number) || entry.number < 1 || ids.has(entry.number)) throw new Error('Invalid/duplicate PR in ledger.');
-    ids.add(entry.number);
-    if (!/^[a-f0-9]{40}$/.test(entry.mergeSha) || !Array.isArray(entry.products) || new Set(entry.products).size !== entry.products.length || entry.products.some(p => !products[p])) throw new Error('Invalid ledger PR ownership/source.');
-    if (!categories.some(c => c.prefix === entry.category) || typeof entry.description !== 'string' || !entry.description.trim() || /[\r\n]/.test(entry.description)) throw new Error('Invalid ledger PR category/description.');
-  }
-  const tags = new Set(), releasedEntries = new Set();
-  for (const release of state.releases) {
-    if (tags.has(release.tag)) throw new Error('Duplicate release record.');
-    tags.add(release.tag);
-    validateSnapshot(release);
-    if (release.baselineSha !== state.baselineSha) throw new Error('Release baseline mismatch.');
-    for (const id of release.entryIds) {
-      if (!state.entries.some(e => e.number === id && e.products.includes(release.product)) || releasedEntries.has(`${release.product}:${id}`)) throw new Error('Invalid or duplicate released PR ownership.');
-      releasedEntries.add(`${release.product}:${id}`);
-    }
-    if (notesFor(state.entries.filter(e => release.entryIds.includes(e.number)), release.product) !== release.notes) throw new Error('Release notes do not match ledger metadata.');
-  }
-  return state;
-}
-export function consumed(state, product) {
-  return new Set(state.releases.filter(r => r.product === product).flatMap(r => r.entryIds));
-}
-export function pending(state, product) {
-  const done = consumed(state, product);
-  return state.entries.filter(e => e.products.includes(product) && !done.has(e.number));
-}
 export function notesFor(entries, product) {
-  return categories.flatMap(c => entries.filter(e => e.products.includes(product) && e.category === c.prefix)
-    .map(e => `* ${c.prefix}: ${e.description.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')} (#${e.number})`)).join('\n');
+  return categories.flatMap(category => entries.filter(entry => entry.products.includes(product) && entry.category === category.prefix)
+    .map(entry => `* ${category.prefix}: ${entry.description.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')} (#${entry.number})`)).join('\n');
 }
-export function renderChangelog(original, state, product) {
-  const normalized = original.replace(/\r\n/g, '\n');
-  const markerStart = normalized.indexOf(begin), markerEnd = normalized.indexOf(end);
-  if ((markerStart < 0) !== (markerEnd < 0) || (markerStart >= 0 && markerEnd < markerStart)) throw new Error('Damaged generated changelog markers.');
-  const archive = markerStart < 0 ? normalized : normalized.slice(0, markerStart) + normalized.slice(markerEnd + end.length).replace(/^\n+/, '');
-  const heading = archive.search(/^### /m);
-  const preamble = heading < 0 ? archive.trimEnd() : archive.slice(0, heading).trimEnd();
-  const history = heading < 0 ? '' : archive.slice(heading).trimEnd();
-  const releases = state.releases.filter(r => r.product === product).sort((a, b) => compareVersions(b.version, a.version));
-  const sections = [begin, '### Unreleased', notesFor(pending(state, product), product) || '* No unreleased changes.',
-    ...releases.flatMap(r => ['', `### ${r.version} - ${r.date}`, r.notes]), end];
-  return [preamble, sections.join('\n'), history].filter(Boolean).join('\n\n') + '\n';
-}
-export function makeSnapshot(state, product, version, sourceSha, repository, date) {
-  parseVersion(version);
-  if (!products[product]) throw new Error('Unknown product.');
-  const previous = state.releases.filter(r => r.product === product).sort((a, b) => compareVersions(b.version, a.version))[0];
-  if (compareVersions(version, previous?.version ?? state.baselineVersions[product]) <= 0) throw new Error('Release version must be newer than the previous successful product release/baseline.');
-  const entries = pending(state, product);
-  if (!entries.length) throw new Error(`No unreleased ${product} PRs at the selected source.`);
-  return {
-    schemaVersion: 1, repository, baselineSha: state.baselineSha, sourceSha, product, version,
-    tag: `${product}-v${version}`, date, entryIds: entries.map(e => e.number), notes: notesFor(entries, product),
-    previousTag: previous?.tag ?? null, packages: [],
-  };
-}
-export function validateSnapshot(snapshot, repository) {
-  const parsed = parseTag(snapshot.tag ?? '');
-  if (snapshot.schemaVersion !== 1 || snapshot.product !== parsed.product || snapshot.version !== parsed.version ||
-      !/^[a-f0-9]{40}$/.test(snapshot.sourceSha ?? '') || !/^[a-f0-9]{40}$/.test(snapshot.baselineSha ?? '') ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(snapshot.date ?? '') || !Array.isArray(snapshot.entryIds) || !snapshot.entryIds.length ||
-      new Set(snapshot.entryIds).size !== snapshot.entryIds.length || snapshot.entryIds.some(n => !Number.isSafeInteger(n) || n < 1) ||
-      typeof snapshot.notes !== 'string' || !snapshot.notes.trim() || !Array.isArray(snapshot.packages) ||
-      (repository && snapshot.repository !== repository)) throw new Error('Invalid release snapshot.');
-  const filenames = new Set();
-  for (const pkg of snapshot.packages) {
-    const expected = `${products[snapshot.product].packageId}.${snapshot.version}`;
-    if (![`${expected}.nupkg`, `${expected}.snupkg`].includes(pkg.name) || filenames.has(pkg.name) || (!/^[a-f0-9]{128}$/.test(pkg.sha512 ?? '') || !/^[a-f0-9]{128}$/.test(pkg.contentHash ?? ''))) throw new Error('Invalid release package manifest.');
-    filenames.add(pkg.name);
+export function releaseSection(version, date, notes) { return `### ${version} - ${date}\n${notes}`; }
+export function renderChangelog(original, entries, product, releases = []) {
+  let archive = original.replace(/\r\n/g, '\n');
+  const start = archive.indexOf(begin), finish = archive.indexOf(end);
+  if ((start < 0) !== (finish < 0) || (start >= 0 && finish < start)) throw new Error('Damaged changelog markers.');
+  if (start >= 0) {
+    // Retain versioned history from the previous renderer during migration.
+    const block = archive.slice(start + begin.length, finish), versions = block.search(/^### v?\d/m);
+    archive = archive.slice(0, start) + (versions < 0 ? '' : block.slice(versions).trim() + '\n\n') + archive.slice(finish + end.length).replace(/^\n+/, '');
   }
-  if (snapshot.packages.length && (!snapshot.packages.some(p => p.name.endsWith('.nupkg')) || !snapshot.packages.some(p => p.name.endsWith('.snupkg')))) throw new Error('Release manifest must contain the package and symbol package.');
-  return snapshot;
+  const firstVersion = archive.search(/^### v?\d/m);
+  const preamble = (firstVersion < 0 ? archive : archive.slice(0, firstVersion)).trimEnd();
+  const history = firstVersion < 0 ? '' : archive.slice(firstVersion).trimEnd();
+  const recorded = new Set([...history.matchAll(/^### v?(\d+\.\d+\.\d+(?:-[\w.-]+)?)(?=\s|$)/gm)].map(match => match[1]));
+  const published = releases.filter(release => !recorded.has(parseTag(release.tag_name).version)).map(release => {
+    const version = parseTag(release.tag_name).version, body = (release.body ?? '').trim();
+    return body.startsWith(`### ${version} -`) ? body : releaseSection(version, release.published_at.slice(0, 10), body);
+  });
+  const pending = [begin, '### Unreleased', notesFor(entries, product) || '* No unreleased changes.', end].join('\n');
+  return [preamble, pending, ...published, history].filter(Boolean).join('\n\n') + '\n';
 }
-// One shared source/ledger check for preparation and publication.
-export function validateSourceSnapshot(snapshot, state, sourceSha, repository) {
-  validateSnapshot(snapshot, repository);
-  if (snapshot.sourceSha !== sourceSha || snapshot.baselineSha !== state.baselineSha ||
-      snapshot.entryIds.some(id => !state.entries.some(entry => entry.number === id && entry.products.includes(snapshot.product))) ||
-      notesFor(state.entries.filter(entry => snapshot.entryIds.includes(entry.number)), snapshot.product) !== snapshot.notes) {
-    throw new Error('Frozen release does not match the selected source/ledger.');
-  }
-  return snapshot;
+export function pendingNotes(changelog) {
+  const match = /### Unreleased\s*\n([\s\S]*?)<!-- END GENERATED RELEASE NOTES -->/.exec(changelog.replace(/\r\n/g, '\n'));
+  if (!match) throw new Error('Generated Unreleased notes are missing. Merge the changelog PR before tagging.');
+  return match[1].trim();
 }
-export function applyRelease(state, snapshot) {
-  validateSnapshot(snapshot);
-  if (snapshot.baselineSha !== state.baselineSha) throw new Error('Release baseline mismatch.');
-  const existing = state.releases.find(r => r.tag === snapshot.tag);
-  if (existing) {
-    if (JSON.stringify(existing) !== JSON.stringify(snapshot)) throw new Error('A recorded release snapshot changed.');
-    return false;
-  }
-  const entries = snapshot.entryIds.map(n => state.entries.find(e => e.number === n));
-  if (entries.some(e => !e || !e.products.includes(snapshot.product)) || notesFor(entries, snapshot.product) !== snapshot.notes) throw new Error('Released PR metadata does not match the ledger.');
-  const already = consumed(state, snapshot.product);
-  if (snapshot.entryIds.some(n => already.has(n))) throw new Error('A PR was released twice for the same product.');
-  state.releases.push(snapshot);
-  return true;
+export function validateRelease(release) {
+  const tag = parseTag(release.tag);
+  if (release.product !== tag.product || release.version !== tag.version || !/^[a-f0-9]{40}$/.test(release.sourceSha)) throw new Error('Invalid release build metadata.');
+  return { ...tag, sourceSha: release.sourceSha };
 }
-export function hash(buffer) { return createHash('sha512').update(buffer).digest('hex'); }

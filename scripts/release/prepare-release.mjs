@@ -1,57 +1,32 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { materialize } from './workspace.mjs';
-import { GitHub, git, fetchHistory, ancestor, assertPublicationCurrent, output, summary, readState, discoverPrs, reconcileReleases } from './github.mjs';
-import { products, parseTag, parseVersion, validateState, makeSnapshot, applyRelease, renderChangelog, validateSourceSnapshot, snapshotName, releaseMarker } from './model.mjs';
+import { resolve } from 'node:path';
+import { GitHub, git, fetchHistory, ancestor, collectChanges, productReleases, output, summary } from './github.mjs';
+import { products, baselineVersions, parseTag, compareVersions, renderChangelog, pendingNotes, releaseSection } from './model.mjs';
 
 const api = new GitHub();
 const manual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
 const dryRun = manual && process.env.DRY_RUN !== 'false';
-const productInput = process.env.PRODUCT;
-const versionInput = process.env.VERSION;
-const resolved = manual ? (() => {
-  if (!products[productInput]) throw new Error('Choose core or metadata.');
-  parseVersion(versionInput);
-  return parseTag(`${productInput}-v${versionInput}`);
-})() : parseTag(process.env.GITHUB_REF_NAME ?? '');
-const { product, version, tag } = resolved;
-const sourceSha = git('rev-parse', 'HEAD');
+const release = parseTag(manual ? `${process.env.PRODUCT}-v${process.env.VERSION}` : process.env.GITHUB_REF_NAME);
+release.sourceSha = git('rev-parse', 'HEAD');
 fetchHistory();
-if (!ancestor(sourceSha, 'origin/master')) throw new Error('Release source must be on master ancestry.');
-if (!dryRun && git('rev-parse', '--verify', `refs/tags/${tag}^{commit}`) !== sourceSha) throw new Error('Publishing requires an existing matching tag at the selected source.');
-const state = validateState(readState());
-const discovered = structuredClone(state);
-await discoverPrs(api, discovered, sourceSha);
-if (JSON.stringify(discovered.entries) !== JSON.stringify(state.entries)) throw new Error('Tagged source has unreconciled PRs. Wait for the changelog updater and tag its generated commit.');
-for (const [p, config] of Object.entries(products)) {
-  const actual = readFileSync(config.changelog, 'utf8').replace(/\r\n/g, '\n');
-  if (renderChangelog(actual, state, p) !== actual) throw new Error(`${config.changelog} is not reconciled at the selected source.`);
-}
+if (!ancestor(release.sourceSha, 'origin/master')) throw new Error('Release source must be on master ancestry.');
+if (!dryRun && git('rev-parse', `refs/tags/${release.tag}^{commit}`) !== release.sourceSha) throw new Error('Publishing requires a matching existing tag.');
+const releases = await api.list('/releases');
+const previous = productReleases(releases, release.product)[0];
+if (compareVersions(release.version, previous ? parseTag(previous.tag_name).version : baselineVersions[release.product]) <= 0) throw new Error('Choose a version newer than the last successful product release.');
+const entries = await collectChanges(api, release.sourceSha, releases);
+const config = products[release.product], original = readFileSync(config.changelog, 'utf8').replace(/\r\n/g, '\n');
+if (renderChangelog(original, entries, release.product, productReleases(releases, release.product)) !== original) throw new Error('Merge the changelog PR covering this source before tagging.');
+const notes = pendingNotes(original);
+if (notes === '* No unreleased changes.') throw new Error('No pending changes for the selected product.');
+const section = releaseSection(release.version, new Date().toISOString().slice(0, 10), notes);
 mkdirSync('.release/packages', { recursive: true });
-let snapshot, reuse = false;
-const existing = await api.releaseByTag(tag);
-if (existing) {
-  if (!existing.body?.includes(releaseMarker)) throw new Error('An unmanaged GitHub release already exists for this tag.');
-  snapshot = await api.snapshot(existing);
-  if (snapshot) {
-    validateSourceSnapshot(snapshot, state, sourceSha, api.repository);
-    if (snapshot.tag !== tag || !snapshot.packages.length || typeof snapshot.generatedChangelog !== 'string') throw new Error('Existing frozen release is incomplete.');
-    await assertPublicationCurrent(api, state, snapshot);
-    const assets = await api.list(`/releases/${existing.id}/assets`);
-    for (const pkg of snapshot.packages) {
-      const asset = assets.find(a => a.name === pkg.name);
-      if (!asset) throw new Error(`Frozen package asset missing: ${pkg.name}. Do not rebuild published artifacts.`);
-      writeFileSync(`.release/packages/${pkg.name}`, await api.asset(asset));
-    }
-    reuse = true;
-  } else if (!existing.draft) throw new Error('Published release has no frozen snapshot.');
-}
-if (!snapshot) {
-  await reconcileReleases(api, state, sourceSha, product);
-  snapshot = makeSnapshot(state, product, version, sourceSha, api.repository, existing?.created_at.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
-  applyRelease(state, snapshot);
-  snapshot.generatedChangelog = renderChangelog(readFileSync(products[product].changelog, 'utf8'), state, product);
-}
-writeFileSync('.release/' + snapshotName, JSON.stringify(snapshot, null, 2) + '\n');
-materialize(snapshot);
-for (const [key, value] of Object.entries({ product, version, tag, project: products[product].project, source_sha: sourceSha, dry_run: dryRun, reuse })) output(key, value);
-summary(`Prepared ${tag} at ${sourceSha}; ${snapshot.entryIds.length} PR(s), ${dryRun ? 'credential-free preview' : 'publication'}, ${reuse ? 'reusing frozen artifacts' : 'new build'}.`);
+writeFileSync('.release/release.json', JSON.stringify(release, null, 2) + '\n');
+writeFileSync('.release/notes.md', section + '\n');
+// Only the selected product gets a release version. Markdown never becomes shell input.
+const escape = text => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
+const noteProperty = release.product === 'core' ? 'CoreReleaseNotesPath' : 'MetadataReleaseNotesPath';
+writeFileSync('.release/version.props', `<Project><PropertyGroup><${config.versionProperty}>${release.version}</${config.versionProperty}><${noteProperty}>${escape(resolve('.release/notes.md'))}</${noteProperty}></PropertyGroup></Project>\n`);
+writeFileSync(config.changelog, original.replace('### Unreleased\n' + notes, section));
+for (const [key, value] of Object.entries({ product: release.product, tag: release.tag, source_sha: release.sourceSha, project: config.project, dry_run: dryRun })) output(key, value);
+summary(`Prepared ${release.tag} at ${release.sourceSha}${dryRun ? ' (preview only)' : ''}.`);

@@ -213,7 +213,7 @@ docs/tools/FSharp.Formatting.svclog
 tmpclaude-*-cwd
 .claude/*.local.json
 
-# Frozen release-workspace artifacts (never committed)
+# Temporary release-build artifacts (never committed)
 .release/
 
 # Release automation source is not a .NET Release output directory.

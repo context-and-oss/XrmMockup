@@ -13,8 +13,8 @@ try {
   prs = await validatePulls(api, event);
   for (const pr of prs) validate(pr);
 } catch (error) { failure = error.message; }
-const headSha = event.merge_group?.head_sha ?? prs[0]?.head.sha ?? event.pull_request?.head.sha;
-if (!headSha) throw new Error('Cannot determine check head SHA.');
+const headSha = prs[0]?.head.sha ?? event.pull_request?.head.sha;
+if (!headSha) throw new Error('Cannot determine PR head SHA.');
 const text = failure ?? `Validated ${prs.map(pr => `#${pr.number}`).join(', ')} against the approved release classification rules.`;
 await api.repo('/check-runs', { method: 'POST', body: {
   name, head_sha: headSha, status: 'completed', conclusion: failure ? 'failure' : 'success',

@@ -19,24 +19,8 @@ async function json(path, method, body) {
   const response = await request(path, method, body);
   return response.status === 204 ? null : response.json();
 }
-async function release(tag) {
-  const releases = await json(`${root}/releases`);
-  const found = releases.find(r => r.tag_name === tag);
-  if (found) return found;
-  // This double's high-level commands need to find drafts on subsequent pages too.
-  for (let page = 2; releases.length === 100; page++) {
-    const batch = await json(`${root}/releases?page=${page}`);
-    const item = batch.find(r => r.tag_name === tag); if (item) return item;
-    if (batch.length < 100) break;
-  }
-  throw new Error('gh: release not found (HTTP 404)');
-}
 try {
-  if (args[0] === 'api' && args[1] === 'graphql') {
-    const fields = Object.fromEntries(values('--raw-field').map(field => [field.slice(0, field.indexOf('=')), field.slice(field.indexOf('=') + 1)]));
-    const response = await json('/graphql', 'POST', { query: fields.query, variables: { owner: fields.owner, name: fields.name, branch: fields.branch } });
-    for (const entry of response.data.repository.mergeQueue.entries.nodes) process.stdout.write(JSON.stringify(entry) + '\n');
-  } else if (args[0] === 'api') {
+  if (args[0] === 'api') {
     let path = args[1];
     const body = args.includes('--input') ? JSON.parse(input.toString()) : undefined;
     do {
@@ -63,13 +47,11 @@ try {
   } else if (args[0] === 'workflow') {
     await json(`${root}/actions/workflows/${args[2]}/dispatches`, 'POST', { ref: value('--ref'), ...(args.includes('--json') ? { inputs: JSON.parse(input) } : {}) });
   } else if (args[0] === 'release' && args[1] === 'create') {
-    await json(`${root}/releases`, 'POST', { tag_name: args[2], name: value('--title'), body: input.toString(), draft: true, prerelease: args.includes('--prerelease') });
-  } else if (args[0] === 'release' && args[1] === 'edit') {
-    const found = await release(args[2]);
-    await json(`${root}/releases/${found.id}`, 'PATCH', { draft: false, make_latest: args.find(arg => arg.startsWith('--latest=')).slice('--latest='.length) });
-  } else if (args[0] === 'release' && args[1] === 'upload') {
-    const found = await release(args[2]);
-    await request(`${root}/upload/${found.id}?name=${encodeURIComponent(basename(args[3]))}`, 'POST', readFileSync(args[3]), true);
+    const result = await json(`${root}/releases`, 'POST', { tag_name: args[2], name: value('--title'), body: input.toString(), draft: false,
+      prerelease: args.includes('--prerelease'), make_latest: args.find(arg => arg.startsWith('--latest=')).split('=')[1] });
+    for (const path of args.slice(3, args.indexOf('--repo'))) {
+      await request(`${root}/upload/${result.id}?name=${encodeURIComponent(basename(path))}`, 'POST', readFileSync(path), true);
+    }
   } else if (args[0] === 'label') {
     await json(`${root}/labels`, 'POST', { name: args[2], color: value('--color'), description: value('--description') });
   } else throw new Error(`Unsupported test CLI command: ${args.join(' ')}`);

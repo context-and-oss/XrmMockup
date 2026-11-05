@@ -2,13 +2,11 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'core-v*'
-      - 'metadata-v*'
+    tags: ['core-v*', 'metadata-v*']
   workflow_dispatch:
     inputs:
       product:
-        description: Product to preview or retry
+        description: Product to preview or release
         type: choice
         options: [core, metadata]
         required: true
@@ -17,15 +15,13 @@ on:
         type: string
         required: true
       source_ref:
-        description: Reconciled source commit/ref (publishing requires the matching existing tag)
+        description: Source with merged changelog updates (publishing requires a matching tag)
         type: string
         required: true
       dry_run:
-        description: Build preview only; no publication or repository writes
+        description: Build only; do not publish
         type: boolean
         default: true
-
-run-name: Release ${{ inputs.product || github.ref_name }} ${{ inputs.version }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && ' (preview)' || '' }}
 
 permissions:
   contents: read
@@ -35,32 +31,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare:
-    # Metadata-only phase: draft visibility needs push access, but no project code is built here.
-    runs-on: ubuntu-latest
+  build:
+    if: github.event_name != 'push' || !github.event.deleted
+    runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: read
     defaults:
       run:
         working-directory: release-source
     outputs:
-      product: ${{ steps.prepare.outputs.product }}
       tag: ${{ steps.prepare.outputs.tag }}
-      source_sha: ${{ steps.prepare.outputs.source_sha }}
       dry_run: ${{ steps.prepare.outputs.dry_run }}
-      project: ${{ steps.prepare.outputs.project }}
-      reuse: ${{ steps.prepare.outputs.reuse }}
     steps:
-      # Privileged helpers always come from the trusted default branch.
-      - name: Check out trusted release automation
+      - name: Check out trusted release scripts
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: release-tools
           persist-credentials: false
-      # Inspect this checkout only; never execute its scripts with a write token.
-      - name: Check out requested source as data
+      - name: Check out requested source
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_ref || github.ref }}
@@ -70,7 +60,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - name: Validate source, freeze product notes, and recover draft artifacts
+      - name: Resolve tag and verify changelog
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,50 +68,16 @@ jobs:
           VERSION: ${{ inputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: node ../release-tools/scripts/release/prepare-release.mjs
-      - uses: actions/upload-artifact@v7
-        with:
-          name: prepared-${{ steps.prepare.outputs.tag }}
-          path: release-source/.release/
-          include-hidden-files: true
-          if-no-files-found: error
-
-  build:
-    needs: prepare
-    runs-on: windows-latest
-    outputs:
-      product: ${{ needs.prepare.outputs.product }}
-      tag: ${{ needs.prepare.outputs.tag }}
-      source_sha: ${{ needs.prepare.outputs.source_sha }}
-      dry_run: ${{ needs.prepare.outputs.dry_run }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.source_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Test release automation
-        run: node --test scripts/release/*.test.mjs
-      - uses: actions/download-artifact@v7
-        with:
-          name: prepared-${{ needs.prepare.outputs.tag }}
-          path: .release/
-      - name: Materialize release notes and runner-local scoped build inputs
-        run: node scripts/release/workspace.mjs materialize
-      - name: Set up .NET
-        if: needs.prepare.outputs.reuse != 'true'
-        uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.x
             10.x
-      - name: Build and test solution using the selected product version
-        if: needs.prepare.outputs.reuse != 'true'
+      - name: Build, test, and pack the selected product
         shell: pwsh
+        env:
+          PACK_PROJECT: ${{ steps.prepare.outputs.project }}
         run: |
-          $ErrorActionPreference = 'Stop'
           $props = (Resolve-Path '.release/version.props').Path
           dotnet restore "-p:ReleaseBuildProps=$props"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -129,24 +85,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet test --configuration Release --no-build --verbosity normal "-p:ReleaseBuildProps=$props"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Pack only the selected product
-        if: needs.prepare.outputs.reuse != 'true'
-        shell: pwsh
-        env:
-          PACK_PROJECT: ${{ needs.prepare.outputs.project }}
-        run: |
-          $props = (Resolve-Path '.release/version.props').Path
           dotnet pack $env:PACK_PROJECT --configuration Release --no-build --output .release/packages "-p:ReleaseBuildProps=$props"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Validate package metadata, symbols, and legacy core assets
+      - name: Validate package ID and version
         shell: pwsh
-        run: '& ./scripts/release/validate-packages.ps1'
-      - name: Freeze/verify artifact hashes
-        run: node scripts/release/workspace.mjs manifest
+        run: '& ../release-tools/scripts/release/validate-packages.ps1'
       - uses: actions/upload-artifact@v7
         with:
-          name: release-${{ needs.prepare.outputs.tag }}
-          path: .release/
+          name: release-${{ steps.prepare.outputs.tag }}
+          path: release-source/.release/
           include-hidden-files: true
           if-no-files-found: error
 
@@ -154,27 +101,16 @@ jobs:
     needs: build
     if: needs.build.outputs.dry_run == 'false'
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: release-source
-    env:
-      RELEASE_TAG: ${{ needs.build.outputs.tag }}
     permissions:
       contents: write
       id-token: write
       actions: write
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
     steps:
-      - name: Check out trusted publication helpers
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
-          path: release-tools
-          persist-credentials: false
-      - name: Check out frozen source as data
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.build.outputs.source_sha }}
-          path: release-source
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -183,44 +119,24 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: release-${{ needs.build.outputs.tag }}
-          path: release-source/.release/
-      - name: Stage release artifacts and check prior publication
-        id: stage
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node ../release-tools/scripts/release/publish-release.mjs stage
-      - name: Verify an existing NuGet version against frozen package content
-        if: steps.stage.outputs.package_exists == 'true'
+          path: .release/
+      - name: Validate package and tag
         shell: pwsh
-        run: '& ../release-tools/scripts/release/validate-packages.ps1 -Existing'
-      - name: Log in to NuGet just before publishing
-        if: steps.stage.outputs.publication_complete != 'true'
+        run: '& ./scripts/release/validate-packages.ps1'
+      - name: Log in to NuGet
         id: nuget-login
         uses: nuget/login@v1
         with:
           user: ${{ secrets.NUGET_USER }}
-      - name: Publish the selected package and symbols
-        id: nuget-push
-        if: steps.stage.outputs.publication_complete != 'true'
+      - name: Push the selected package and its symbols
         shell: pwsh
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-          PACKAGE_EXISTS: ${{ steps.stage.outputs.package_exists }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $package = @(Get-ChildItem '.release/packages/*.nupkg' -File)
-          $symbols = @(Get-ChildItem '.release/packages/*.snupkg' -File)
-          if ($package.Count -ne 1 -or $symbols.Count -ne 1) { throw 'Expected exactly one product package and symbol package' }
-          if ($env:PACKAGE_EXISTS -ne 'true') {
-            dotnet nuget push ($package[0].FullName) --no-symbols --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          # Do not blindly mask symbol collisions: retries use a recorded successful publication.
-          dotnet nuget push ($symbols[0].FullName) --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
+          $package = Get-ChildItem '.release/packages/*.nupkg' -File
+          dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "published=true" >> $env:GITHUB_OUTPUT
-      - name: Finalize release and request changelog history update
+      - name: Create GitHub release and update changelog PR
         env:
           GH_TOKEN: ${{ github.token }}
-          NUGET_PUBLISHED: ${{ steps.nuget-push.outputs.published }}
-        run: node ../release-tools/scripts/release/publish-release.mjs finalize
+        run: node scripts/release/publish-release.mjs
