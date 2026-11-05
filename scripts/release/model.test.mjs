@@ -137,3 +137,10 @@ test('the bot-owned changelog PR requires product:none and Chore, but a fork can
   assert.throws(() => classify({ ...bot, title: 'Fix: Wrong category', labels: [{ name: 'product:none' }] }), /Chore category/);
   assert.deepEqual(classify({ ...bot, head: { ...bot.head, repo: { full_name: 'fork/repo' } }, labels: [{ name: 'product:core' }], title: 'Fix: Real feature' }).products, ['core']);
 });
+test('emergency corrections are optional but require explicit SHA-keyed audit metadata', () => {
+  assert.doesNotThrow(() => validateState(state()));
+  assert.doesNotThrow(() => validateState({ ...state(), corrections: { [source]: { reviewPr: 12, reason: 'Reviewed emergency repair' } } }));
+  for (const corrections of [null, [], { invalid: { reviewPr: 12, reason: 'Bad SHA' } }, { [source]: { reviewPr: 0, reason: 'Bad PR' } }, { [source]: { reviewPr: 12, reason: ' ' } }]) {
+    assert.throws(() => validateState({ ...state(), corrections }), /correction/i);
+  }
+});

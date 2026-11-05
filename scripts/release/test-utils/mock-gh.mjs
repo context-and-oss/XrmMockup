@@ -32,7 +32,11 @@ async function release(tag) {
   throw new Error('gh: release not found (HTTP 404)');
 }
 try {
-  if (args[0] === 'api') {
+  if (args[0] === 'api' && args[1] === 'graphql') {
+    const fields = Object.fromEntries(values('--raw-field').map(field => [field.slice(0, field.indexOf('=')), field.slice(field.indexOf('=') + 1)]));
+    const response = await json('/graphql', 'POST', { query: fields.query, variables: { owner: fields.owner, name: fields.name, branch: fields.branch } });
+    for (const entry of response.data.repository.mergeQueue.entries.nodes) process.stdout.write(JSON.stringify(entry) + '\n');
+  } else if (args[0] === 'api') {
     let path = args[1];
     const body = args.includes('--input') ? JSON.parse(input.toString()) : undefined;
     do {

@@ -27,7 +27,7 @@ async function fixture(t) {
   g(work, 'add', '.'); g(work, 'commit', '-m', 'Chore: Initialize ledger');
   g(work, 'config', 'user.name', 'maintainer'); g(work, 'config', 'user.email', 'maintainer@example.test');
   g(root, 'init', '--bare', remote); g(work, 'remote', 'add', 'origin', remote); g(work, 'push', '-u', 'origin', 'master');
-  const pullRequests = [], botPrs = [], requests = [], releases = [], assets = new Map();
+  const pullRequests = [], botPrs = [], queue = [], groupCommits = [], requests = [], releases = [], assets = new Map();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost'), path = url.pathname.replace('/repos/owner/repo', '');
@@ -35,6 +35,8 @@ async function fixture(t) {
       const bytes = Buffer.concat(chunks), body = bytes.length && req.headers['content-type']?.includes('application/json') ? JSON.parse(bytes) : undefined;
       requests.push({ method: req.method, path, body });
       const json = value => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value)); };
+      if (path === '/graphql') return json({ data: { repository: { mergeQueue: { entries: { nodes: queue, pageInfo: { hasNextPage: false, endCursor: null } } } } } });
+      if (path.startsWith('/compare/')) return json({ commits: groupCommits });
       const sha = /^\/commits\/([^/]+)\/pulls$/.exec(path)?.[1];
       if (sha) return json([...pullRequests, ...botPrs].filter(pr => pr.merge_commit_sha === sha));
       const number = /^\/pulls\/(\d+)$/.exec(path)?.[1];
@@ -102,7 +104,7 @@ async function fixture(t) {
     g(work, 'config', 'user.name', 'maintainer'); g(work, 'config', 'user.email', 'maintainer@example.test');
     const number = pullRequests.length + 1; write(work, `feature-${number}.txt`, title);
     g(work, 'add', '.'); g(work, 'commit', '-m', title); const sha = g(work, 'rev-parse', 'HEAD');
-    const pr = { number, title, labels: labels.map(name => ({ name })), merged: true, merged_at: '2026-11-05T09:00:00Z', merge_commit_sha: sha, base: { ref: 'master' }, head: { sha } };
+    const pr = { number, title, labels: labels.map(name => ({ name })), merged: true, merged_at: '2026-11-05T09:00:00Z', merge_commit_sha: sha, base: { ref: 'master', repo: { full_name: 'owner/repo' } }, head: { sha } };
     pullRequests.push(pr); g(work, 'push', 'origin', 'master'); return pr;
   }
   function mergeBotPr(strategy = 'merge') {
@@ -126,7 +128,7 @@ async function fixture(t) {
     return result;
   }
   const readState = () => JSON.parse(readFileSync(join(work, '.github/release-state.json'), 'utf8'));
-  return { root, work, remote, state, feature, run, readState, pullRequests, botPrs, mergeBotPr, requests, releases, assets, env };
+  return { root, work, remote, state, feature, run, readState, pullRequests, botPrs, queue, groupCommits, mergeBotPr, requests, releases, assets, env };
 }
 
 test('merge reconciler writes both product files, excludes maintenance, and is retry-safe', async t => {
@@ -542,4 +544,82 @@ test('a metadata release publishes only its package and finalizes history after 
   assert.equal(f.releases[0].draft, false); assert.equal(f.releases[0].tag_name, snapshot.tag);
   assert.equal(f.releases[0].make_latest, 'false');
   assert.ok(f.requests.some(request => request.path.endsWith('/update-changelogs.yml/dispatches')));
+});
+
+function emergencyPush(f, name = 'emergency.txt') {
+  g(f.work, 'fetch', 'origin', 'master'); g(f.work, 'checkout', '--force', '-B', 'master', 'origin/master');
+  g(f.work, 'config', 'user.name', 'maintainer'); g(f.work, 'config', 'user.email', 'maintainer@example.test');
+  write(f.work, name, 'urgent fix'); g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Emergency direct push');
+  const sha = g(f.work, 'rev-parse', 'HEAD'); g(f.work, 'push', 'origin', 'master'); return sha;
+}
+
+function recordCorrection(f, sha, reviewPr = f.pullRequests.length + 1) {
+  const ledger = f.readState();
+  ledger.corrections = { ...ledger.corrections, [sha]: { reviewPr, reason: 'Emergency production repair, classified in a reviewed PR' } };
+  write(f.work, '.github/release-state.json', ledger); return ledger.corrections[sha];
+}
+
+test('a merged SHA-keyed correction recovers reconciliation and a full-rescan release preview', async t => {
+  const f = await fixture(t), direct = emergencyPush(f);
+  await assert.rejects(f.run('update-changelogs.mjs'), /no classified merged master PR/);
+  recordCorrection(f, direct);
+  const review = f.feature(['product:core'], 'Fix: Emergency repair');
+  await f.run('update-changelogs.mjs');
+  assert.deepEqual(f.readState().entries.map(entry => entry.number), [review.number]);
+  assert.equal(f.readState().corrections[direct].reviewPr, review.number);
+  const log = readFileSync(join(f.work, products.core.changelog), 'utf8');
+  assert.match(log, /Fix: Emergency repair \(#1\)/);
+  const master = g(f.remote, 'rev-parse', 'master');
+  await f.run('update-changelogs.mjs'); assert.equal(g(f.remote, 'rev-parse', 'master'), master);
+  // Exercise preparation with no skip boundary: the audit, not an advanced
+  // checkpoint or a synthetic PR association for the direct SHA, authorizes it.
+  const ledger = f.readState(); ledger.checkpointSha = ledger.baselineSha; write(f.work, '.github/release-state.json', ledger);
+  f.requests.length = 0;
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' });
+  assert.ok(f.requests.some(request => request.path === `/commits/${direct}/pulls`));
+  assert.deepEqual(JSON.parse(readFileSync(join(f.work, '.release/release-snapshot.json'), 'utf8')).entryIds, [review.number]);
+  assert.ok(f.requests.every(request => request.method === 'GET'));
+});
+
+for (const invalid of ['unmerged review', 'wrong repository', 'missing audit in review tree', 'inherited audit']) {
+  test(`an emergency correction cannot bypass review: ${invalid}`, async t => {
+    const f = await fixture(t), direct = emergencyPush(f);
+    let pr;
+    if (invalid === 'missing audit in review tree') {
+      pr = f.feature(['product:core'], 'Fix: Does not review the ledger'); recordCorrection(f, direct, pr.number);
+    } else if (invalid === 'inherited audit') {
+      recordCorrection(f, direct, 2); f.feature(['product:none'], 'Chore: Store an unreviewed future reference');
+      pr = f.feature(['product:core'], 'Fix: Unrelated later review');
+    } else {
+      recordCorrection(f, direct); pr = f.feature(['product:core'], 'Fix: Review correction');
+      if (invalid === 'unmerged review') pr.merged = false;
+      else pr.base.repo.full_name = 'another/repository';
+    }
+    f.requests.length = 0;
+    await assert.rejects(f.run('update-changelogs.mjs'), /Emergency correction/);
+    await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' }), /Emergency correction/);
+    assert.ok(f.requests.every(request => request.method === 'GET'));
+  });
+}
+
+test('auditing one emergency SHA does not authorize another unassociated commit', async t => {
+  const f = await fixture(t), direct = emergencyPush(f); recordCorrection(f, direct); f.feature(['product:core'], 'Fix: Review emergency');
+  await f.run('update-changelogs.mjs'); const unknown = emergencyPush(f, 'second-direct.txt');
+  await assert.rejects(f.run('update-changelogs.mjs'), /no classified merged master PR/);
+  assert.ok(f.requests.some(request => request.path === `/commits/${unknown}/pulls`));
+});
+
+test('both required checks ignore invalid unqueued stacked PRs associated with queued commits', async t => {
+  const f = await fixture(t);
+  const a = { number: 1, title: 'Fix: Queued repair', labels: [{ name: 'product:core' }], base: { ref: 'master' }, head: { sha: 'pr-a' }, merged_at: null };
+  const b = { number: 2, title: 'No category', labels: [], base: { ref: 'master' }, head: { sha: 'pr-b' }, merged_at: null };
+  f.pullRequests.push(a, b);
+  f.queue.push({ headCommit: { oid: 'group-a' }, pullRequest: { number: 1, headRefOid: 'pr-a' } });
+  f.groupCommits.push({ sha: 'a-shared-commit' }, { sha: 'group-a' });
+  const event = join(f.root, 'group-event.json');
+  writeFileSync(event, JSON.stringify({ merge_group: { base_ref: 'refs/heads/master', base_sha: 'base', head_sha: 'group-a' } }));
+  for (const mode of ['product', 'category']) await f.run('check-pr.mjs', [mode], { GITHUB_EVENT_PATH: event });
+  const checks = f.requests.filter(request => request.path === '/check-runs').map(request => request.body);
+  assert.equal(checks.length, 2); assert.ok(checks.every(check => check.conclusion === 'success' && check.head_sha === 'group-a'));
+  assert.ok(!f.requests.some(request => request.path === '/pulls/2' || request.path.startsWith('/commits/')));
 });

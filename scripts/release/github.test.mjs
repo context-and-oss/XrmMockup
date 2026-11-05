@@ -11,19 +11,34 @@ test('PR checks fetch current metadata rather than stale event labels', async ()
   const api = { repo: async path => { assert.equal(path, '/pulls/5'); return current; } };
   assert.deepEqual(await validatePulls(api, { pull_request: { number: 5, labels: [] } }), [current]);
 });
-test('merge-group checks validate each associated unmerged master PR', async () => {
-  const prs = [{ number: 1, base: { ref: 'master' }, merged_at: null }, { number: 2, base: { ref: 'master' }, merged_at: null }];
+test('a merge group validates its queue members, not an unqueued stacked PR sharing commits', async () => {
+  const queued = { number: 1, base: { ref: 'master' }, head: { sha: 'pr-a' }, labels: [{ name: 'product:core' }], title: 'Fix: Valid queued work' };
+  const calls = [];
   const api = {
-    repo: async path => prs.find(p => path === `/pulls/${p.number}`),
-    list: async (path, selector) => {
-      if (path.startsWith('/compare/')) { return [{ sha: 'a' }, { sha: 'b' }]; }
-      return path.includes('/a/') ? [prs[0]] : [prs[0], prs[1]];
-    },
+    list: async path => { assert.ok(path.startsWith('/compare/')); return [{ sha: 'shared-a' }, { sha: 'group-a' }]; },
+    mergeQueueEntries: async () => [{ headCommit: { oid: 'group-a' }, pullRequest: { number: 1, headRefOid: 'pr-a' } }],
+    repo: async path => { calls.push(path); assert.equal(path, '/pulls/1'); return queued; },
   };
-  assert.deepEqual(await validatePulls(api, { merge_group: { base_sha: 'base', head_sha: 'head' } }), prs);
+  assert.deepEqual(await validatePulls(api, { merge_group: { base_sha: 'base', head_sha: 'group-a' } }), [queued]);
+  assert.deepEqual(calls, ['/pulls/1']); // PR B shares shared-a but is not in the queue at all.
 });
-test('unknown merge group fails closed', async () => {
-  await assert.rejects(validatePulls({ list: async () => [] }, { merge_group: { base_sha: 'base', head_sha: 'head' } }), /Cannot identify/);
+test('multi-PR groups include all contained queue build heads, not later queued entries or their base', async () => {
+  const prs = [1, 2, 3].map(number => ({ number, base: { ref: 'master' }, head: { sha: `pr-${number}` } }));
+  const api = {
+    list: async () => [{ sha: 'group-1' }, { sha: 'group-2' }],
+    mergeQueueEntries: async () => prs.map(pr => ({ headCommit: { oid: `group-${pr.number}` }, pullRequest: { number: pr.number, headRefOid: pr.head.sha } })),
+    repo: async path => prs.find(pr => path === `/pulls/${pr.number}`),
+  };
+  assert.deepEqual(await validatePulls(api, { merge_group: { base_sha: 'base', head_sha: 'group-2' } }), prs.slice(0, 2));
+  api.list = async () => [{ sha: 'group-2' }];
+  assert.deepEqual(await validatePulls(api, { merge_group: { base_sha: 'group-1', head_sha: 'group-2' } }), [prs[1]]);
+});
+test('stale merge-group membership or a changed PR head fails instead of guessing members', async () => {
+  const api = { list: async () => [{ sha: 'group-a' }], mergeQueueEntries: async () => [] };
+  await assert.rejects(validatePulls(api, { merge_group: { base_sha: 'base', head_sha: 'group-a' } }), /Cannot identify/);
+  api.mergeQueueEntries = async () => [{ headCommit: { oid: 'group-a' }, pullRequest: { number: 1, headRefOid: 'old-head' } }];
+  api.repo = async () => ({ number: 1, base: { ref: 'master' }, head: { sha: 'new-head' } });
+  await assert.rejects(validatePulls(api, { merge_group: { base_sha: 'base', head_sha: 'group-a' } }), /changed while resolving/);
 });
 test('optional 404 is handled but CLI permissions and command errors still fail', async () => {
   const failure = status => Object.assign(new Error(`gh failed: ${status}`), { stderr: `gh: Not Found (HTTP ${status})\n` });

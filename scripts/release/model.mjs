@@ -95,6 +95,12 @@ export function validateState(state) {
   if (state.checkpointSha !== undefined && (typeof state.checkpointSha !== 'string' || !/^[a-f0-9]{40}$/.test(state.checkpointSha))) throw new Error('Invalid reconciliation checkpoint.');
   if (!Array.isArray(state.entries) || !Array.isArray(state.releases)) throw new Error('Invalid release ledger arrays.');
   for (const product of Object.keys(products)) parseVersion(state.baselineVersions?.[product] ?? '');
+  const corrections = state.corrections === undefined ? {} : state.corrections;
+  if (!corrections || typeof corrections !== 'object' || Array.isArray(corrections)) throw new Error('Invalid emergency corrections.');
+  for (const [sha, correction] of Object.entries(corrections)) {
+    if (!/^[a-f0-9]{40}$/.test(sha) || !correction || !Number.isSafeInteger(correction.reviewPr) || correction.reviewPr < 1 ||
+        typeof correction.reason !== 'string' || !correction.reason.trim()) throw new Error('Emergency corrections require a full SHA, reviewPr, and audit reason.');
+  }
   const ids = new Set();
   for (const entry of state.entries) {
     if (!Number.isSafeInteger(entry.number) || entry.number < 1 || ids.has(entry.number)) throw new Error('Invalid/duplicate PR in ledger.');

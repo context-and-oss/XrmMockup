@@ -60,6 +60,14 @@ export class GitHub {
     const bytes = await this.cli(['api', endpoint, '--hostname', this.host, '--method', 'GET', '--paginate', '--jq', selector, '--header', 'X-GitHub-Api-Version:2022-11-28']);
     return bytes.toString('utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   }
+  async mergeQueueEntries(branch) {
+    const [owner, name] = this.repository.split('/');
+    const query = 'query($owner:String!,$name:String!,$branch:String!,$endCursor:String){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){entries(first:100,after:$endCursor){nodes{headCommit{oid} pullRequest{number headRefOid}} pageInfo{hasNextPage endCursor}}}}}';
+    const bytes = await this.cli(['api', 'graphql', '--hostname', this.host, '--paginate',
+      '--raw-field', `query=${query}`, '--raw-field', `owner=${owner}`, '--raw-field', `name=${name}`, '--raw-field', `branch=${branch}`,
+      '--jq', '.data.repository.mergeQueue.entries.nodes[] | @json']);
+    return bytes.toString('utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  }
   async releaseByTag(tag) {
     const matches = (await this.list('/releases')).filter(release => release.tag_name === tag);
     if (matches.length > 1) throw new Error(`Multiple releases/drafts use tag ${tag}; resolve the ambiguity before retrying.`);
@@ -178,6 +186,22 @@ export async function discoverPrs(api, state, sourceSha) {
   const trustedCheckpoint = checkpoint === state.baselineSha || (parent && ancestor(checkpoint, parent) &&
     (generatedCommit(ledgerCommit) || await generatedPrFor(ledgerCommit)));
   const from = trustedCheckpoint ? checkpoint : state.baselineSha;
+  const reviewed = new Map();
+  const approveCorrection = async sha => {
+    const correction = state.corrections?.[sha];
+    if (!correction) throw new Error(`Commit ${sha} has no classified merged master PR. Record a reviewed SHA-keyed emergency correction.`);
+    const pr = await api.repo(`/pulls/${correction.reviewPr}`);
+    if (!pr.merged || pr.base?.ref !== 'master' || pr.base.repo?.full_name !== api.repository || isChangelogPr(pr) ||
+        !/^[a-f0-9]{40}$/.test(pr.merge_commit_sha ?? '') || pr.merge_commit_sha === sha ||
+        !ancestor(sha, pr.merge_commit_sha) || !ancestor(pr.merge_commit_sha, sourceSha)) throw new Error('Emergency correction must be reviewed in a later merged master PR in this repository.');
+    classify(pr); // Classification and release-note text come from the corrective PR.
+    const atReview = JSON.parse(git('show', `${pr.merge_commit_sha}:${statePath}`));
+    const parent = git('rev-list', '--parents', '-n', '1', pr.merge_commit_sha).split(' ')[1];
+    const before = parent && git('ls-tree', '--name-only', parent, statePath)
+      ? JSON.parse(git('show', `${parent}:${statePath}`)).corrections?.[sha] : undefined;
+    if (!isDeepStrictEqual(atReview.corrections?.[sha], correction) || isDeepStrictEqual(before, correction)) throw new Error('Emergency correction was not introduced or updated by its referenced review PR.');
+    reviewed.set(pr.merge_commit_sha, pr);
+  };
   const known = new Set(state.entries.map(entry => entry.number));
   const commits = git('rev-list', '--reverse', '--first-parent', `${from}..${sourceSha}`).split('\n').filter(Boolean);
   let substantiveHistory = false;
@@ -189,11 +213,12 @@ export async function discoverPrs(api, state, sourceSha) {
     if (await generatedPrFor(sha)) continue; // Do not add a ledger row/checkpoint update for the notes PR itself.
     const eligible = associated.filter(pr => pr.base?.ref === 'master' && pr.merged_at && pr.merge_commit_sha &&
       ancestor(pr.merge_commit_sha, sourceSha) && !ancestor(pr.merge_commit_sha, state.baselineSha));
-    if (!eligible.length) throw new Error(`Commit ${sha} has no classified merged master PR. Use PRs or record an explicitly reviewed emergency correction.`);
+    if (!eligible.length && reviewed.has(sha)) eligible.push(reviewed.get(sha));
+    if (!eligible.length) { await approveCorrection(sha); substantiveHistory = true; continue; }
     substantiveHistory = true;
     for (const candidate of eligible.sort((a, b) => a.number - b.number)) {
       if (known.has(candidate.number)) continue;
-      const pr = await api.repo(`/pulls/${candidate.number}`);
+      const pr = reviewed.get(sha) ?? await api.repo(`/pulls/${candidate.number}`);
       if (!pr.merged || pr.base.ref !== 'master') throw new Error(`PR #${pr.number} is not merged into master.`);
       const classification = classify(pr);
       state.entries.push({ number: pr.number, mergeSha: pr.merge_commit_sha, ...classification });
@@ -253,12 +278,17 @@ export async function validatePulls(api, event) {
   }
   if (event.pull_request) return [await api.repo(`/pulls/${event.pull_request.number}`)];
   if (!event.merge_group) throw new Error('Expected a pull_request_target or merge_group event.');
-  const group = event.merge_group, found = new Map();
-  for (const commit of await api.list(`/compare/${group.base_sha}...${group.head_sha}`, '.commits[] | @json')) {
-    for (const pr of await api.list(`/commits/${commit.sha}/pulls`)) {
-      if (pr.base?.ref === 'master' && !pr.merged_at) found.set(pr.number, pr);
-    }
-  }
-  if (!found.size) throw new Error('Cannot identify the PRs in this merge group; refusing to bypass classification.');
-  return Promise.all([...found.keys()].map(n => api.repo(`/pulls/${n}`)));
+  const group = event.merge_group;
+  if (group.base_ref && group.base_ref !== 'refs/heads/master') throw new Error('Only master merge groups are supported.');
+  const commits = new Set((await api.list(`/compare/${group.base_sha}...${group.head_sha}`, '.commits[] | @json')).map(commit => commit.sha));
+  const entries = await api.mergeQueueEntries('master');
+  // Queue build heads, not arbitrary PRs sharing a commit, identify this group.
+  if (!entries.some(entry => entry?.headCommit?.oid === group.head_sha) || !commits.has(group.head_sha)) throw new Error('Cannot identify the current merge group; its queue membership may have changed.');
+  const members = entries.filter(entry => entry && commits.has(entry.headCommit?.oid));
+  if (!members.length || members.some(entry => !entry.pullRequest)) throw new Error('Cannot identify PRs in the merge group.');
+  return Promise.all(members.map(async entry => {
+    const pr = await api.repo(`/pulls/${entry.pullRequest.number}`);
+    if (pr.merged || pr.merged_at || pr.base?.ref !== 'master' || pr.head.sha !== entry.pullRequest.headRefOid) throw new Error('Merge group PR changed while resolving queue membership; retry the current group.');
+    return pr;
+  }));
 }

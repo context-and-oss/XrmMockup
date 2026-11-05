@@ -9,7 +9,7 @@ Release automation uses **Node 24** for classification, rendering, and validatio
 ## Repository setup
 
 1. Run **Set up release labels** (`setup-release-labels.yml`) from `master` to create/update the approved labels. For the initial implementation PR, create/apply the needed labels manually before merging.
-2. Require **`PR product labels`** and **`PR change category`** in the `master` branch ruleset. They are published against the PR head SHA. Keep normal branch protection and required reviews in place; merge-queue validation is included. No changelog automation bypass is needed.
+2. Require **`PR product labels`** and **`PR change category`** in the `master` branch ruleset. They are published against the PR head SHA. Keep normal branch protection and required reviews in place; merge-queue validation checks only the PRs in the actual group, not unqueued stacked PRs sharing commits. No changelog automation bypass is needed.
 3. In **Settings → Actions → General → Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests** (and the organization-level permission if applicable). The pipeline passes the built-in `GITHUB_TOKEN` to `gh` through `GH_TOKEN`; it does not approve or automatically merge PRs. No GitHub App or bot PAT is required. The token writes only the reserved branch `automation/update-changelogs`, never `master`.
 4. Keep **`NUGET_USER`** configured and verify the NuGet Trusted Publishing policy for `release.yml` and both package IDs. Restrict who may create the approved release tags.
 5. Run **Update product changelogs** manually, review and merge its generated PR after checks pass, and try a manual **Release** preview before creating production tags.
@@ -120,6 +120,28 @@ Each release freezes the selected product's unreleased PR entries at the tagged 
 After successful publication, the shared writer adds that exact versioned section to the same open changelog PR, or creates the next PR if the previous one has merged. Review and merge it to update history on `master`. It removes only that release's consumed pending entries; newer merged changes and the other product's notes remain untouched. Multiple publication/merge updates are combined into one open PR.
 
 **The tag itself retains its reconciled `Unreleased` source file.** The release artifacts contain the generated versioned file, and `master` receives the historical section afterward. This is intentional: never move a published tag to include the later generated documentation commit.
+
+## Auditing an emergency direct push
+
+Direct pushes remain exceptional and blocked until reviewed. If one was unavoidable:
+
+1. Create a corrective PR against `master` and obtain its PR number.
+2. In `.github/release-state.json`, add a record under `corrections`, keyed by the emergency commit's **full 40-character SHA**:
+
+```json
+"corrections": {
+  "<full-emergency-commit-sha>": {
+    "reviewPr": 123,
+    "reason": "Why the emergency push was necessary and what was reviewed"
+  }
+}
+```
+
+3. Replace `123` with **this corrective PR's number**, not an unrelated PR. Use the affected product label(s) and a category/title describing the emergency change; those supply its release note. Use `product:none` only for genuine repository maintenance.
+4. Review and merge the corrective PR through normal branch protection. The record must be introduced or updated by that PR, and its merge must follow the emergency commit. Unmerged PRs, other repositories, and inherited audit references are rejected.
+5. Rerun **Update product changelogs**, then review and merge its generated PR before previewing/tagging a release.
+
+Do not invent a PR entry for the direct SHA or advance the checkpoint to hide it. Each emergency commit needs its own audit record; one corrective PR may review several SHA-keyed records, but produces one release-note entry. Already reviewed metadata remains in the ledger for audit.
 
 ## Failures and recovery
 

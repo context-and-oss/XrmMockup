@@ -84,7 +84,7 @@ These jobs require read-only metadata access, no secrets, and no checkout/build/
 
 Make **both checks required** in the `master` ruleset/branch protection. Keep normal direct-push restrictions and branch protections; changelog automation does not need a bypass. A failing Action alone is insufficient without these repository settings. Do not skip validation jobs when classification is absent: skipped checks can appear successful. [S11]
 
-If a merge queue is used, add `merge_group: checks_requested` handling and validate all constituent PRs under the same rules. Do not silently pass merge-group events or leave required checks absent. [S10]
+For `merge_group: checks_requested`, resolve membership from the paginated GitHub merge queue entries: select only queue build-head commits present in the event's base-to-head comparison, with an exact queue-head match anchoring the group. Fetch current metadata for that set of PRs only. Commit-to-PR associations are not membership evidence: unqueued/later stacked PRs sharing commits must not affect checks. Fail closed if queue membership cannot be resolved or changes during resolution; do not silently pass merge-group events. [S10]
 
 The bot-owned changelog PR uses `product:none` and `change:chore` and runs the same required checks as other PRs. Its verified automation identity, same-repository reserved branch, and generated-only diff exclude it from the ledger as well as the notes, preventing recursive PR creation. There is no blanket exemption for human PRs, Dependabot PRs, or PRs titled “release.”
 
@@ -121,7 +121,7 @@ Use stable category ordering from the category table and oldest-first source ord
 
 Serialize all writes to these shared generated files, including release finalization, under one writer concurrency group with `cancel-in-progress: false`. Product publication can remain separately serialized. Event coalescing must be safe because a writer reconstructs all missing work from repository/release state rather than consuming only the latest event.
 
-If reconciliation encounters a reachable feature PR with invalid classification, fail visibly and block releasing that source until corrected/reconciled. Do not silently omit it. Disallow human direct pushes as normal policy; approved emergency pushes require an explicit recorded classification/correction before release.
+If reconciliation encounters a reachable feature PR with invalid classification, fail visibly and block releasing that source until corrected/reconciled. Do not silently omit it. Disallow human direct pushes as normal policy; approved emergency pushes require `corrections[fullSha] = { reviewPr, reason }` in the tracked ledger before release. The reference must be a later merged, same-repository master PR that introduces/updates the exact record. Classification and note text come from that corrective PR, which is included once. A baseline rescan validates the audit before rejecting an unassociated commit; a checkpoint or arbitrary PR entry is not an authorization.
 
 ### Freshness gate
 
@@ -219,6 +219,8 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 - A tag created before its notes are reconciled fails the freshness gate.
 - Checkpoint verification uses a bounded lookup for its introducing bot PR, not a growing scan of processed features. A new unclassified commit remains detectable.
 - Invalid ancestry or a manually advanced checkpoint cannot hide source history.
+- A merged SHA-keyed emergency audit restores reconciliation and release preparation; missing/unmerged/unrelated/inherited audit references do not.
+- Merge-group checks ignore unqueued and later queued stacked PRs whose build heads are outside that group.
 
 **Release:**
 
@@ -258,3 +260,5 @@ Primary sources consulted on 5 November 2026. GitHub's public documentation page
 - **S13 — Release Please release-PR lifecycle:** `https://github.com/googleapis/release-please`
 
 - **S14 — GitHub CLI in Actions and CLI command reference:** `https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-github-cli`; `https://cli.github.com/manual/gh_api`; `https://cli.github.com/manual/gh_release_create`; `https://cli.github.com/manual/gh_pr_create`
+
+- **S15 — Merge queue entry build-head metadata:** `https://docs.github.com/en/graphql/reference/objects#mergequeueentry`; official API schema: `https://github.com/octokit/graphql-schema/blob/master/schema.graphql`
