@@ -6,9 +6,44 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Explicit stdio prevents execFileSync from echoing expected failures into CI logs.
+// Failed commands still throw with status/stdout/stderr for assertions and diagnostics.
+const runCaptured = (command, args, options = {}) => execFileSync(command, args, {
+  ...options, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+});
+
+// These regression tests do not require PowerShell, so capture/fail-fast behavior is
+// exercised locally as well as on the hosted runners that run the package fixtures.
+test('expected child failures are captured without printing raw exceptions', () => {
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { execFileSync } from 'node:child_process';
+    const runCaptured = ${runCaptured.toString()};
+    assert.throws(() => runCaptured(process.execPath, ['-e',
+      'process.stderr.write("expected validation error"); process.exit(1);']), error => {
+      assert.equal(error.status, 1);
+      assert.match(error.stderr, /expected validation error/);
+      return true;
+    });
+  `], { encoding: 'utf8' });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, '', 'Expected negative tests must not leak exception logs');
+});
+
+test('unexpected captured child failures still fail the invoking process', () => {
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { execFileSync } from 'node:child_process';
+    const runCaptured = ${runCaptured.toString()};
+    runCaptured(process.execPath, ['-e',
+      'process.stderr.write("unexpected validation error"); process.exit(7);']);
+  `], { encoding: 'utf8' });
+  assert.notEqual(child.status, 0);
+  assert.match(child.stderr, /unexpected validation error/);
+});
+
 const probe = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()']);
 const validator = fileURLToPath(new URL('validate-packages.ps1', import.meta.url));
-test('PowerShell package validation checks IDs, symbols, core assets, and signed retry content', { skip: probe.error?.code === 'ENOENT' }, t => {
+test('PowerShell package validation checks IDs, symbols, core assets, and signed retry content', { skip: probe.error?.code === 'ENOENT' }, async t => {
   assert.equal(probe.status, 0, probe.stderr?.toString());
   const root = mkdtempSync(join(tmpdir(), 'xrmmockup-packages-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -39,7 +74,7 @@ foreach ($extension in @('nupkg', 'snupkg')) {
     } finally { $archive.Dispose() }
 }
 `);
-  const run = (path, ...args) => execFileSync('pwsh', ['-NoProfile', '-File', path, ...args], { cwd: root, encoding: 'utf8' });
+  const run = (path, ...args) => runCaptured('pwsh', ['-NoProfile', '-File', path, ...args], { cwd: root });
   const snapshot = { product: 'core', version: '1.20.3', packages: [] };
   const snapshotPath = join(root, '.release/release-snapshot.json');
   writeFileSync(snapshotPath, JSON.stringify(snapshot));
@@ -51,6 +86,20 @@ foreach ($extension in @('nupkg', 'snupkg')) {
   run(fixture, '-Signed');
   copyFileSync(join(root, '.release/packages/XrmMockup365.1.20.3.nupkg'), join(root, '.release/existing.nupkg'));
   run(validator, '-Existing'); // Repository signature is excluded, but real content must agree.
-  run(fixture, '-Id', 'Wrong.Package'); assert.throws(() => run(validator), /ID\/version mismatch/);
-  run(fixture, '-MissingLegacy'); assert.throws(() => run(validator), /Missing legacy generator/);
+  await t.test('rejects a wrong package ID with exit code 1 (expected failure)', () => {
+    run(fixture, '-Id', 'Wrong.Package');
+    assert.throws(() => run(validator), error => {
+      assert.equal(error.status, 1, 'Wrong package metadata must fail the validator');
+      assert.match(error.stderr, /Package ID\/version mismatch/);
+      return true;
+    });
+  });
+  await t.test('rejects missing legacy assets with exit code 1 (expected failure)', () => {
+    run(fixture, '-MissingLegacy');
+    assert.throws(() => run(validator), error => {
+      assert.equal(error.status, 1, 'Missing legacy assets must fail the validator');
+      assert.match(error.stderr, /Missing legacy generator/);
+      return true;
+    });
+  });
 });
