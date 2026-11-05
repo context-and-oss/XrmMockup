@@ -129,3 +129,11 @@ test('checkpoint schema accepts legacy absence but rejects malformed or coerced 
     assert.throws(() => validateState({ ...state(), checkpointSha }), /Invalid reconciliation checkpoint/);
   }
 });
+test('the bot-owned changelog PR requires product:none and Chore, but a fork cannot claim that identity', () => {
+  const bot = { ...pr(['product:none', 'change:chore'], 'Chore: Update generated notes'),
+    user: { login: 'github-actions[bot]' }, head: { ref: 'automation/update-changelogs', repo: { full_name: 'owner/repo' } }, base: { repo: { full_name: 'owner/repo' } } };
+  assert.deepEqual(classify(bot).products, []);
+  assert.throws(() => classify({ ...bot, labels: [{ name: 'product:core' }, { name: 'change:chore' }] }), /product:none exclusively/);
+  assert.throws(() => classify({ ...bot, title: 'Fix: Wrong category', labels: [{ name: 'product:none' }] }), /Chore category/);
+  assert.deepEqual(classify({ ...bot, head: { ...bot.head, repo: { full_name: 'fork/repo' } }, labels: [{ name: 'product:core' }], title: 'Fix: Real feature' }).products, ['core']);
+});

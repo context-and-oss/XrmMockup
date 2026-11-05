@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { hash, classify, products, generatedPaths, statePath, snapshotName, releaseMarker, parseTag, validateSnapshot, applyRelease, compareVersions, makeSnapshot } from './model.mjs';
+import { hash, classify, products, generatedPaths, statePath, snapshotName, releaseMarker, parseTag, validateSnapshot, applyRelease, compareVersions, makeSnapshot, isChangelogPr } from './model.mjs';
 
 export function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }).replace(/\r\n/g, '\n').trim();
@@ -89,10 +89,10 @@ function firstParent(sha) {
   const parents = git('rev-list', '--parents', '-n', '1', sha).split(' ');
   return parents.length === 2 ? parents[1] : null;
 }
-function generatedCommit(sha) {
+export function generatedCommit(sha) {
   const identity = 'release-changelog-bot <release-changelog-bot@users.noreply.github.com>';
-  // PR rebases/squashes can preserve a forged author. The writer must also be
-  // the committer; normal protected-branch bypass remains limited to its identity.
+  // Verify owned branch commits and historical direct-writer commits. A PR
+  // merge can rewrite these identities and is verified through GitHub metadata.
   if (!firstParent(sha) || git('show', '-s', '--format=%an <%ae>%n%cn <%ce>', sha).split('\n').some(value => value !== identity)) return false;
   const paths = git('diff-tree', '--no-commit-id', '--name-only', '-r', sha).split('\n').filter(Boolean);
   return paths.length > 0 && paths.every(path => generatedPaths.includes(path));
@@ -104,17 +104,43 @@ export async function discoverPrs(api, state, sourceSha) {
       !git('rev-list', '--first-parent', sourceSha).split('\n').includes(checkpoint)) throw new Error('Reconciliation checkpoint is not on the selected source first-parent ancestry.');
   // A reviewed/manual ledger edit invalidates the skip boundary. Rescan rather than
   // trusting an arbitrarily advanced checkpoint, and let the writer establish it again.
-  const ledgerCommit = git('log', '-1', '--format=%H', sourceSha, '--', statePath);
-  const trustedCheckpoint = checkpoint === state.baselineSha || (ledgerCommit && generatedCommit(ledgerCommit) && ancestor(checkpoint, firstParent(ledgerCommit)));
+  const associations = new Map();
+  const prsFor = async sha => {
+    if (!associations.has(sha)) associations.set(sha, await api.list(`/commits/${sha}/pulls`));
+    return associations.get(sha);
+  };
+  const generatedPulls = new Map();
+  const generatedPrFor = async sha => {
+    if (generatedPulls.has(sha)) return generatedPulls.get(sha);
+    const candidates = (await prsFor(sha)).filter(pr => pr.merge_commit_sha === sha && pr.merged_at && isChangelogPr(pr));
+    let result = null;
+    for (const candidate of candidates) {
+      const pr = await api.repo(`/pulls/${candidate.number}`);
+      if (!pr.merged || pr.base.ref !== 'master' || pr.base.repo.full_name !== api.repository || !isChangelogPr(pr)) continue;
+      classify(pr); // product:none and Chore remain mandatory, never a blanket bypass.
+      const parent = git('rev-list', '--parents', '-n', '1', sha).split(' ')[1];
+      const paths = parent ? git('diff', '--name-only', parent, sha).split('\n').filter(Boolean) : [];
+      if (!paths.length || paths.some(path => !generatedPaths.includes(path))) throw new Error('Changelog PR contains changes outside its generated-file allowlist.');
+      result = pr; break;
+    }
+    generatedPulls.set(sha, result); return result;
+  };
+  // A PR merge can rewrite author/committer metadata. Verify its actual GitHub PR
+  // identity and changed paths instead of treating it as a direct bot commit.
+  const ledgerCommit = git('log', '--first-parent', '-1', '--format=%H', sourceSha, '--', statePath);
+  const parent = ledgerCommit && git('rev-list', '--parents', '-n', '1', ledgerCommit).split(' ')[1];
+  const trustedCheckpoint = checkpoint === state.baselineSha || (parent && ancestor(checkpoint, parent) &&
+    (generatedCommit(ledgerCommit) || await generatedPrFor(ledgerCommit)));
   const from = trustedCheckpoint ? checkpoint : state.baselineSha;
   const known = new Set(state.entries.map(entry => entry.number));
   const commits = git('rev-list', '--reverse', '--first-parent', `${from}..${sourceSha}`).split('\n').filter(Boolean);
   let substantiveHistory = false;
   for (const sha of commits) {
-    // The writer's own pushes must not make API requests or create an endless
-    // checkpoint-only commit loop. Verify their identity, parent and path allowlist locally.
+    // Historical direct bot commits can be verified locally. Current changelog
+    // PR merges are verified once per scan and excluded without a follow-up row.
     if (generatedCommit(sha)) continue;
-    const associated = await api.list(`/commits/${sha}/pulls`);
+    const associated = await prsFor(sha);
+    if (await generatedPrFor(sha)) continue; // Do not add a ledger row/checkpoint update for the notes PR itself.
     const eligible = associated.filter(pr => pr.base?.ref === 'master' && pr.merged_at && pr.merge_commit_sha &&
       ancestor(pr.merge_commit_sha, sourceSha) && !ancestor(pr.merge_commit_sha, state.baselineSha));
     if (!eligible.length) throw new Error(`Commit ${sha} has no classified merged master PR. Use PRs or record an explicitly reviewed emergency correction.`);
@@ -175,6 +201,10 @@ export async function assertPublicationCurrent(api, state, snapshot) {
 export function readState() { return JSON.parse(readFileSync(statePath, 'utf8')); }
 export function writeState(state) { writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n'); }
 export async function validatePulls(api, event) {
+  if (event.inputs?.pr_number !== undefined) {
+    if (!/^[1-9]\d*$/.test(event.inputs.pr_number) || !Number.isSafeInteger(Number(event.inputs.pr_number))) throw new Error('A valid PR number is required.');
+    return [await api.repo(`/pulls/${event.inputs.pr_number}`)];
+  }
   if (event.pull_request) return [await api.repo(`/pulls/${event.pull_request.number}`)];
   if (!event.merge_group) throw new Error('Expected a pull_request_target or merge_group event.');
   const group = event.merge_group, found = new Map();

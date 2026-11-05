@@ -26,10 +26,13 @@ test('tag release separates metadata preparation, read-only builds, and dry-run-
   assert.ok(publish.indexOf('publish-release.mjs complete') < publish.indexOf('publish-release.mjs notify'));
   assert.ok(!yaml.includes('--skip-duplicate'));
 });
-test('writer is serialized, supports fresh App tokens, and generated source is not ignored', () => {
+test('writer is serialized, uses the repository token for PRs, and generated source is not ignored', () => {
   const yaml = read('.github/workflows/update-changelogs.yml');
   assert.match(yaml, /group: release-changelog-writer/); assert.match(yaml, /cancel-in-progress: false/);
-  assert.match(yaml, /actions\/create-github-app-token@v2/);
+  assert.match(yaml, /pull-requests: write/); assert.match(yaml, /actions: write/);
+  assert.match(yaml, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.ok(!yaml.includes('RELEASE_APP')); assert.ok(!yaml.includes('RELEASE_BOT_TOKEN'));
+  assert.ok(!yaml.includes('create-github-app-token'));
   assert.match(read('.gitignore'), /!\/scripts\/release\//);
 });
 test('CI/local pack no longer derives versions from changelog headings', () => {
@@ -58,4 +61,14 @@ test('privileged preparation and publication run default-branch helpers over iso
   }
   assert.match(prepare, /run: node \.\.\/release-tools\/scripts\/release\/prepare-release\.mjs/);
   assert.match(yaml, /run: node \.\.\/release-tools\/scripts\/release\/publish-release\.mjs/);
+});
+test('changelog PR checks are explicitly dispatchable and the writer never pushes master or merges PRs', () => {
+  for (const name of ['pr-product-labels', 'pr-change-category']) {
+    const yaml = read(`.github/workflows/${name}.yml`); assert.match(yaml, /workflow_dispatch:/); assert.match(yaml, /pr_number:/);
+  }
+  assert.match(read('.github/workflows/ci.yml'), /workflow_dispatch:/);
+  const script = read('scripts/release/update-changelogs.mjs');
+  assert.ok(!script.includes('HEAD:refs/heads/master')); assert.ok(!script.includes('/merge'));
+  assert.match(script, /state=open&base=master&head=/); assert.match(script, /force-with-lease/);
+  assert.match(script, /'product:none', 'change:chore'/);
 });

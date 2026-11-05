@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
-import { products, renderChangelog, makeSnapshot, applyRelease, hash, releaseMarker } from './model.mjs';
+import { changelogBranch, products, renderChangelog, makeSnapshot, applyRelease, hash, releaseMarker } from './model.mjs';
 
 const execute = promisify(execFile), scriptDir = fileURLToPath(new URL('.', import.meta.url));
 const g = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -27,7 +27,7 @@ async function fixture(t) {
   g(work, 'add', '.'); g(work, 'commit', '-m', 'Chore: Initialize ledger');
   g(work, 'config', 'user.name', 'maintainer'); g(work, 'config', 'user.email', 'maintainer@example.test');
   g(root, 'init', '--bare', remote); g(work, 'remote', 'add', 'origin', remote); g(work, 'push', '-u', 'origin', 'master');
-  const pullRequests = [], requests = [], releases = [], assets = new Map();
+  const pullRequests = [], botPrs = [], requests = [], releases = [], assets = new Map();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost'), path = url.pathname.replace('/repos/owner/repo', '');
@@ -36,9 +36,35 @@ async function fixture(t) {
       requests.push({ method: req.method, path, body });
       const json = value => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value)); };
       const sha = /^\/commits\/([^/]+)\/pulls$/.exec(path)?.[1];
-      if (sha) return json(pullRequests.filter(pr => pr.merge_commit_sha === sha));
+      if (sha) return json([...pullRequests, ...botPrs].filter(pr => pr.merge_commit_sha === sha));
       const number = /^\/pulls\/(\d+)$/.exec(path)?.[1];
-      if (number) return json(pullRequests.find(pr => pr.number === Number(number)));
+      if (number && req.method === 'GET') return json([...pullRequests, ...botPrs].find(pr => pr.number === Number(number)));
+      const branchPath = `/git/ref/heads/${changelogBranch}`;
+      if (path === branchPath) {
+        try { return json({ object: { sha: g(remote, 'rev-parse', '--verify', `refs/heads/${changelogBranch}`) } }); }
+        catch { res.statusCode = 404; return res.end('Not found'); }
+      }
+      if (path === '/pulls' && req.method === 'GET') {
+        return json(botPrs.filter(pr => pr.state === 'open').map(pr => {
+          pr.head.sha = g(remote, 'rev-parse', `refs/heads/${changelogBranch}`); return pr;
+        }));
+      }
+      if (path === '/pulls' && req.method === 'POST') {
+        const pr = { number: 1001 + botPrs.length, ...body, state: 'open', merged: false, merged_at: null,
+          user: { login: 'github-actions[bot]' }, labels: [], merge_commit_sha: null,
+          base: { ref: 'master', repo: { full_name: 'owner/repo' } },
+          head: { ref: body.head, sha: g(remote, 'rev-parse', `refs/heads/${body.head}`), repo: { full_name: 'owner/repo' } } };
+        botPrs.push(pr); return json(pr);
+      }
+      const updatePr = /^\/pulls\/(\d+)$/.exec(path)?.[1];
+      if (updatePr && req.method === 'PATCH') {
+        const pr = botPrs.find(pr => pr.number === Number(updatePr)); Object.assign(pr, body);
+        pr.head.sha = g(remote, 'rev-parse', `refs/heads/${changelogBranch}`); return json(pr);
+      }
+      const labelPr = /^\/issues\/(\d+)\/labels$/.exec(path)?.[1];
+      if (labelPr && req.method === 'PUT') {
+        const pr = botPrs.find(pr => pr.number === Number(labelPr)); pr.labels = body.labels.map(name => ({ name })); return json(pr.labels);
+      }
       if (path === '/check-runs') return json({ id: 1 });
       if (path === '/releases' && req.method === 'GET') { const start = (Number(url.searchParams.get('page') ?? 1) - 1) * 100; return json(releases.slice(start, start + 100)); }
       if (path === '/releases' && req.method === 'POST') {
@@ -56,7 +82,7 @@ async function fixture(t) {
       }
       const releaseId = /^\/releases\/(\d+)$/.exec(path)?.[1];
       if (releaseId && req.method === 'PATCH') { Object.assign(releases.find(r => r.id === Number(releaseId)), body); return json(releases.find(r => r.id === Number(releaseId))); }
-      if (path === '/actions/workflows/update-changelogs.yml/dispatches') { res.statusCode = 204; return res.end(); }
+      if (/^\/actions\/workflows\/(update-changelogs|pr-product-labels|pr-change-category|ci)\.yml\/dispatches$/.test(path)) { res.statusCode = 204; return res.end(); }
       res.statusCode = 500; res.end(`Unhandled test request ${req.method} ${path}`);
     } catch (error) { res.statusCode = 500; res.end(error.stack); }
   });
@@ -72,9 +98,28 @@ async function fixture(t) {
     const pr = { number, title, labels: labels.map(name => ({ name })), merged: true, merged_at: '2026-11-05T09:00:00Z', merge_commit_sha: sha, base: { ref: 'master' }, head: { sha } };
     pullRequests.push(pr); g(work, 'push', 'origin', 'master'); return pr;
   }
-  async function run(script, args = [], overrides = {}) { return execute(process.execPath, [join(scriptDir, script), ...args], { cwd: work, env: { ...env, ...overrides }, maxBuffer: 5 * 1024 * 1024 }); }
+  function mergeBotPr(strategy = 'merge') {
+    const pr = botPrs.find(pr => pr.state === 'open');
+    if (!pr) return null;
+    g(work, 'fetch', 'origin', 'master', `+refs/heads/${changelogBranch}:refs/remotes/origin/${changelogBranch}`);
+    g(work, 'checkout', '--force', '-B', 'master', 'origin/master');
+    g(work, 'config', 'user.name', 'maintainer'); g(work, 'config', 'user.email', 'maintainer@example.test');
+    if (strategy === 'squash') {
+      g(work, 'merge', '--squash', `origin/${changelogBranch}`); g(work, 'commit', '-m', pr.title);
+    } else if (strategy === 'rebase') g(work, 'cherry-pick', `origin/${changelogBranch}`);
+    else g(work, 'merge', '--no-ff', `origin/${changelogBranch}`, '-m', `Merge changelog PR #${pr.number}`);
+    pr.state = 'closed'; pr.merged = true; pr.merged_at = '2026-11-05T12:00:00Z'; pr.merge_commit_sha = g(work, 'rev-parse', 'HEAD');
+    g(work, 'push', 'origin', 'master'); return pr;
+  }
+  async function run(script, args = [], overrides = {}) {
+    const result = await execute(process.execPath, [join(scriptDir, script), ...args], { cwd: work, env: { ...env, ...overrides }, maxBuffer: 5 * 1024 * 1024 });
+    // Most existing release tests need approved notes on master. Simulate the human
+    // review/merge in the fixture only; production automation never merges its PR.
+    if (script === 'update-changelogs.mjs' && overrides.MERGE_BOT_PR !== 'false') mergeBotPr();
+    return result;
+  }
   const readState = () => JSON.parse(readFileSync(join(work, '.github/release-state.json'), 'utf8'));
-  return { root, work, remote, state, feature, run, readState, pullRequests, requests, releases, assets, env };
+  return { root, work, remote, state, feature, run, readState, pullRequests, botPrs, mergeBotPr, requests, releases, assets, env };
 }
 
 test('merge reconciler writes both product files, excludes maintenance, and is retry-safe', async t => {
@@ -238,20 +283,23 @@ test('trusted preparation rejects an unmerged source without executing its repla
   assert.equal(f.requests.length, 0, 'Reject unmerged sources before any API or artifact operations');
 });
 
-test('checkpoint reconciliation makes no PR API requests on self-pushes or unchanged previews', async t => {
+test('checkpoint reconciliation verifies only the bot merge and newly introduced history', async t => {
   const f = await fixture(t), first = f.feature(); await f.run('update-changelogs.mjs');
   assert.equal(f.readState().checkpointSha, first.merge_commit_sha);
   const checkpointCommit = g(f.work, 'rev-parse', 'HEAD');
   f.requests.length = 0; await f.run('update-changelogs.mjs');
   assert.equal(g(f.work, 'rev-parse', 'HEAD'), checkpointCommit);
-  assert.ok(!f.requests.some(r => r.path.startsWith('/commits/') || r.path.startsWith('/pulls/')));
+  const botMerge = f.botPrs[0].merge_commit_sha;
+  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${botMerge}/pulls`]);
+  assert.ok(!f.requests.some(r => r.path === '/pulls/1'));
   const next = f.feature(['product:metadata'], 'Add: Metadata addition');
   f.requests.length = 0; await f.run('update-changelogs.mjs');
-  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${next.merge_commit_sha}/pulls`]);
+  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${botMerge}/pulls`, `/commits/${next.merge_commit_sha}/pulls`]);
   assert.equal(f.readState().checkpointSha, next.merge_commit_sha);
   f.requests.length = 0;
   await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' });
-  assert.ok(!f.requests.some(r => r.path.startsWith('/commits/') || r.path.startsWith('/pulls/')));
+  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${f.botPrs[1].merge_commit_sha}/pulls`]);
+  assert.ok(!f.requests.some(r => r.path === '/pulls/1' || r.path === '/pulls/2'));
 });
 
 test('checkpoint optimization still detects a new unclassified direct commit', async t => {
@@ -261,7 +309,7 @@ test('checkpoint optimization still detects a new unclassified direct commit', a
   const directSha = g(f.work, 'rev-parse', 'HEAD'); g(f.work, 'push', 'origin', 'HEAD:master');
   f.requests.length = 0;
   await assert.rejects(f.run('update-changelogs.mjs'), /no classified merged master PR/);
-  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${directSha}/pulls`]);
+  assert.deepEqual(f.requests.filter(r => r.path.startsWith('/commits/')).map(r => r.path), [`/commits/${f.botPrs[0].merge_commit_sha}/pulls`, `/commits/${directSha}/pulls`]);
 });
 
 test('a manually advanced checkpoint cannot hide an earlier unclassified direct commit', async t => {
@@ -372,4 +420,105 @@ test('a reachable checkpoint on a merged side branch is not accepted as a first-
   f.feature(['product:none'], 'Chore: Review side boundary'); f.requests.length = 0;
   await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' }), /checkpoint.*first-parent ancestry/);
   assert.equal(f.requests.length, 0);
+});
+
+test('multiple master merges update one combined changelog PR without pushing master', async t => {
+  const f = await fixture(t), first = f.feature(['product:core'], 'Fix: Original core note');
+  const initialMaster = g(f.remote, 'rev-parse', 'master');
+  await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  assert.equal(g(f.remote, 'rev-parse', 'master'), initialMaster);
+  assert.equal(f.botPrs.length, 1); const number = f.botPrs[0].number;
+  first.title = 'Fix: Edited after first processing'; // Pending branch retains the frozen text.
+  f.feature(['product:metadata'], 'Add: Metadata improvement');
+  const third = f.feature(['product:core', 'product:metadata'], 'Change: Shared improvement');
+  const before = g(f.remote, 'rev-parse', 'master');
+  await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  assert.equal(g(f.remote, 'rev-parse', 'master'), before);
+  assert.equal(before, third.merge_commit_sha);
+  assert.equal(f.botPrs.length, 1); assert.equal(f.botPrs[0].number, number);
+  assert.deepEqual(f.botPrs[0].labels.map(label => label.name), ['product:none', 'change:chore']);
+  const pending = JSON.parse(g(f.remote, 'show', `${changelogBranch}:.github/release-state.json`));
+  assert.deepEqual(pending.entries.map(entry => entry.number), [1, 2, 3]);
+  assert.equal(pending.entries[0].description, 'Original core note');
+  assert.equal(JSON.parse(g(f.remote, 'show', 'master:.github/release-state.json')).entries.length, 0);
+  const core = g(f.remote, 'show', `${changelogBranch}:${products.core.changelog}`);
+  const metadata = g(f.remote, 'show', `${changelogBranch}:${products.metadata.changelog}`);
+  assert.match(core, /Original core note/); assert.match(core, /Shared improvement/);
+  assert.match(metadata, /Metadata improvement/); assert.match(metadata, /Shared improvement/);
+  const head = g(f.remote, 'rev-parse', changelogBranch);
+  await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  assert.equal(g(f.remote, 'rev-parse', changelogBranch), head, 'Unchanged content must not create another commit');
+  assert.equal(f.botPrs.length, 1);
+  const dispatches = f.requests.filter(r => r.path.endsWith('/dispatches'));
+  assert.ok(dispatches.some(r => r.path.includes('/ci.yml/') && r.body.ref === changelogBranch));
+  for (const name of ['pr-product-labels', 'pr-change-category']) {
+    assert.ok(dispatches.some(r => r.path.includes(`/${name}.yml/`) && r.body.ref === 'master' && r.body.inputs.pr_number === String(number)));
+  }
+});
+
+for (const strategy of ['merge', 'squash', 'rebase']) {
+  test(`merging the generated PR (${strategy}) does not add itself to notes or generate another PR`, async t => {
+    const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+    const pr = f.mergeBotPr(strategy), master = g(f.remote, 'rev-parse', 'master');
+    await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+    assert.equal(f.botPrs.length, 1); assert.equal(f.botPrs[0].state, 'closed');
+    assert.equal(g(f.remote, 'rev-parse', 'master'), master);
+    assert.ok(!f.readState().entries.some(entry => entry.number === pr.number));
+    for (const config of Object.values(products)) assert.ok(!readFileSync(join(f.work, config.changelog), 'utf8').includes(`#${pr.number}`));
+    // The main merge commit can be tagged without needing a second housekeeping PR.
+    await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' });
+  });
+}
+
+test('release validation rejects an unmerged changelog PR rather than using pending branch notes', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  g(f.work, 'checkout', '--force', '-B', 'master', 'origin/master');
+  await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' }), /unreconciled PRs/);
+  assert.equal(f.botPrs.length, 1);
+});
+
+test('explicitly dispatched validation checks the actual bot PR head and rejects changed product labels', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  const pr = f.botPrs[0], event = join(f.root, 'bot-check.json'); writeFileSync(event, JSON.stringify({ inputs: { pr_number: String(pr.number) } }));
+  await f.run('check-pr.mjs', ['product'], { GITHUB_EVENT_PATH: event });
+  let check = f.requests.filter(r => r.path === '/check-runs').at(-1).body;
+  assert.equal(check.head_sha, pr.head.sha); assert.equal(check.conclusion, 'success');
+  pr.labels = [{ name: 'product:core' }, { name: 'change:chore' }];
+  await assert.rejects(f.run('check-pr.mjs', ['product'], { GITHUB_EVENT_PATH: event }));
+  check = f.requests.filter(r => r.path === '/check-runs').at(-1).body; assert.equal(check.conclusion, 'failure');
+  assert.match(check.output.summary, /product:none exclusively/);
+});
+
+test('the writer refuses to overwrite an unowned or source-changing automation branch', async t => {
+  const f = await fixture(t); f.feature(); await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  g(f.work, 'checkout', '--force', '-B', 'human-edit', `origin/${changelogBranch}`);
+  write(f.work, 'unexpected-source.cs', '// must not be overwritten');
+  g(f.work, 'add', '.'); g(f.work, 'commit', '-m', 'Edit the managed branch'); g(f.work, 'push', 'origin', `HEAD:${changelogBranch}`);
+  const master = g(f.remote, 'rev-parse', 'master'), head = g(f.remote, 'rev-parse', changelogBranch);
+  await assert.rejects(f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' }), /unowned or unexpected changes/);
+  assert.equal(g(f.remote, 'rev-parse', 'master'), master); assert.equal(g(f.remote, 'rev-parse', changelogBranch), head);
+});
+
+test('release-history finalization and pending feature merges share the same open changelog PR', async t => {
+  const f = await fixture(t); f.feature(['product:core', 'product:metadata']); await f.run('update-changelogs.mjs');
+  const releasedSource = g(f.work, 'rev-parse', 'HEAD');
+  const releasedState = JSON.parse(g(f.work, 'show', `${releasedSource}:.github/release-state.json`));
+  const makeReleased = (product, version) => {
+    const snapshot = makeSnapshot(releasedState, product, version, releasedSource, 'owner/repo', '2026-11-05');
+    snapshot.packages = ['nupkg', 'snupkg'].map(ext => ({ name: `${products[product].packageId}.${version}.${ext}`, sha512: hash(Buffer.from(ext)), contentHash: hash(Buffer.from(ext)) }));
+    successfulRelease(f, snapshot);
+  };
+  makeReleased('core', '1.20.3');
+  const next = f.feature(['product:core'], 'Add: Pending next version');
+  await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  const number = f.botPrs.find(pr => pr.state === 'open').number;
+  makeReleased('metadata', '1.2.1');
+  await f.run('update-changelogs.mjs', [], { MERGE_BOT_PR: 'false' });
+  assert.equal(f.botPrs.filter(pr => pr.state === 'open').length, 1);
+  assert.equal(f.botPrs.find(pr => pr.state === 'open').number, number);
+  assert.equal(g(f.remote, 'rev-parse', 'master'), next.merge_commit_sha);
+  const core = g(f.remote, 'show', `${changelogBranch}:${products.core.changelog}`);
+  const metadata = g(f.remote, 'show', `${changelogBranch}:${products.metadata.changelog}`);
+  assert.match(core, /### 1\.20\.3 - 2026-11-05/); assert.match(core, /Pending next version/);
+  assert.match(metadata, /### 1\.2\.1 - 2026-11-05/);
 });

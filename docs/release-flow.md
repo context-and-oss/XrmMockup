@@ -10,7 +10,7 @@ Updated: 5 November 2026.
 2. Every PR targeting `master` must have `product:core`, `product:metadata`, both, or the exclusive maintenance label `product:none`.
 3. Every PR must specify a change category through an approved label or a recognized title prefix. This also applies to `product:none` PRs.
 4. Required validation pipelines enforce product and category classification before merge.
-5. A merge-to-`master` pipeline generates and **commits** the tracked changelogs directly to `master`, keeping their `Unreleased` sections current. It does not wait for a release-preparation PR.
+5. A merge-to-`master` pipeline generates the changelogs in **one combined bot PR**, refreshing the same reserved branch while it is open. Tracked files reach `master` only when that PR merges; normal checks/reviews apply and no App/PAT or branch bypass is required.
 6. A product-prefixed tag releases only that product. The tag is the authoritative release version; maintainers do not manually edit version headings or copy descriptions into GitHub.
 7. Release notes are generated from classified merged PRs, not file paths or manually maintained fragments.
 
@@ -80,13 +80,13 @@ The implementation adds separate lightweight workflows/checks, independent of ex
 
 Run both on PRs targeting `master` for `opened`, `reopened`, `synchronize`, `labeled`, `unlabeled`, `edited`, and `ready_for_review`. Re-fetch current PR labels/title through the API; do not rely only on an older event payload. Changes to either title or labels must rerun both checks. GitHub supports these event types. [S10]
 
-These jobs require read-only metadata access, no secrets, and no checkout/build/execution of PR code. Use a trusted base-branch metadata-only workflow, such as `pull_request_target`, so a contributor cannot edit the validator in their PR to bypass it. Never combine that trigger with execution of the PR head's code. Ensure checks report against the actual PR head SHA: a base-branch workflow result alone is not a required check on the proposed merge. Explicit check publication needs narrowly scoped `checks: write` and must otherwise remain metadata-only; use a GitHub App or equivalent trusted check publisher where repository policy requires it.
+These jobs require read-only metadata access, no secrets, and no checkout/build/execution of PR code. Use a trusted base-branch metadata-only workflow, such as `pull_request_target`, so a contributor cannot edit the validator in their PR to bypass it. Never combine that trigger with execution of the PR head's code. Ensure checks report against the actual PR head SHA: a base-branch workflow result alone is not a required check on the proposed merge. Explicit check publication uses `GITHUB_TOKEN` with narrowly scoped `checks: write` and otherwise remains metadata-only.
 
-Make **both checks required** in the `master` ruleset/branch protection. Restrict direct pushes and bypass to the narrowly scoped changelog automation identity. A failing Action alone is insufficient without these repository settings. Do not skip validation jobs when classification is absent: skipped checks can appear successful. [S11]
+Make **both checks required** in the `master` ruleset/branch protection. Keep normal direct-push restrictions and branch protections; changelog automation does not need a bypass. A failing Action alone is insufficient without these repository settings. Do not skip validation jobs when classification is absent: skipped checks can appear successful. [S11]
 
 If a merge queue is used, add `merge_group: checks_requested` handling and validate all constituent PRs under the same rules. Do not silently pass merge-group events or leave required checks absent. [S10]
 
-Generated changelog commits contain no feature PR and are handled through the approved automation identity, not a public “skip validation” label. There is no blanket exemption for human PRs, Dependabot PRs, or PRs titled “release.”
+The bot-owned changelog PR uses `product:none` and `change:chore` and runs the same required checks as other PRs. Its verified automation identity, same-repository reserved branch, and generated-only diff exclude it from the ledger as well as the notes, preventing recursive PR creation. There is no blanket exemption for human PRs, Dependabot PRs, or PRs titled “release.”
 
 ## 3. Generate tracked changelogs on merge to master
 
@@ -94,24 +94,30 @@ Generated changelog commits contain no feature PR and are handled through the ap
 
 `.github/workflows/update-changelogs.yml` runs with `push` to `master` and a manual reconciliation trigger for recovery. A push-triggered reconciler queries newly reachable merged PRs instead of assuming every push is a single merge. Closing a PR without merging it must not create an entry. [S10]
 
-Use a trusted automation identity to commit generated updates **directly to `master`**. This is the approved choice for immediate tracked-file updates, not a bot-owned preparation PR. Restrict its writable files to:
+The writer uses `GITHUB_TOKEN` to create/update **one open PR** from the reserved branch `automation/update-changelogs` to `master`. Normal feature merges and successful release-history finalization are combined into this same PR, even when several events arrive before it merges. It writes only:
 
 - `RELEASE_NOTES.md`;
 - `src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md`;
-- the machine-readable reconciliation ledger, stored in `.github/release-state.json`.
+- `.github/release-state.json`.
 
-This requires explicit repository/org setup for narrowly scoped branch-rule bypass and token permissions; ordinary contributors must not receive that bypass. The writer must reject any unexpected changed path before committing. Generated-only commits do not produce release-note entries. If its credential starts another push workflow, reconciliation produces no further commit when content is unchanged. Do not depend on `[skip ci]` for correctness or skip normal checks on feature merges. Token-trigger behavior must be accounted for explicitly. [S5, S12]
+Grant the writer contents write (reserved branch only), pull requests write (PR metadata/labels), and actions write (explicit check dispatch). Enable the repository/organization setting allowing GitHub Actions to create PRs. No App credentials, bot PAT, direct `master` push, automatic approval, or branch-rule bypass is used.
+
+Select the existing open PR by its fixed head/base, never create a new branch per merge. Serialize writers and refresh the reserved branch with an explicit force-with-lease only after validating its owner, generated commit marker, baseline, and allowed diff. Unexpected edits fail rather than being overwritten. Reuse frozen pending metadata from the existing branch; the approved `master` ledger wins for already recorded/corrected rows, and an unmerged branch checkpoint is never used to skip main history.
+
+Apply `product:none` and `change:chore`. The actual GitHub bot PR identity and same-repository head/base are enforced; a fork or merely matching title is not an exclusion. Validate its merged diff contains only generated files before excluding it from reconciliation. Do not create a ledger entry or checkpoint-only follow-up for the automation PR itself. Normal maintenance PRs still receive ledger audit rows.
+
+`GITHUB_TOKEN`-created PR events are not a reliable downstream trigger. The writer explicitly dispatches the two metadata validators on `master` with a validated PR number and dispatches read-only `ci.yml` on the controlled bot branch. Metadata validators fetch the current PR head and never execute its code. No validation/build check is hard-coded successful. Required reviews remain a maintainer action. [S5, S12]
 
 ### Deterministic reconciliation
 
-1. Fetch current `master`, relevant tags, successful release records, and the existing ledger.
-2. Discover unprocessed merged PRs after the ledger's `checkpointSha` (or the migration baseline for an older ledger). Validate the checkpoint against the selected source's first-parent ancestry and the recorded generated-writer commit. A manual ledger edit invalidates skipping and triggers a full baseline reconciliation. Verify generated bot commits locally before skipping their PR API calls. Handle the repository's actual merge strategies; do not use timestamps alone as inclusion boundaries.
+1. Fetch current `master`, relevant tags, successful release records, and the existing ledger. Inspect the existing owned bot branch to retain first-generated pending metadata while its PR is open.
+2. Discover unprocessed merged PRs after the ledger's `checkpointSha` (or the migration baseline for an older ledger). Validate the checkpoint against the selected source's first-parent ancestry and its verified introducing changelog PR. Verify the actual bot author/repository/branch and generated-only merged diff; cache that lookup within the scan. A manual ledger edit invalidates skipping and triggers a full baseline reconciliation. Historical direct writer commits remain locally verifiable during migration. Handle the repository's actual merge strategies; do not use timestamps alone as inclusion boundaries.
 3. Resolve and validate product/category metadata. Freeze the first processed title, category, product selection, PR number, and merge/source commit in the ledger. Later label/title edits must not silently alter already recorded notes. Corrections need an explicit reviewed operation.
 4. Render `### Unreleased` at the top of each product's changelog, preserving existing preambles and immutable released history. Deduplicate by **product + PR number**; shared changes appear once in each file.
 5. Incorporate any newly successful release snapshots as described below, removing only the entries consumed by those releases from the appropriate pending section.
-6. Advance `checkpointSha` only after the complete scan succeeds; keep it unchanged on bot-only self-runs so they do not create checkpoint-only commit loops. Older ledgers acquire it on their next successful reconciliation. Commit only changed generated files. Refresh/reconcile on a non-fast-forward push instead of overwriting newer work. Do not force-push `master`.
+6. Advance `checkpointSha` only after the complete scan succeeds; keep it unchanged when the only new commit is the changelog PR merge, preventing checkpoint-only follow-up PRs. Older ledgers acquire it on their next successful reconciliation. Commit only changed generated files to the reserved branch and update its existing PR. A no-op leaves the branch unchanged; an obsolete open PR can be closed. Refresh/reconcile after lease races instead of overwriting newer work. Never push or force-push `master`.
 
-Use stable category ordering from the category table and oldest-first source order within a category, with PR number as a deterministic tie-breaker. Persist `product:none` decisions in the ledger for audit/reconciliation, but do not render them in either product file.
+Use stable category ordering from the category table and oldest-first source order within a category, with PR number as a deterministic tie-breaker. Persist ordinary `product:none` decisions in the ledger for audit/reconciliation, but do not render them in either product file. Exclude the verified changelog PR itself from both ledger and visible notes.
 
 Serialize all writes to these shared generated files, including release finalization, under one writer concurrency group with `cancel-in-progress: false`. Product publication can remain separately serialized. Event coalescing must be safe because a writer reconstructs all missing work from repository/release state rather than consuming only the latest event.
 
@@ -119,7 +125,7 @@ If reconciliation encounters a reachable feature PR with invalid classification,
 
 ### Freshness gate
 
-“Always up to date” means the generated files are committed automatically after each merge and successful reconciliation. There is still an asynchronous interval after the feature merge. Maintainers must wait for that update before tagging.
+The open changelog PR stays up to date after merges and reconciliation; tracked files on `master` update only after its normal review/checks and merge. Multiple feature merges refresh one PR. Maintainers must merge that PR before tagging and repeat if additional source changes arrive.
 
 The release pipeline independently validates that the tagged commit's ledger accounts for every merged PR reachable since the migration baseline and that its rendered pending sections match those records. If a tag races the generator, fail before publication; do not silently pull newer `master` into the tagged build.
 
@@ -146,9 +152,9 @@ Freeze the included PR IDs and their recorded metadata from the tagged ledger, e
 
 Generate a selected-product file with a version/date section in the release workspace, and extract that exact section for GitHub/NuGet release notes. Store the snapshot, generated file, and version/date as release artifacts so retries and finalization reuse identical content. The date is set once in UTC when the release attempt is first prepared. Ordinary category-only changes with `product:none` never enter the snapshot.
 
-After successful publication, commit the versioned section and release-state update back to current `master` through the shared reconciler. Preserve every newer unreleased PR and the other product's pending entries. Use the stored released snapshot, not a fresh query of mutable PR metadata. If two products release together, reconcile both successful snapshots without overwriting either update.
+After successful publication, add the versioned section and release-state update to the existing combined changelog PR (or create the next one if the previous PR merged). A maintainer merges it to finalize tracked history on `master`. Preserve every newer unreleased PR and the other product's pending entries. Use the stored released snapshot, not a fresh query of mutable PR metadata. If two products release together, reconcile both successful snapshots without overwriting either update.
 
-**Deliberate ordering trade-off:** a release tag points to a reconciled commit with an `Unreleased` section; its release/package artifacts contain the generated versioned section. The subsequent documentation/history commit is newer than that tag. Never move the published tag to include it. Retain the snapshot so the workspace transformation is reproducible and identifiable. This keeps tagging as the release command without requiring a preparation PR or manual version-heading edits.
+**Deliberate ordering trade-off:** a release tag points to a reconciled commit with an `Unreleased` section; its release/package artifacts contain the generated versioned section. The subsequent documentation/history commit is newer than that tag. Never move the published tag to include it. Retain the snapshot so the workspace transformation is reproducible and identifiable. This keeps tagging as the release command without manual version-heading edits. The pre-tag changelog PR contains pending notes; its later history update is merged after publication.
 
 A failed documentation push after successful publication is recoverable independently: published artifacts are not rebuilt/republished. The shared writer also discovers successful release snapshots on later merge/manual runs, so a missed finalization event does not lose release history. Expose pending/failed finalization clearly to maintainers.
 
@@ -168,7 +174,7 @@ Draft recovery uses the authenticated, paginated release list, not the published
 
 NuGet and GitHub publication are not atomic. Serialize publication per product with `cancel-in-progress: false`. Reuse drafts/snapshots on retry and do not blindly treat an existing NuGet version as identical to a rebuilt artifact. Verify prior successful upload state before skipping an existing version; otherwise fail for investigation instead of masking a collision with unconditional `--skip-duplicate`.
 
-Build/test jobs use read-only contents permissions. A separate metadata-only preparation job has contents write for draft visibility and `pull-requests: read` for commit/PR classification endpoints. Privileged preparation and publication check out their scripts from the trusted default branch under `release-tools` and inspect a separate `release-source` checkout. The requested source never supplies privileged executable scripts; trusted code validates ancestry before inspecting its ledger or generating artifacts. Checkout credentials are not persisted; trusted Git fetches receive authentication only in the subprocess environment. Preparation does not build project code or make publication API writes. Restrict `contents: write`, `id-token: write`, and bot write/bypass privileges to the jobs/identities that need them. Dry runs must not obtain NuGet credentials, create/upload/publish GitHub releases, or commit/push tracked-file updates. Temporary release-workspace transformations are still generated for preview packaging.
+Build/test jobs use read-only contents permissions. A separate metadata-only preparation job has contents write for draft visibility and `pull-requests: read` for commit/PR classification endpoints. Privileged preparation and publication check out their scripts from the trusted default branch under `release-tools` and inspect a separate `release-source` checkout. The requested source never supplies privileged executable scripts; trusted code validates ancestry before inspecting its ledger or generating artifacts. Checkout credentials are not persisted; trusted Git fetches receive authentication only in the subprocess environment. Preparation does not build project code or make publication API writes. Restrict `contents: write`, `id-token: write`, and bot branch-writing privileges to the jobs/identities that need them. Dry runs must not obtain NuGet credentials, create/upload/publish GitHub releases, or commit/push tracked-file updates. Temporary release-workspace transformations are still generated for preview packaging.
 
 Bot-created tags/releases using `GITHUB_TOKEN` do not automatically launch another push/release workflow. Use explicit orchestration/dispatch or an appropriately scoped GitHub App where needed; do not depend on recursive events. [S5]
 
@@ -176,7 +182,7 @@ Bot-created tags/releases using `GITHUB_TOKEN` do not automatically launch anoth
 
 The dependency-free Node 24 modules live under `scripts/release/`. `model.mjs` owns the shared label/category/tag contract and deterministic rendering; `github.mjs` handles authenticated, paginated API access and source ancestry. The CLI scripts perform validation, reconciliation, preparation, artifact hashing, publication, and label provisioning. Tests use temporary Git repositories and a local mock API; they do not publish or modify the real repository's release state.
 
-`setup-release-labels.yml` provisions the approved labels on manual dispatch. Configure `PR product labels` and `PR change category` as required head-SHA checks and configure `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY` (or a scoped `RELEASE_BOT_TOKEN` PAT) for the direct writer. `NUGET_USER` and the existing Trusted Publishing policy must allow `release.yml` and the selected packages. A live publish requests finalization through an explicit dispatch of `update-changelogs.yml`; published snapshots can also be recovered on its next merge/manual run.
+`setup-release-labels.yml` provisions the approved labels on manual dispatch. Configure `PR product labels` and `PR change category` as required head-SHA checks and enable GitHub Actions PR creation for the built-in repository token. `NUGET_USER` and the existing Trusted Publishing policy must allow `release.yml` and the selected packages. A live publish requests finalization through an explicit dispatch of `update-changelogs.yml`; published snapshots can also be recovered on its next merge/manual run.
 
 Both a `.nupkg` and `.snupkg` are required. Package archives are validated in PowerShell before hashing. NuGet repository signing changes the transport bytes, so retry checks compare canonical unpacked content excluding `.signature.p7s`, not the uploaded ZIP's raw hash. Frozen GitHub assets still use exact SHA-512 transport hashes. Publication stores a `nuget-publication.json` receipt after both uploads succeed; only releases with a matching receipt are eligible for tracked history.
 
@@ -187,7 +193,7 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 1. Provision the approved labels and document them in `RELEASE.md`.
 2. Add and test both PR validation pipelines; require their check names on `master` and configure merge-queue handling if applicable.
 3. The seeded ledger uses the collection cutoff `46f2af04b6d5dc4797f6069c31610c7101de3b47`, core **1.20.2**, and metadata **1.2.0**. Both versions were confirmed present in the NuGet index on 5 November 2026. Existing release notes are retained as immutable archives. This is a prospective PR-classification cutover: audit any metadata changes between its legacy release and the collection cutoff, and seed explicitly reviewed pending entries if needed. Do not rewrite old tags or republish old versions.
-4. Add the merge reconciler, ledger, shared writer lock, freshness validation, and narrowly scoped automation permission. Test direct generated-file updates without granting general branch bypass.
+4. Add the merge reconciler, ledger, shared writer lock, freshness validation, and narrowly scoped automation permission. Test several master merges before approval: they must update one PR without any direct master push or bypass.
 5. Replace the old release-event workflow with validated tag releases, scoped build versions, selected-product packing, release snapshots, publication, and tracked-file finalization.
 6. Update CI/local pack scripts to stop treating the first numbered changelog heading as a release version. Define a separate development build version policy. Ordinary CI/local builds use `0.0.0-dev`; local pack accepts explicit product-scoped version overrides and is side-effect-free with respect to release state.
 7. Exercise previews for both products, shared changes, maintenance-only PRs, prereleases, race conditions, and interrupted finalization before enabling publication.
@@ -206,10 +212,10 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 
 - Each merged product PR appears once in the correct `Unreleased` section(s).
 - `product:none` produces no visible entry; shared PRs appear in both files.
-- Reconciliation commits generated files to `master`, preserves released history, and is a no-op on retry.
+- Reconciliation updates one bot PR, preserves released history, and does not make a new commit for identical content. Merging that PR does not create another PR for itself.
 - Concurrent merge/finalization runs lose neither pending notes nor successful release records.
 - A tag created before its notes are reconciled fails the freshness gate.
-- A current checkpoint/self-push makes no commit-to-PR API requests; a new unclassified commit remains detectable.
+- Checkpoint verification uses a bounded lookup for its introducing bot PR, not a growing scan of processed features. A new unclassified commit remains detectable.
 - Invalid ancestry or a manually advanced checkpoint cannot hide source history.
 
 **Release:**
@@ -217,7 +223,7 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 - Each product tag publishes only its package, with consistent tag/package/assembly/title/artifact versions.
 - Two tags at one commit produce independent releases and histories.
 - Notes use the selected product's recorded PRs and previous successful release.
-- Release finalization writes the correct versioned section while retaining later pending entries and the other product's notes.
+- Release finalization updates the same changelog PR with the correct versioned section, retaining later pending entries and the other product's notes.
 - Publication success followed by documentation failure is recoverable without moving tags or republishing packages.
 - Obsolete unfinished drafts are rejected in both preparation and publish-job-only retries; completed matching releases remain recoverable.
 - Drafts on subsequent release-list pages are recovered without rebuilding frozen artifacts.

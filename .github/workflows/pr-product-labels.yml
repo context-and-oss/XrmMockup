@@ -4,6 +4,12 @@ on:
   pull_request_target:
     branches: [master]
     types: [opened, reopened, synchronize, labeled, unlabeled, edited, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to validate using trusted metadata-only code
+        required: true
+        type: string
   merge_group:
     types: [checks_requested]
 
@@ -13,7 +19,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: pr-products-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  group: pr-products-${{ github.event.pull_request.number || inputs.pr_number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 jobs:

@@ -12,6 +12,13 @@ export const categories = [
   { label: 'change:breaking', prefix: 'Breaking' },
   { label: 'change:chore', prefix: 'Chore' },
 ];
+export const changelogBranch = 'automation/update-changelogs';
+export const changelogPrMarker = '<!-- xrmmockup-changelog-pr:v1 -->';
+export function isChangelogPr(pr) {
+  return pr.user?.login === 'github-actions[bot]' && pr.head?.ref === changelogBranch &&
+    typeof pr.base?.repo?.full_name === 'string' && pr.head?.repo?.full_name === pr.base.repo.full_name;
+}
+
 export const statePath = '.github/release-state.json';
 export const generatedPaths = [statePath, ...Object.values(products).map(p => p.changelog)];
 export const snapshotName = 'release-snapshot.json';
@@ -25,6 +32,7 @@ function labelsOf(pr) {
 export function classifyProducts(pr) {
   const labels = labelsOf(pr);
   const selected = Object.keys(products).filter(p => labels.has(products[p].label));
+  if (isChangelogPr(pr) && (!labels.has('product:none') || selected.length)) throw new Error('The changelog automation PR must use product:none exclusively.');
   if (labels.has('product:none')) {
     if (selected.length) throw new Error('product:none must not be combined with product:core or product:metadata.');
     return [];
@@ -43,6 +51,7 @@ export function classifyCategory(pr) {
   const inferred = match && categories.find(c => c.prefix.toLowerCase() === match[1].toLowerCase());
   if (selected[0] && inferred && selected[0] !== inferred) throw new Error('The category label conflicts with the PR title prefix.');
   const category = selected[0] ?? inferred;
+  if (isChangelogPr(pr) && category?.prefix !== 'Chore') throw new Error('The changelog automation PR must use the Chore category.');
   if (!category) throw new Error('Add a change category label or start the title with Add:, Fix:, Change:, Breaking:, or Chore:.');
   return { category: category.prefix, description: match ? match[2].trim() : title };
 }
