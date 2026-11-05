@@ -109,7 +109,7 @@ jobs:
           name: prepared-${{ needs.prepare.outputs.tag }}
           path: .release/
       - name: Materialize release notes and runner-local scoped build inputs
-        run: node scripts/release/materialize-release.mjs
+        run: node scripts/release/workspace.mjs materialize
       - name: Set up .NET
         if: needs.prepare.outputs.reuse != 'true'
         uses: actions/setup-dotnet@v6
@@ -142,7 +142,7 @@ jobs:
         shell: pwsh
         run: '& ./scripts/release/validate-packages.ps1'
       - name: Freeze/verify artifact hashes
-        run: node scripts/release/package-manifest.mjs
+        run: node scripts/release/workspace.mjs manifest
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ needs.prepare.outputs.tag }}
@@ -184,31 +184,28 @@ jobs:
         with:
           name: release-${{ needs.build.outputs.tag }}
           path: release-source/.release/
-      - name: Create/reuse draft and attach frozen artifacts
+      - name: Stage release artifacts and check prior publication
+        id: stage
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ../release-tools/scripts/release/publish-release.mjs draft
-      - name: Check prior NuGet publication
-        id: probe
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node ../release-tools/scripts/release/publish-release.mjs probe
+        run: node ../release-tools/scripts/release/publish-release.mjs stage
       - name: Verify an existing NuGet version against frozen package content
-        if: steps.probe.outputs.package_exists == 'true'
+        if: steps.stage.outputs.package_exists == 'true'
         shell: pwsh
         run: '& ../release-tools/scripts/release/validate-packages.ps1 -Existing'
       - name: Log in to NuGet just before publishing
-        if: steps.probe.outputs.publication_complete != 'true'
+        if: steps.stage.outputs.publication_complete != 'true'
         id: nuget-login
         uses: nuget/login@v1
         with:
           user: ${{ secrets.NUGET_USER }}
       - name: Publish the selected package and symbols
-        if: steps.probe.outputs.publication_complete != 'true'
+        id: nuget-push
+        if: steps.stage.outputs.publication_complete != 'true'
         shell: pwsh
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-          PACKAGE_EXISTS: ${{ steps.probe.outputs.package_exists }}
+          PACKAGE_EXISTS: ${{ steps.stage.outputs.package_exists }}
         run: |
           $ErrorActionPreference = 'Stop'
           $package = @(Get-ChildItem '.release/packages/*.nupkg' -File)
@@ -221,15 +218,9 @@ jobs:
           # Do not blindly mask symbol collisions: retries use a recorded successful publication.
           dotnet nuget push ($symbols[0].FullName) --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Record successful package and symbol publication
+          "published=true" >> $env:GITHUB_OUTPUT
+      - name: Finalize release and request changelog history update
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ../release-tools/scripts/release/publish-release.mjs record
-      - name: Publish GitHub release after successful NuGet publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node ../release-tools/scripts/release/publish-release.mjs complete
-      - name: Request tracked changelog history finalization
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node ../release-tools/scripts/release/publish-release.mjs notify
+          NUGET_PUBLISHED: ${{ steps.nuget-push.outputs.published }}
+        run: node ../release-tools/scripts/release/publish-release.mjs finalize

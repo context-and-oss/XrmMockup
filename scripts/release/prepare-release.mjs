@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { materialize } from './workspace.mjs';
 import { GitHub, git, fetchHistory, ancestor, assertPublicationCurrent, output, summary, readState, discoverPrs, reconcileReleases } from './github.mjs';
-import { products, parseTag, parseVersion, validateState, makeSnapshot, applyRelease, renderChangelog, notesFor, snapshotName, releaseMarker } from './model.mjs';
+import { products, parseTag, parseVersion, validateState, makeSnapshot, applyRelease, renderChangelog, validateSourceSnapshot, snapshotName, releaseMarker } from './model.mjs';
 
 const api = new GitHub();
 const manual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
@@ -33,9 +33,8 @@ if (existing) {
   if (!existing.body?.includes(releaseMarker)) throw new Error('An unmanaged GitHub release already exists for this tag.');
   snapshot = await api.snapshot(existing);
   if (snapshot) {
-    if (snapshot.sourceSha !== sourceSha || snapshot.baselineSha !== state.baselineSha || snapshot.tag !== tag || !snapshot.packages.length ||
-        notesFor(state.entries.filter(e => snapshot.entryIds.includes(e.number)), product) !== snapshot.notes ||
-        typeof snapshot.generatedChangelog !== 'string') throw new Error('Existing frozen release does not match tagged source/ledger.');
+    validateSourceSnapshot(snapshot, state, sourceSha, api.repository);
+    if (snapshot.tag !== tag || !snapshot.packages.length || typeof snapshot.generatedChangelog !== 'string') throw new Error('Existing frozen release is incomplete.');
     await assertPublicationCurrent(api, state, snapshot);
     const assets = await api.list(`/releases/${existing.id}/assets`);
     for (const pkg of snapshot.packages) {

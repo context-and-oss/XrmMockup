@@ -170,6 +170,16 @@ export function validateSnapshot(snapshot, repository) {
   if (snapshot.packages.length && (!snapshot.packages.some(p => p.name.endsWith('.nupkg')) || !snapshot.packages.some(p => p.name.endsWith('.snupkg')))) throw new Error('Release manifest must contain the package and symbol package.');
   return snapshot;
 }
+// One shared source/ledger check for preparation and publication.
+export function validateSourceSnapshot(snapshot, state, sourceSha, repository) {
+  validateSnapshot(snapshot, repository);
+  if (snapshot.sourceSha !== sourceSha || snapshot.baselineSha !== state.baselineSha ||
+      snapshot.entryIds.some(id => !state.entries.some(entry => entry.number === id && entry.products.includes(snapshot.product))) ||
+      notesFor(state.entries.filter(entry => snapshot.entryIds.includes(entry.number)), snapshot.product) !== snapshot.notes) {
+    throw new Error('Frozen release does not match the selected source/ledger.');
+  }
+  return snapshot;
+}
 export function applyRelease(state, snapshot) {
   validateSnapshot(snapshot);
   if (snapshot.baselineSha !== state.baselineSha) throw new Error('Release baseline mismatch.');

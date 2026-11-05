@@ -6,41 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Explicit stdio prevents execFileSync from echoing expected failures into CI logs.
-// Failed commands still throw with status/stdout/stderr for assertions and diagnostics.
-const runCaptured = (command, args, options = {}) => execFileSync(command, args, {
-  ...options, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-});
-
-// These regression tests do not require PowerShell, so capture/fail-fast behavior is
-// exercised locally as well as on the hosted runners that run the package fixtures.
-test('expected child failures are captured without printing raw exceptions', () => {
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
-    import assert from 'node:assert/strict';
-    import { execFileSync } from 'node:child_process';
-    const runCaptured = ${runCaptured.toString()};
-    assert.throws(() => runCaptured(process.execPath, ['-e',
-      'process.stderr.write("expected validation error"); process.exit(1);']), error => {
-      assert.equal(error.status, 1);
-      assert.match(error.stderr, /expected validation error/);
-      return true;
-    });
-  `], { encoding: 'utf8' });
-  assert.equal(child.status, 0, child.stderr);
-  assert.equal(child.stderr, '', 'Expected negative tests must not leak exception logs');
-});
-
-test('unexpected captured child failures still fail the invoking process', () => {
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
-    import { execFileSync } from 'node:child_process';
-    const runCaptured = ${runCaptured.toString()};
-    runCaptured(process.execPath, ['-e',
-      'process.stderr.write("unexpected validation error"); process.exit(7);']);
-  `], { encoding: 'utf8' });
-  assert.notEqual(child.status, 0);
-  assert.match(child.stderr, /unexpected validation error/);
-});
-
 const probe = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()']);
 const validator = fileURLToPath(new URL('validate-packages.ps1', import.meta.url));
 test('PowerShell package validation checks IDs, symbols, core assets, and signed retry content', { skip: probe.error?.code === 'ENOENT' }, async t => {
@@ -74,7 +39,8 @@ foreach ($extension in @('nupkg', 'snupkg')) {
     } finally { $archive.Dispose() }
 }
 `);
-  const run = (path, ...args) => runCaptured('pwsh', ['-NoProfile', '-File', path, ...args], { cwd: root });
+  // Capture intentional negative-case output; unexpected failures still throw.
+  const run = (path, ...args) => execFileSync('pwsh', ['-NoProfile', '-File', path, ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
   const snapshot = { product: 'core', version: '1.20.3', packages: [] };
   const snapshotPath = join(root, '.release/release-snapshot.json');
   writeFileSync(snapshotPath, JSON.stringify(snapshot));

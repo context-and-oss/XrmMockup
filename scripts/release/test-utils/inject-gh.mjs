@@ -9,3 +9,8 @@ childProcess.execFile = (command, args, ...options) => command === 'gh'
   ? original(process.execPath, [mock, ...args], ...options)
   : original(command, args, ...options);
 syncBuiltinESMExports();
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (url, options) => String(url).startsWith('https://api.nuget.org/')
+  ? originalFetch(process.env.TEST_GH_API_URL + '/nuget/' + String(url).split('/').at(-1), options)
+  : originalFetch(url, options);

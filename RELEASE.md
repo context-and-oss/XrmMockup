@@ -108,7 +108,7 @@ git tag -a metadata-v1.2.1 <reconciled-commit-sha> -m "MetadataGenerator 1.2.1"
 git push origin metadata-v1.2.1
 ```
 
-6. Monitor the selected product's release workflow. It builds/tests the solution but packs/publishes only that product, using the tag's version.
+6. Monitor the selected product's release workflow. It builds/tests the solution, stages the frozen draft, publishes only that product to NuGet, then finalizes GitHub and requests the changelog history PR.
 7. Confirm the NuGet publication and finalized GitHub release/assets. Review and merge the changelog PR containing the versioned history update afterward.
 
 Releasing both products requires two tags and produces two GitHub releases. There is no need to edit either changelog's version, manually create a GitHub release, or copy a release description.

@@ -180,7 +180,9 @@ Bot-created tags/releases using `GITHUB_TOKEN` do not automatically launch anoth
 
 ### Implemented scripts and recovery details
 
-The dependency-free Node 24 modules live under `scripts/release/`. `model.mjs` owns the shared label/category/tag contract and deterministic rendering; `github.mjs` delegates GitHub operations to the installed CLI and checks source ancestry. `gh-cli.mjs` executes `gh` without a shell, keeps authentication in environment variables, and sends bodies over stdin. Native `gh pr`, `gh release`, `gh label`, and `gh workflow run` commands handle common operations; `gh api` handles metadata/check-run endpoints and performs pagination. Binary release assets go through temporary files and `gh release upload` without clobbering existing assets. Git history refreshes use `gh auth git-credential` without persisting a write token in the requested source checkout. The CLI scripts perform validation, reconciliation, preparation, artifact hashing, publication, and label provisioning. Tests use temporary Git repositories and a local mock API through a test-only CLI double; an additional test exercises the installed CLI against a local TLS endpoint. they do not publish or modify the real repository's release state.
+Publication has two operations: `publish-release.mjs stage` validates the source/snapshot, stages immutable draft assets and checks existing NuGet publication; `finalize` records successful package/symbol upload, publishes GitHub and requests the changelog PR update. The workflow calls finalization only after the NuGet step reports `published=true`, or a verified prior receipt exists. Stale-snapshot guards run at both boundaries. `workspace.mjs materialize` creates runner-local build inputs; `workspace.mjs manifest` records/verifies packaged artifacts.
+
+The dependency-free Node 24 modules live under `scripts/release/`. `model.mjs` owns the shared label/category/tag contract and deterministic rendering; `github.mjs` delegates GitHub operations to the installed CLI and checks source ancestry. `gh-cli.mjs` executes `gh` without a shell, keeps authentication in environment variables, and sends bodies over stdin. Native `gh pr`, `gh release`, `gh label`, and `gh workflow run` commands handle common operations; `gh api` handles metadata/check-run endpoints and performs pagination. Binary release assets go through temporary files and `gh release upload` without clobbering existing assets. Git history refreshes use `gh auth git-credential` without persisting a write token in the requested source checkout. The CLI scripts perform validation, reconciliation, preparation, artifact hashing, publication, and label provisioning. Functional scenarios use temporary Git repositories and a local API through a test-only CLI double. they do not publish or modify the real repository's release state.
 
 `setup-release-labels.yml` provisions the approved labels on manual dispatch. Configure `PR product labels` and `PR change category` as required head-SHA checks and enable GitHub Actions PR creation for the built-in repository token. `NUGET_USER` and the existing Trusted Publishing policy must allow `release.yml` and the selected packages. A live publish requests finalization through an explicit dispatch of `update-changelogs.yml`; published snapshots can also be recovered on its next merge/manual run.
 
@@ -230,6 +232,11 @@ If symbol upload succeeds but writing that receipt fails, a retry deliberately f
 - An unmerged source containing modified preparation code is rejected without executing that code.
 - Invalid/unapproved tags and dry runs have no publication side effects; dry runs need no NuGet identity.
 - Legacy core generator assets and full solution test coverage remain intact.
+
+
+### Test scope
+
+Tests cover behavior: valid/invalid PR classification, independent product notes, aggregation into one PR, exclusion of its own merge, freshness and dry runs, immutable assets, stale-draft rejection and successful recovery. Package tests validate ID/version, required core assets, and repository-signature-aware comparisons. A small deployment-contract test protects trusted-script execution and read-only build/dry-run boundaries. Workflow formatting, exact CLI argument sequences, Node runtime/library behavior and TLS/CLI internals are not mirrored as tests; schema validation and the external tools cover those concerns.
 
 ## Online sources
 
