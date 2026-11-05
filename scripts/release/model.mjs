@@ -65,7 +65,7 @@ export function parseVersion(version) {
   }
   // .NET/NuGet version components must fit Int32.
   if (match.slice(1, 4).some(x => BigInt(x) > 2147483647n)) throw new Error('Version components exceed NuGet limits.');
-  return { numbers: match.slice(1, 4).map(BigInt), prerelease: match[4]?.split('.') ?? [] };
+  return { numbers: match.slice(1, 4).map(BigInt), prerelease: match[4]?.toLowerCase().split('.') ?? [] };
 }
 export function compareVersions(a, b) {
   const x = parseVersion(a), y = parseVersion(b);

@@ -58,7 +58,7 @@ The initial notes collection cutoff is `46f2af04b6d5dc4797f6069c31610c7101de3b47
 Use semantic versions such as `1.20.3` or `1.3.0-rc.1`. No combined-version tags are used for new releases.
 
 1. Review and merge the changelog PR; confirm source CI is green.
-2. Choose a version newer than the previous successful release of that product.
+2. Choose a version newer than the previous successful release of that product. Changing prerelease letter casing does not create a new NuGet version.
 3. Optionally run **Release** manually with product, version, source ref, and `dry_run: true`. This builds a preview without NuGet login, publication, or repository writes.
 4. Fetch current refs, choose the exact reviewed source, and create/push an annotated tag:
 

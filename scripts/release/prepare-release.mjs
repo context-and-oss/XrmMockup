@@ -14,7 +14,7 @@ if (!dryRun && git('rev-parse', `refs/tags/${release.tag}^{commit}`) !== release
 const releases = await api.list('/releases');
 const previous = productReleases(releases, release.product)[0];
 if (compareVersions(release.version, previous ? parseTag(previous.tag_name).version : baselineVersions[release.product]) <= 0) throw new Error('Choose a version newer than the last successful product release.');
-const entries = await collectChanges(api, release.sourceSha, releases);
+const entries = await collectChanges(api, release.sourceSha, releases, release.product);
 const config = products[release.product], original = readFileSync(config.changelog, 'utf8').replace(/\r\n/g, '\n');
 if (renderChangelog(original, entries, release.product, productReleases(releases, release.product)) !== original) throw new Error('Merge the changelog PR covering this source before tagging.');
 const notes = pendingNotes(original);
@@ -27,6 +27,6 @@ writeFileSync('.release/notes.md', section + '\n');
 const escape = text => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
 const noteProperty = release.product === 'core' ? 'CoreReleaseNotesPath' : 'MetadataReleaseNotesPath';
 writeFileSync('.release/version.props', `<Project><PropertyGroup><${config.versionProperty}>${release.version}</${config.versionProperty}><${noteProperty}>${escape(resolve('.release/notes.md'))}</${noteProperty}></PropertyGroup></Project>\n`);
-writeFileSync(config.changelog, original.replace('### Unreleased\n' + notes, section));
+writeFileSync(config.changelog, original.replace('### Unreleased\n' + notes, () => section));
 for (const [key, value] of Object.entries({ product: release.product, tag: release.tag, source_sha: release.sourceSha, project: config.project, dry_run: dryRun })) output(key, value);
 summary(`Prepared ${release.tag} at ${release.sourceSha}${dryRun ? ' (preview only)' : ''}.`);

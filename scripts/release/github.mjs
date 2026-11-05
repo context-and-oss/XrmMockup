@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { runGh, ghEnvironment } from './gh-cli.mjs';
-import { classify, products, historyBaseline, parseTag, compareVersions } from './model.mjs';
+import { classifyProducts, classifyCategory, products, historyBaseline, parseTag, compareVersions } from './model.mjs';
 
 export function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }).replace(/\r\n/g, '\n').trim();
@@ -101,21 +101,22 @@ export function productReleases(releases, product) {
   return releases.filter(release => !release.draft && release.tag_name.startsWith(product + '-v'))
     .sort((a, b) => compareVersions(parseTag(b.tag_name).version, parseTag(a.tag_name).version));
 }
-export async function collectChanges(api, sourceSha, releases) {
-  const ranges = Object.fromEntries(Object.keys(products).map(product => {
-    const ref = productReleases(releases, product)[0]?.tag_name ?? historyBaseline;
+export async function collectChanges(api, sourceSha, releases, selectedProduct) {
+  const selected = selectedProduct ? [selectedProduct] : Object.keys(products);
+  const boundaries = selected.map(product => productReleases(releases, product)[0]?.tag_name ?? historyBaseline);
+  const ranges = Object.fromEntries(selected.map((product, index) => {
+    const ref = boundaries[index];
     if (!ancestor(ref, sourceSha)) throw new Error('Source predates a successful product release. Select current master.');
     return [product, new Set(git('rev-list', `${ref}..${sourceSha}`).split('\n').filter(Boolean))];
   }));
-  const oldest = git('merge-base', productReleases(releases, 'core')[0]?.tag_name ?? historyBaseline,
-    productReleases(releases, 'metadata')[0]?.tag_name ?? historyBaseline);
+  const oldest = boundaries.length === 1 ? boundaries[0] : git('merge-base', ...boundaries);
   const entries = new Map();
   for (const sha of git('rev-list', '--reverse', '--first-parent', `${oldest}..${sourceSha}`).split('\n').filter(Boolean)) {
     for (const pr of await api.list(`/commits/${sha}/pulls`)) {
       if (!pr.merged_at || !pr.merge_commit_sha || pr.base?.ref !== 'master' || entries.has(pr.number) || !ancestor(pr.merge_commit_sha, sourceSha)) continue;
-      const classification = classify(pr);
-      classification.products = classification.products.filter(product => ranges[product].has(pr.merge_commit_sha));
-      entries.set(pr.number, { number: pr.number, ...classification });
+      const pendingProducts = classifyProducts(pr).filter(product => ranges[product]?.has(pr.merge_commit_sha));
+      if (!pendingProducts.length) continue;
+      entries.set(pr.number, { number: pr.number, products: pendingProducts, ...classifyCategory(pr) });
     }
   }
   return [...entries.values()];

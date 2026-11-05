@@ -133,3 +133,69 @@ test('PR metadata checks fail invalid labels against the actual current head', a
   const check = f.requests.find(request => request.path === '/check-runs').body;
   assert.equal(check.conclusion, 'failure'); assert.equal(check.head_sha, pr.head.sha);
 });
+
+for (const product of ['core', 'metadata']) test(`${product} preparation ignores a later release boundary for the other product`, async t => {
+  const f = await fixture(t);
+  f.feature(['product:core', 'product:metadata'], 'Fix: Shared reviewed change');
+  await f.run('update-changelogs.mjs'); f.mergeNotes();
+  const earlierSource = git(f.work, 'rev-parse', 'HEAD');
+  const other = product === 'core' ? 'metadata' : 'core';
+  f.feature([products[other].label], 'Add: Later other-product change');
+  await f.run('update-changelogs.mjs'); f.mergeNotes();
+  const laterSource = git(f.work, 'rev-parse', 'HEAD');
+  const otherVersion = other === 'core' ? '1.20.3' : '1.2.1', otherTag = `${other}-v${otherVersion}`;
+  git(f.work, 'tag', otherTag); git(f.work, 'push', 'origin', '--tags');
+  f.releases.push({ id: 3, tag_name: otherTag, draft: false, body: releaseSection(otherVersion, '2026-11-05', '* Published other-product changes'), published_at: '2026-11-05T12:00:00Z' });
+  git(f.work, 'checkout', '--force', '--detach', earlierSource);
+  const version = product === 'core' ? '1.20.3' : '1.2.1';
+  const preview = { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: product, VERSION: version, DRY_RUN: 'true' };
+  f.requests.length = 0;
+  await f.run('prepare-release.mjs', [], preview);
+  const release = JSON.parse(readFileSync(join(f.work, '.release/release.json'), 'utf8'));
+  assert.equal(release.product, product); assert.equal(release.sourceSha, earlierSource);
+  assert.match(readFileSync(join(f.work, '.release/notes.md'), 'utf8'), /Shared reviewed change/);
+  assert.ok(!readFileSync(join(f.work, '.release/notes.md'), 'utf8').includes('Later other-product change'));
+  assert.ok(f.requests.every(request => request.method === 'GET'));
+
+  // Preparation must still enforce its own product's successful-release boundary.
+  const ownTag = `${product}-v${version}`; git(f.work, 'tag', ownTag, laterSource); git(f.work, 'push', 'origin', '--tags');
+  f.releases.push({ id: 4, tag_name: ownTag, draft: false, body: releaseSection(version, '2026-11-05', '* Own release'), published_at: '2026-11-05T13:00:00Z' });
+  await assert.rejects(f.run('prepare-release.mjs', [], { ...preview, VERSION: product === 'core' ? '1.20.4' : '1.2.2' }), /Source predates a successful product release/);
+});
+
+test('released-only PRs with edited invalid titles do not block pending notes, but shared pending PRs still validate', async t => {
+  const f = await fixture(t), released = f.feature(['product:core'], 'Fix: Released core repair');
+  await f.run('update-changelogs.mjs'); f.mergeNotes();
+  const tag = 'core-v1.20.3'; git(f.work, 'tag', tag); git(f.work, 'push', 'origin', '--tags');
+  f.releases.push({ id: 3, tag_name: tag, draft: false, body: releaseSection('1.20.3', '2026-11-05', '* Fix: Released core repair (#1)'), published_at: '2026-11-05T12:00:00Z' });
+  released.title = 'Edited title without a category';
+  f.feature(['product:metadata'], 'Add: Pending metadata capability');
+  await f.run('update-changelogs.mjs'); f.mergeNotes();
+  const preview = { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'metadata', VERSION: '1.2.1', DRY_RUN: 'true' };
+  await f.run('prepare-release.mjs', [], preview);
+  assert.match(readFileSync(join(f.work, '.release/notes.md'), 'utf8'), /Pending metadata capability/);
+  assert.ok(!readFileSync(join(f.work, '.release/notes.md'), 'utf8').includes('Edited title'));
+  git(f.work, 'checkout', '--', products.metadata.changelog); // Preparation changes only the temporary build workspace.
+  released.labels.push({ name: 'product:metadata' });
+  await assert.rejects(f.run('update-changelogs.mjs'), /category label|start the title/);
+  await assert.rejects(f.run('prepare-release.mjs', [], preview), /category label|start the title/);
+});
+
+test('a differently cased prerelease cannot pass progression as a new NuGet version', async t => {
+  const f = await fixture(t); f.feature(['product:core'], 'Fix: Candidate repair'); await f.run('update-changelogs.mjs'); f.mergeNotes();
+  const tag = 'core-v1.20.3-RC.1'; git(f.work, 'tag', tag); git(f.work, 'push', 'origin', '--tags');
+  f.releases.push({ id: 3, tag_name: tag, draft: false, body: releaseSection('1.20.3-RC.1', '2026-11-05', '* Fix: Candidate repair'), published_at: '2026-11-05T12:00:00Z' });
+  f.requests.length = 0;
+  await assert.rejects(f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3-rc.1', DRY_RUN: 'true' }), /newer than the last successful/);
+  assert.ok(f.requests.every(request => request.method === 'GET'));
+});
+
+test('core packaged changelog keeps dollar-sign sequences exactly as the saved release notes', async t => {
+  const f = await fixture(t); f.feature(['product:core'], "Fix: Preserve $$, $&, $` and $' in templates");
+  await f.run('update-changelogs.mjs'); f.mergeNotes();
+  await f.run('prepare-release.mjs', [], { GITHUB_EVENT_NAME: 'workflow_dispatch', PRODUCT: 'core', VERSION: '1.20.3', DRY_RUN: 'true' });
+  const notes = readFileSync(join(f.work, '.release/notes.md'), 'utf8').trim();
+  const changelog = readFileSync(join(f.work, products.core.changelog), 'utf8');
+  assert.match(notes, /Preserve \$\$/); assert.ok(notes.includes("$` and $'"));
+  assert.ok(changelog.includes(notes), 'The exact versioned notes must be embedded in the packaged changelog');
+});

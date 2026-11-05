@@ -23,7 +23,7 @@ The bot-owned changelog PR must have `product:none` and `change:chore`. Normal m
 
 1. Fetch master/tags and list published GitHub releases.
 2. Choose the latest successful same-product release as that product's notes boundary; before any new-format release, use the fixed migration cutoff `46f2af04b6d5dc4797f6069c31610c7101de3b47`.
-3. Find merged PRs in the relevant commit ranges through gh. Ignore open PRs, changes already released for that product, and `product:none` notes. Unassociated direct commits have no automatic PR note and are not special-cased.
+3. Find merged PRs in the relevant commit ranges through gh. Ignore open PRs, changes already released for that product, and `product:none` notes. Determine pending products before validating category/title, so later edits to released-only PRs do not block unrelated pending changes; shared PRs still validate for any unreleased product. Unassociated direct commits have no automatic PR note and are not special-cased.
 4. Regenerate each Unreleased section, preserving recorded versioned history. Add new published sections from GitHub release bodies once. PR metadata may update pending notes; published sections do not change.
 5. Update one open PR using the fixed head/base. Further merges refresh that PR; identical content makes no new commit. Leases protect the reserved branch, and unrelated branch-file changes fail rather than being overwritten.
 6. Apply the maintenance labels, dispatch checks/CI, and leave approval/merge to maintainers. Merging the bot PR does not add a note and therefore does not generate another PR for itself.
@@ -34,7 +34,9 @@ There is no mutable release-state file. Existing historical changelog sections r
 
 ### Read-only build
 
-The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. An unmerged source cannot replace privileged preparation code. Preview dispatch defaults to dry-run; live dispatch requires a matching existing tag.
+The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. Preparation scopes release boundaries and range ancestry to the selected product; a later release of the other product does not invalidate an earlier reviewed source. The changelog writer still collects both products on current master. An unmerged source cannot replace privileged preparation code. Preview dispatch defaults to dry-run; live dispatch requires a matching existing tag.
+
+Prerelease identifiers are compared case-insensitively to match NuGet version identity. Release sections are inserted literally, preserving dollar-sign sequences from PR titles in both saved notes and the packaged changelog.
 
 Preparation writes temporary `.release/release.json`, `.release/notes.md`, and product-scoped MSBuild inputs. This metadata is only a build artifact, not a recovery ledger. The tag determines the Version before restore/build, and only the selected product receives the release override.
 

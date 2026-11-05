@@ -44,3 +44,8 @@ test('rendering keeps published history, adds new releases once and replaces pen
   const cleared = renderChangelog(rendered, [], 'core', published);
   assert.equal(pendingNotes(cleared), '* No unreleased changes.');
 });
+test('prerelease comparison follows NuGet case-insensitive version identity', () => {
+  assert.equal(compareVersions('1.20.3-RC.1', '1.20.3-rc.1'), 0);
+  assert.equal(compareVersions('1.20.3-rc.1', '1.20.3-RC.1'), 0);
+  assert.ok(compareVersions('1.20.3-RC.2', '1.20.3-rc.1') > 0);
+});
