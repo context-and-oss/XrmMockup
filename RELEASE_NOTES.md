@@ -1,8 +1,10 @@
-### 1.20.2 - UNRELEASED
+### 1.20.2 - 5 November 2026
 * Chore: Refresh the internal `workflow` option set enums against current Dataverse, and use them in place of the hardcoded `category`/`statecode` literals in the workflow manager and metadata generator (#352)
 * Add: `SendEmailFromTemplate` request support. The e-mail is created from the template and then sent through the existing `Create` and `SendEmail` handlers, so security, plugins and status transitions behave like a normal send. Template subject/body are stored by Dataverse as XSLT stylesheets, so they are rendered against the regarding record and the sending user; plain-text templates pass through unchanged (#331)
-* Add: `SendEmailFromTemplate` request support, rendering the template's XSLT subject/body against the regarding record and the sending user (#331)
 * Change: `InstantiateTemplate` now returns the merged template content instead of an empty e-mail, and rejects a missing or mistyped record like Dataverse does (#351)
+* Fix: Filter unregistered Custom API parameters and pass tag as shared variable (#355)
+* Add: Implement QueryExpression Aggregate Column Support (#358)
+* Add: Support for all date comparitors in queries, cleanup and handling of BigInt as long (@AnyTick) (#359)
 
 ### 1.20.1 - 1 September 2026
 * Fix: Match alternate keys by value, not reference (#350)
