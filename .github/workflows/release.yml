@@ -1,120 +1,209 @@
 name: Release
 
 on:
-  release:
-    types: [released]
+  push:
+    tags:
+      - 'core-v*'
+      - 'metadata-v*'
   workflow_dispatch:
     inputs:
+      product:
+        description: Product to preview or retry
+        type: choice
+        options: [core, metadata]
+        required: true
+      version:
+        description: Semantic version without a v prefix
+        type: string
+        required: true
+      source_ref:
+        description: Reconciled source commit/ref (publishing requires the matching existing tag)
+        type: string
+        required: true
       dry_run:
-        description: 'Perform a dry run (skip actual NuGet publish)'
-        required: false
-        default: true
+        description: Build preview only; no publication or repository writes
         type: boolean
+        default: true
 
-run-name: ${{ github.event_name == 'release' && format('Release {0}', github.event.release.tag_name) || (github.event.inputs.dry_run == 'false' && 'Release (Manual)' || 'Release (Dry Run)') }}
+run-name: Release ${{ inputs.product || github.ref_name }} ${{ inputs.version }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && ' (preview)' || '' }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-product-${{ inputs.product || (startsWith(github.ref_name, 'metadata-v') && 'metadata' || 'core') }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: windows-latest
+  prepare:
+    # Metadata-only phase: draft visibility needs push access, but no project code is built here.
+    runs-on: ubuntu-latest
     permissions:
-      contents: write      # For release asset upload
-      id-token: write      # Required for OIDC token (NuGet Trusted Publishing)
+      contents: write
+    outputs:
+      product: ${{ steps.prepare.outputs.product }}
+      tag: ${{ steps.prepare.outputs.tag }}
+      source_sha: ${{ steps.prepare.outputs.source_sha }}
+      dry_run: ${{ steps.prepare.outputs.dry_run }}
+      project: ${{ steps.prepare.outputs.project }}
+      reuse: ${{ steps.prepare.outputs.reuse }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Validate source, freeze product notes, and recover draft artifacts
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node scripts/release/prepare-release.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prepared-${{ steps.prepare.outputs.tag }}
+          path: .release/
+          include-hidden-files: true
+          if-no-files-found: error
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v6
-      with:
-        dotnet-version: |
-          8.x
-          10.x
+  build:
+    needs: prepare
+    runs-on: windows-latest
+    outputs:
+      product: ${{ needs.prepare.outputs.product }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      dry_run: ${{ needs.prepare.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Test release automation
+        run: node --test scripts/release/*.test.mjs
+      - uses: actions/download-artifact@v7
+        with:
+          name: prepared-${{ needs.prepare.outputs.tag }}
+          path: .release/
+      - name: Materialize release notes and runner-local scoped build inputs
+        run: node scripts/release/materialize-release.mjs
+      - name: Set up .NET
+        if: needs.prepare.outputs.reuse != 'true'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.x
+            10.x
+      - name: Build and test solution using the selected product version
+        if: needs.prepare.outputs.reuse != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $props = (Resolve-Path '.release/version.props').Path
+          dotnet restore "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build --configuration Release --no-restore "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test --configuration Release --no-build --verbosity normal "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Pack only the selected product
+        if: needs.prepare.outputs.reuse != 'true'
+        shell: pwsh
+        env:
+          PACK_PROJECT: ${{ needs.prepare.outputs.project }}
+        run: |
+          $props = (Resolve-Path '.release/version.props').Path
+          dotnet pack $env:PACK_PROJECT --configuration Release --no-build --output .release/packages "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate package metadata, symbols, and legacy core assets
+        shell: pwsh
+        run: '& ./scripts/release/validate-packages.ps1'
+      - name: Freeze/verify artifact hashes
+        run: node scripts/release/package-manifest.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ needs.prepare.outputs.tag }}
+          path: .release/
+          include-hidden-files: true
+          if-no-files-found: error
 
-    - name: Set XrmMockup365 version from RELEASE_NOTES.md
-      shell: pwsh
-      run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./RELEASE_NOTES.md -CsprojPath ./src/XrmMockup365/XrmMockup365.csproj
-
-    - name: Set MetadataGenerator version from CHANGELOG.md
-      shell: pwsh
-      run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -PropsPath ./src/MetadataGen/Directory.Build.props
-
-    - name: Restore dependencies
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Run tests
-      run: dotnet test --configuration Release --no-build --verbosity normal
-
-    - name: Pack XrmMockup365
-      run: dotnet pack src/XrmMockup365/XrmMockup365.csproj --configuration Release --no-build --output ./nupkg
-
-    - name: Pack MetadataGenerator.Tool
-      run: dotnet pack src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj --configuration Release --no-build --output ./nupkg
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: packages
-        path: ./nupkg
-
-    - name: Add packages to release
-      if: github.event_name == 'release'
-      shell: pwsh
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        $assets = @(Get-ChildItem -Path ./nupkg -File | Where-Object { $_.Extension -in '.nupkg', '.snupkg' })
-        if ($assets.Count -eq 0) {
-          Write-Error "No NuGet packages found to upload to the release"
-          exit 1
-        }
-
-        $assetPaths = @($assets | ForEach-Object { $_.FullName })
-        gh release upload "${{ github.event.release.tag_name }}" $assetPaths --clobber
-
-    - name: Login to NuGet (OIDC)
-      id: nuget-login
-      uses: nuget/login@v1
-      with:
-        user: ${{ secrets.NUGET_USER }}
-
-    - name: Publish to NuGet
-      shell: pwsh
-      run: |
-        Write-Host "Looking for nupkg files..."
-        $nupkgFiles = Get-ChildItem -Path "./nupkg/*.nupkg" -File
-
-        if ($nupkgFiles.Count -eq 0) {
-            Write-Host "No nupkg files found in nupkg"
-            exit 1
-        }
-
-        Write-Host "Found $($nupkgFiles.Count) nupkg file(s):"
-        foreach ($file in $nupkgFiles) {
-            Write-Host "  Full path: $($file.FullName)"
-            Write-Host "  Size: $([math]::Round($file.Length / 1KB, 2)) KB"
-        }
-
-        # For automatic triggers (release events), always publish
-        # For manual triggers, only publish if dry_run is explicitly set to false
-        $isDryRun = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.dry_run }}" -ne "false"
-
-        $apiKey = "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
-
-        if ($isDryRun) {
-            Write-Host "Dry run mode - skipping NuGet publish"
-            if ($apiKey -ne "") {
-                Write-Host "- Has NuGet API key from login"
-            } else {
-                Write-Host "- WARNING: Missing NuGet API key from login"
-                exit 1
-            }
-        } else {
-            Write-Host "Publishing to NuGet..."
-            foreach ($file in $nupkgFiles) {
-                Write-Host "Publishing: $($file.FullName)"
-                dotnet nuget push "$($file.FullName)" --api-key $apiKey --source "https://api.nuget.org/v3/index.json" --skip-duplicate
-            }
-        }
+  publish:
+    needs: build
+    if: needs.build.outputs.dry_run == 'false'
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+    permissions:
+      contents: write
+      id-token: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-${{ needs.build.outputs.tag }}
+          path: .release/
+      - name: Create/reuse draft and attach frozen artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-release.mjs draft
+      - name: Check prior NuGet publication
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-release.mjs probe
+      - name: Verify an existing NuGet version against frozen package content
+        if: steps.probe.outputs.package_exists == 'true'
+        shell: pwsh
+        run: '& ./scripts/release/validate-packages.ps1 -Existing'
+      - name: Log in to NuGet just before publishing
+        if: steps.probe.outputs.publication_complete != 'true'
+        id: nuget-login
+        uses: nuget/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish the selected package and symbols
+        if: steps.probe.outputs.publication_complete != 'true'
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          PACKAGE_EXISTS: ${{ steps.probe.outputs.package_exists }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = @(Get-ChildItem '.release/packages/*.nupkg' -File)
+          $symbols = @(Get-ChildItem '.release/packages/*.snupkg' -File)
+          if ($package.Count -ne 1 -or $symbols.Count -ne 1) { throw 'Expected exactly one product package and symbol package' }
+          if ($env:PACKAGE_EXISTS -ne 'true') {
+            dotnet nuget push ($package[0].FullName) --no-symbols --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          # Do not blindly mask symbol collisions: retries use a recorded successful publication.
+          dotnet nuget push ($symbols[0].FullName) --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record successful package and symbol publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-release.mjs record
+      - name: Publish GitHub release after successful NuGet publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-release.mjs complete
+      - name: Request tracked changelog history finalization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/publish-release.mjs notify

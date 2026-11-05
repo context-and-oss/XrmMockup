@@ -4,15 +4,17 @@
     <TargetFrameworks>net462;net10.0</TargetFrameworks>
     <DebugType>portable</DebugType>
     <Title>XrmMockup365</Title>
-    <!-- Version set by CI from RELEASE_NOTES.md -->
-    <Version>1.18.0-rc.6</Version>
+    <!-- Development builds never infer a version from generated changelog headings. -->
+    <Version Condition="'$(CoreReleaseVersion)' == ''">0.0.0-dev</Version>
+    <Version Condition="'$(CoreReleaseVersion)' != ''">$(CoreReleaseVersion)</Version>
   </PropertyGroup>
   <PropertyGroup>
     <!-- Project-specific metadata (shared metadata comes from Directory.Build.props) -->
     <Description>Engine which simulates your exact Dynamics 365/CRM instance locally including all of it's logic!</Description>
     <PackageTags>dynamics-365 dynamics-crm csharp testing unit-testing mockup simulation-engine</PackageTags>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
-    <PackageReleaseNotes>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/../../RELEASE_NOTES.md'))</PackageReleaseNotes>
+    <PackageReleaseNotes>Development build. See RELEASE_NOTES.md for release history.</PackageReleaseNotes>
+    <PackageReleaseNotes Condition="'$(CoreReleaseNotesPath)' != ''">$([System.IO.File]::ReadAllText('$(CoreReleaseNotesPath)'))</PackageReleaseNotes>
     <RootNamespace>DG.Tools.XrmMockup</RootNamespace>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">

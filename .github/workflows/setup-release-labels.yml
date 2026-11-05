@@ -1,0 +1,24 @@
+name: Set up release labels
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Create or update the approved product and category labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/setup-labels.mjs

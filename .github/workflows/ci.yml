@@ -2,6 +2,8 @@ name: Check PR
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches:
       - master
@@ -10,6 +12,16 @@ permissions:
   contents: read
 
 jobs:
+  release-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Test release policy and orchestration
+        run: node --test scripts/release/*.test.mjs
+
   ci:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -25,14 +37,6 @@ jobs:
           dotnet-version: |
             8.x
             10.x
-
-      - name: Set XrmMockup365 version from RELEASE_NOTES.md
-        shell: pwsh
-        run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./RELEASE_NOTES.md -CsprojPath ./src/XrmMockup365/XrmMockup365.csproj
-
-      - name: Set MetadataGenerator version from CHANGELOG.md
-        shell: pwsh
-        run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -PropsPath ./src/MetadataGen/Directory.Build.props
 
       - name: Install dependencies
         run: dotnet restore

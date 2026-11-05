@@ -1,8 +1,9 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <!-- Version set by CI from CHANGELOG.md -->
-    <Version>0.0.0</Version>
+    <!-- Applies only to this metadata subtree, not to the core library. -->
+    <Version Condition="'$(MetadataReleaseVersion)' == ''">0.0.0-dev</Version>
+    <Version Condition="'$(MetadataReleaseVersion)' != ''">$(MetadataReleaseVersion)</Version>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

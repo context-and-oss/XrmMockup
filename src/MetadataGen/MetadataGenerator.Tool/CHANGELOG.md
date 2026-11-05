@@ -5,6 +5,11 @@ All notable changes to XrmMockup.MetadataGenerator will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<!-- BEGIN GENERATED RELEASE NOTES -->
+### Unreleased
+* No unreleased changes.
+<!-- END GENERATED RELEASE NOTES -->
+
 ### v1.2.0 - 11 September 2026
 * Add: `--credential-type` (`-t`) to override DataverseConnection's `DataverseCredentialType` setting — `browser` (the default), `devicecode` or `azcli`
 * Add: `--dataverse-url` (`-u`) to override the `DataverseUrl` setting
