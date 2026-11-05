@@ -1215,7 +1215,9 @@ namespace DG.Tools.XrmMockup.Internal
     }
 
     [DataContract()]
+#pragma warning disable CS8981 // Name matches the Dataverse logical name of the option set
     internal enum componentstate
+#pragma warning restore CS8981
     {
 
         [EnumMember()]
@@ -1288,6 +1290,15 @@ namespace DG.Tools.XrmMockup.Internal
 
         [EnumMember()]
         BusinessProcessFlow = 4,
+
+        [EnumMember()]
+        ModernFlow = 5,
+
+        [EnumMember()]
+        DesktopFlow = 6,
+
+        [EnumMember()]
+        AIFlow = 7,
     }
 
     [DataContract()]
@@ -1299,6 +1310,9 @@ namespace DG.Tools.XrmMockup.Internal
 
         [EnumMember()]
         Activated = 1,
+
+        [EnumMember()]
+        Suspended = 2,
     }
 
     [DataContract()]
@@ -1310,6 +1324,9 @@ namespace DG.Tools.XrmMockup.Internal
 
         [EnumMember()]
         Activated = 2,
+
+        [EnumMember()]
+        CompanyDLPViolation = 3,
     }
 
     [DataContract()]
