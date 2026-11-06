@@ -1,0 +1,442 @@
+using XrmMockup.PermissionAnalyzer.Core.Graph;
+using XrmMockup.PermissionAnalyzer.Core.Model;
+
+namespace XrmMockup.PermissionAnalyzer.Core.Extraction;
+
+/// <summary>
+/// The tables a value can refer to. A value can resolve partly: <c>flag ? "account" : name</c> resolves to
+/// <c>account</c> plus a reason for the parameter. An empty resolution carries no information yet, such as
+/// <c>new Entity()</c> before its <c>LogicalName</c> is set.
+/// </summary>
+/// <remarks>
+/// A value that comes from a method parameter is kept as a <see cref="TableSlot"/>, so the call graph can fill
+/// it in from the argument at each call site. Where no call site binds it, the slot's reason is reported. A value
+/// returned by a method in the solution is kept as a <see cref="ReturnedTables"/>, resolved from the method's
+/// return values in the context of the call. The plugin steps an operation fires are kept per message in
+/// <see cref="Fired"/>, with the tables they fire on, bound the same way.
+/// <para>A resolution doesn't change once made, so resolutions can be shared; <see cref="Union(TableResolution)"/>
+/// makes a new one.</para>
+/// </remarks>
+internal sealed class TableResolution
+{
+    private readonly SortedSet<string> _tables = new(StringComparer.Ordinal);
+    private readonly SortedSet<string> _reasons = new(StringComparer.Ordinal);
+    private readonly SortedSet<string> _lookupTargets = new(StringComparer.Ordinal);
+    private readonly SortedSet<TableSlot> _slots = new();
+    private readonly SortedSet<ReturnedTables> _returns = new();
+    private readonly SortedDictionary<string, TableResolution> _fired = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SortedSet<GlobalNeed> _globals = new();
+    private readonly SortedSet<string> _assumptions = new(StringComparer.Ordinal);
+    private TableResolution? _columns;
+    private PluginBypass _bypass;
+
+    public IReadOnlyCollection<string> Tables => _tables;
+
+    /// <summary>
+    /// Why part of the value couldn't be resolved, one entry per distinct cause.
+    /// </summary>
+    public IReadOnlyCollection<string> Reasons => _reasons;
+
+    /// <summary>
+    /// Tables a lookup can refer to, by the metadata, where the record it refers to can't be determined. They are
+    /// required with the basis <see cref="Model.RequirementBasis.AllLookupTargets"/>.
+    /// </summary>
+    public IReadOnlyCollection<string> LookupTargets => _lookupTargets;
+
+    /// <summary>
+    /// Parameters the value depends on, resolved per call site.
+    /// </summary>
+    public IReadOnlyCollection<TableSlot> Slots => _slots;
+
+    /// <summary>
+    /// Calls whose return value the value depends on, resolved per call context.
+    /// </summary>
+    public IReadOnlyCollection<ReturnedTables> Returns => _returns;
+
+    /// <summary>
+    /// The messages an operation fires plugin steps for, such as <c>Upsert</c>, <c>Create</c> and <c>Update</c> for an
+    /// <c>UpsertRequest</c>, each with the tables it fires on. A message with neither tables nor reasons fires on no
+    /// table; one with reasons fires on a table that isn't known.
+    /// </summary>
+    public IReadOnlyDictionary<string, TableResolution> Fired => _fired;
+
+    /// <summary>
+    /// For a message in <see cref="Fired"/>: the columns the operation sets, in <see cref="Tables"/>, with a reason
+    /// for each way more can be set, which an Update step filtered on columns runs for.
+    /// </summary>
+    public TableResolution? Columns => _columns;
+
+    /// <summary>
+    /// For a message in <see cref="Fired"/>: the plugin steps the request skips, by the bypass parameters set on it.
+    /// </summary>
+    public PluginBypass Bypass => _bypass;
+
+    /// <summary>
+    /// Privileges not tied to a table that the operation needs, such as <c>prvBulkDelete</c>, each with the message
+    /// that needs it.
+    /// </summary>
+    public IReadOnlyCollection<GlobalNeed> Globals => _globals;
+
+    /// <summary>
+    /// What the analysis assumes about the operation, such as who an email is sent as.
+    /// </summary>
+    public IReadOnlyCollection<string> Assumptions => _assumptions;
+
+    /// <summary>
+    /// Set when nothing in the value depends on the call context: no parameter and no method's return value.
+    /// </summary>
+    public bool IsBound => _slots.Count == 0 && _returns.Count == 0 && _fired.Values.All(f => f.IsBound) && (_columns?.IsBound ?? true);
+
+    public bool IsEmpty =>
+        _tables.Count == 0 && _reasons.Count == 0 && _lookupTargets.Count == 0 && _fired.Count == 0 && _globals.Count == 0 && _assumptions.Count == 0 && IsBound;
+
+    public static TableResolution Empty { get; } = new();
+
+    public static TableResolution Table(string logicalName)
+    {
+        var result = new TableResolution();
+        result._tables.Add(logicalName.ToLowerInvariant());
+        return result;
+    }
+
+    public static TableResolution Unresolved(string reason)
+    {
+        var result = new TableResolution();
+        result._reasons.Add(reason);
+        return result;
+    }
+
+    public static TableResolution LookupTarget(string logicalName)
+    {
+        var result = new TableResolution();
+        result._lookupTargets.Add(logicalName.ToLowerInvariant());
+        return result;
+    }
+
+    public static TableResolution Slot(TableSlot slot)
+    {
+        var result = new TableResolution();
+        result._slots.Add(slot);
+        return result;
+    }
+
+    public static TableResolution Returned(ReturnedTables returned)
+    {
+        var result = new TableResolution();
+        result._returns.Add(returned);
+        return result;
+    }
+
+    public static TableResolution Global(string privilege, string message)
+    {
+        var result = new TableResolution();
+        result._globals.Add(new GlobalNeed(privilege, message));
+        return result;
+    }
+
+    public static TableResolution Assumed(string assumption)
+    {
+        var result = new TableResolution();
+        result._assumptions.Add(assumption);
+        return result;
+    }
+
+    /// <summary>
+    /// <paramref name="message"/> fired on <paramref name="tables"/>, setting <paramref name="columns"/>; without
+    /// columns, those set aren't known. <paramref name="bypass"/> are the steps the request skips.
+    /// </summary>
+    public static TableResolution Fires(string message, TableResolution tables, TableResolution? columns = null, PluginBypass bypass = PluginBypass.None)
+    {
+        var fired = tables.Copy();
+        fired._columns = columns ?? Unresolved("the columns set aren't known");
+        fired._bypass = bypass;
+        var result = new TableResolution();
+        result._fired.Add(message, fired);
+        return result;
+    }
+
+    public TableResolution Union(TableResolution other) => Union([this, other]);
+
+    public static TableResolution Union(IEnumerable<TableResolution> parts)
+    {
+        // A single part with information is returned as is, so most unions make nothing new
+        TableResolution? first = null;
+        TableResolution? result = null;
+        foreach (var part in parts)
+        {
+            if (part.IsBlank) continue;
+            if (first is null)
+            {
+                first = part;
+                continue;
+            }
+            if (result is null)
+            {
+                result = first.Copy();
+            }
+            result.UnionWith(part);
+        }
+        return result ?? first ?? Empty;
+    }
+
+    // Only for a resolution being made, before anything else sees it
+    private void UnionWith(TableResolution other)
+    {
+        _tables.UnionWith(other._tables);
+        _reasons.UnionWith(other._reasons);
+        _lookupTargets.UnionWith(other._lookupTargets);
+        _slots.UnionWith(other._slots);
+        _returns.UnionWith(other._returns);
+        _globals.UnionWith(other._globals);
+        _assumptions.UnionWith(other._assumptions);
+        foreach (var fired in other._fired)
+        {
+            // A step is only known to be skipped when every request that fires the message skips it
+            if (!_fired.TryGetValue(fired.Key, out var existing))
+            {
+                _fired[fired.Key] = fired.Value;
+                continue;
+            }
+            var merged = existing.Union(fired.Value).Copy();
+            merged._bypass = existing._bypass & fired.Value._bypass;
+            _fired[fired.Key] = merged;
+        }
+        if (other._columns is { } columns) _columns = _columns is null ? columns : _columns.Union(columns);
+    }
+
+    /// <summary>
+    /// The parts that don't depend on the call context: without <see cref="Slots"/>, <see cref="Returns"/> and
+    /// <see cref="Fired"/>, which are bound per call context.
+    /// </summary>
+    public TableResolution WithoutContext()
+    {
+        var result = new TableResolution();
+        result._tables.UnionWith(_tables);
+        result._reasons.UnionWith(_reasons);
+        result._lookupTargets.UnionWith(_lookupTargets);
+        result._globals.UnionWith(_globals);
+        result._assumptions.UnionWith(_assumptions);
+        return result;
+    }
+
+    private bool IsBlank => IsEmpty && _columns is null && _bypass == PluginBypass.None;
+
+    private TableResolution Copy()
+    {
+        var result = new TableResolution();
+        result.UnionWith(this);
+        result._bypass = _bypass;
+        return result;
+    }
+
+    /// <summary>
+    /// Turns "no information" into an explicit reason, so a final result is never silently empty.
+    /// </summary>
+    public TableResolution OrUnresolved(string reason) => IsEmpty ? Unresolved(reason) : this;
+
+    /// <summary>
+    /// The value of a lookup that can refer to <paramref name="targets"/> only. With one target that is its table.
+    /// With several, what can't be resolved here becomes all of them.
+    /// </summary>
+    public TableResolution WithinTargets(IReadOnlyCollection<string> targets)
+    {
+        if (targets.Count != 1 && _reasons.Count == 0) return this;
+
+        var result = Copy();
+        result._reasons.Clear();
+        if (targets.Count == 1)
+        {
+            result._tables.Clear();
+            result._lookupTargets.Clear();
+            result._slots.Clear();
+            result._returns.Clear();
+            result._tables.Add(targets.First().ToLowerInvariant());
+        }
+        else
+        {
+            result._lookupTargets.UnionWith(targets.Select(t => t.ToLowerInvariant()));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// A stable text form, used to tell call contexts apart.
+    /// </summary>
+    public override string ToString() =>
+        string.Join("|", _tables) + "?" + string.Join("|", _reasons) + "*" + string.Join("|", _lookupTargets) + "$" + string.Join("|", _slots) + "^" + string.Join("|", _returns)
+        + "!" + string.Join("|", _fired.Select(f => $"{f.Key}=({f.Value})")) + (_columns is null ? "" : $"#({_columns})")
+        + (_bypass == PluginBypass.None ? "" : $"~{_bypass}") + "&" + string.Join("|", _globals) + "%" + string.Join("|", _assumptions);
+}
+
+/// <summary>
+/// A privilege not tied to a table, such as <c>prvBulkDelete</c>, that <see cref="Message"/> needs. The name is
+/// looked up in the privilege catalog, never derived from its spelling.
+/// </summary>
+internal sealed record GlobalNeed(string Privilege, string Message) : IComparable<GlobalNeed>
+{
+    public int CompareTo(GlobalNeed? other)
+    {
+        if (other is null) return 1;
+        var result = string.CompareOrdinal(Privilege, other.Privilege);
+        return result != 0 ? result : string.CompareOrdinal(Message, other.Message);
+    }
+
+    public override string ToString() => $"{Privilege}@{Message}";
+}
+
+/// <summary>
+/// The plugin steps a request skips, by its <c>BypassCustomPluginExecution</c> or <c>BypassBusinessLogicExecution</c>
+/// parameter.
+/// </summary>
+[Flags]
+internal enum PluginBypass
+{
+    None = 0,
+    Synchronous = 1,
+    Asynchronous = 2,
+}
+
+/// <summary>
+/// How a parameter value is read for its table, because a string can be a table name or FetchXML, and a query
+/// can count its linked tables or only its main table.
+/// </summary>
+internal enum TableShape
+{
+    Name,
+    Entity,
+    Query,
+    QueryMainTable,
+    Fetch,
+    FetchMainTable,
+    EntityReferences,
+    Records,
+
+    // An entity, or a collection of entities, read for the lookups set on it: the tables that need Append because
+    // a lookup is set on them, and the tables the lookups refer to, which need AppendTo
+    LookupHolder,
+    LookupTarget,
+
+    // An entity read for the columns set on it, which decide the Update steps filtered on columns it fires
+    Columns,
+
+    // A request, or a collection of requests, read for the tables it needs one privilege on (see RequestShapes)
+    RequestCreate,
+    RequestRead,
+    RequestWrite,
+    RequestDelete,
+    RequestAppend,
+    RequestAppendTo,
+    RequestAssign,
+    RequestShare,
+
+    /// <summary>
+    /// A request read for what can't be tied to a privilege: requests without a rule, or of unknown type, and the
+    /// plugin steps it fires.
+    /// </summary>
+    RequestOther,
+}
+
+/// <summary>
+/// The shapes a request is read as: one per privilege, plus <see cref="TableShape.RequestOther"/>.
+/// </summary>
+internal static class RequestShapes
+{
+    public static IReadOnlyList<TableShape> All { get; } =
+        [.. Enum.GetValues(typeof(Privilege)).Cast<Privilege>().Select(For), TableShape.RequestOther];
+
+    public static TableShape For(Privilege privilege) => privilege switch
+    {
+        Privilege.Create => TableShape.RequestCreate,
+        Privilege.Read => TableShape.RequestRead,
+        Privilege.Write => TableShape.RequestWrite,
+        Privilege.Delete => TableShape.RequestDelete,
+        Privilege.Append => TableShape.RequestAppend,
+        Privilege.AppendTo => TableShape.RequestAppendTo,
+        Privilege.Assign => TableShape.RequestAssign,
+        Privilege.Share => TableShape.RequestShare,
+        _ => throw new ArgumentOutOfRangeException(nameof(privilege), privilege, null),
+    };
+
+    /// <summary>
+    /// The privilege a request shape is read for; <c>null</c> for <see cref="TableShape.RequestOther"/> and the
+    /// other shapes.
+    /// </summary>
+    public static Privilege? PrivilegeOf(TableShape shape) => shape switch
+    {
+        TableShape.RequestCreate => Privilege.Create,
+        TableShape.RequestRead => Privilege.Read,
+        TableShape.RequestWrite => Privilege.Write,
+        TableShape.RequestDelete => Privilege.Delete,
+        TableShape.RequestAppend => Privilege.Append,
+        TableShape.RequestAppendTo => Privilege.AppendTo,
+        TableShape.RequestAssign => Privilege.Assign,
+        TableShape.RequestShare => Privilege.Share,
+        _ => null,
+    };
+
+    public static bool IsRequest(TableShape shape) => shape >= TableShape.RequestCreate;
+
+    /// <summary>
+    /// A reason that is reported under <see cref="TableShape.RequestOther"/> only, as it applies to no privilege.
+    /// </summary>
+    public static TableResolution Other(TableShape shape, string reason) =>
+        shape == TableShape.RequestOther ? TableResolution.Unresolved(reason) : TableResolution.Empty;
+}
+
+/// <summary>
+/// A table that depends on parameter <see cref="Ordinal"/>, on a type parameter of a generic method (see
+/// <see cref="TypeParameterOrdinal"/>) of <see cref="Method"/>, or on a type parameter of its type (see
+/// <see cref="TypeArgumentOrdinal"/>), read as <see cref="Shape"/>.
+/// <see cref="Reason"/> is reported when no call site provides the argument; an empty reason reports nothing, for
+/// a request read for one privilege, whose reason is reported once under <see cref="TableShape.RequestOther"/>.
+/// </summary>
+internal sealed record TableSlot(string Method, int Ordinal, TableShape Shape, string Reason) : IComparable<TableSlot>
+{
+    /// <summary>
+    /// The <see cref="Method"/> of the slot for the execution context's <c>PrimaryEntityName</c>, which the entry
+    /// point fills in: the table of the plugin step it runs for.
+    /// </summary>
+    public const string PrimaryEntity = "<primary entity>";
+
+    /// <summary>
+    /// The ordinal a method's type parameter is bound under. Negative, so it never clashes with a parameter: a
+    /// call binds type argument <c>i</c> as if it were argument <c>-1 - i</c>, read as <see cref="TableShape.Entity"/>.
+    /// </summary>
+    public static int TypeParameterOrdinal(int ordinal) => -1 - ordinal;
+
+    /// <summary>
+    /// The ordinal a type parameter of the method's type, or of a type it is nested in, is bound under: its
+    /// position among <see cref="Nodes.TypeParameters"/>, below the ordinals of a method's type parameters.
+    /// </summary>
+    public static int TypeArgumentOrdinal(int ordinal) => -(1 << 20) - ordinal;
+
+    public int CompareTo(TableSlot? other)
+    {
+        if (other is null) return 1;
+        var result = string.CompareOrdinal(Method, other.Method);
+        if (result == 0) result = Ordinal.CompareTo(other.Ordinal);
+        if (result == 0) result = Shape.CompareTo(other.Shape);
+        return result != 0 ? result : string.CompareOrdinal(Reason, other.Reason);
+    }
+
+    public override string ToString() => $"{Method}#{Ordinal}:{Shape}";
+}
+
+/// <summary>
+/// The tables of the value <see cref="Call"/> returns, read as <see cref="Shape"/>, such as a query built by a
+/// helper method. <see cref="Reason"/> is reported when the method isn't in the call graph or returns nothing known;
+/// an empty reason reports nothing, as for <see cref="TableSlot"/>.
+/// </summary>
+internal sealed record ReturnedTables(CallFact Call, TableShape Shape, string Reason) : IComparable<ReturnedTables>
+{
+    public int CompareTo(ReturnedTables? other)
+    {
+        if (other is null) return 1;
+        var result = Call.Source.CompareTo(other.Call.Source);
+        if (result == 0) result = string.CompareOrdinal(Call.Target, other.Call.Target);
+        if (result == 0) result = Shape.CompareTo(other.Shape);
+        return result != 0 ? result : string.CompareOrdinal(Reason, other.Reason);
+    }
+
+    public override string ToString() => $"{Call.Target}@{Call.Source}:{Shape}";
+}

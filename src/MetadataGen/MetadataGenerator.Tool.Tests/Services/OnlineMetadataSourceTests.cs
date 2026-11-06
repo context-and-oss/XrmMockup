@@ -25,6 +25,7 @@ public class OnlineMetadataSourceTests
     private readonly IOptionSetReader _optionSetReader;
     private readonly ICurrencyReader _currencyReader;
     private readonly IOrganizationReader _organizationReader;
+    private readonly IPrivilegeReader _privilegeReader;
     private readonly ILogger<OnlineMetadataSource> _logger;
 
     public OnlineMetadataSourceTests()
@@ -36,6 +37,7 @@ public class OnlineMetadataSourceTests
         _optionSetReader = Substitute.For<IOptionSetReader>();
         _currencyReader = Substitute.For<ICurrencyReader>();
         _organizationReader = Substitute.For<IOrganizationReader>();
+        _privilegeReader = Substitute.For<IPrivilegeReader>();
         _logger = Substitute.For<ILogger<OnlineMetadataSource>>();
 
         // Setup default mock returns
@@ -69,6 +71,7 @@ public class OnlineMetadataSourceTests
             _optionSetReader,
             _currencyReader,
             _organizationReader,
+            _privilegeReader,
             Options.Create(options),
             _logger);
     }
@@ -389,5 +392,17 @@ public class OnlineMetadataSourceTests
             Arg.Any<string[]>(),
             Arg.Any<string[]>(),
             Arg.Is<CancellationToken>(ct => ct == cts.Token));
+    }
+
+    [Fact]
+    public async Task GetPrivilegeCatalogAsync_ReturnsCatalogFromReader()
+    {
+        var catalog = new PrivilegeCatalog { Privileges = [], CustomApis = [] };
+        _privilegeReader.GetPrivilegeCatalogAsync(Arg.Any<CancellationToken>()).Returns(catalog);
+        var source = CreateSource(new GeneratorOptions { OutputDirectory = "/test", Solutions = [], Entities = [] });
+
+        var result = await source.GetPrivilegeCatalogAsync();
+
+        Assert.Same(catalog, result);
     }
 }

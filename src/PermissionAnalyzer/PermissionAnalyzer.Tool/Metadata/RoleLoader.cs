@@ -1,0 +1,85 @@
+using System.Runtime.Serialization;
+using DG.Tools.XrmMockup;
+using Microsoft.Crm.Sdk.Messages;
+using XrmMockup.PermissionAnalyzer.Core.Model;
+using CrmDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth;
+using PrivilegeDepth = XrmMockup.PermissionAnalyzer.Core.Model.PrivilegeDepth;
+
+namespace XrmMockup.PermissionAnalyzer.Tool.Metadata;
+
+/// <summary>
+/// Reads the security roles in <c>Metadata/SecurityRoles</c>, written by the metadata tool, the same way XrmMockup
+/// does.
+/// </summary>
+internal static class RoleLoader
+{
+    public const string SecurityRolesFolder = "SecurityRoles";
+
+    /// <summary>
+    /// Every role in the metadata folder, sorted by name. Empty when the folder has no security roles.
+    /// </summary>
+    public static IReadOnlyList<RoleDefinition> Load(string metadataDirectory)
+    {
+        var directory = Path.Combine(metadataDirectory, SecurityRolesFolder);
+        if (!Directory.Exists(directory)) return [];
+
+        var serializer = new DataContractSerializer(typeof(SecurityRole));
+        // Files in name order, so copies of a role with the same name always come in the same order
+        return Directory.GetFiles(directory, "*.xml")
+            .Order(StringComparer.Ordinal)
+            .Select(file =>
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var role = serializer.ReadObject(stream) as SecurityRole
+                    ?? throw new ToolException($"Not a security role: {file}");
+                return Convert(role);
+            })
+            .OrderBy(r => r.Name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    internal static RoleDefinition Convert(SecurityRole role)
+    {
+        var privileges = new SortedDictionary<string, IReadOnlyDictionary<Privilege, PrivilegeDepth>>(StringComparer.Ordinal);
+        foreach (var (table, rights) in role.Privileges ?? [])
+        {
+            var granted = new SortedDictionary<Privilege, PrivilegeDepth>();
+            foreach (var (right, privilege) in rights)
+            {
+                if (ToPrivilege(right) is { } mapped) granted[mapped] = ToDepth(privilege.PrivilegeDepth);
+            }
+            privileges[table] = granted;
+        }
+
+        // Metadata from before global privileges were downloaded has none, which is not the same as granting none
+        SortedDictionary<string, PrivilegeDepth>? globalPrivileges = null;
+        if (role.GlobalPrivileges is { } globals)
+        {
+            globalPrivileges = new SortedDictionary<string, PrivilegeDepth>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, privilege) in globals) globalPrivileges[name] = ToDepth(privilege.PrivilegeDepth);
+        }
+        return new RoleDefinition(role.Name, privileges, globalPrivileges);
+    }
+
+    internal static Privilege? ToPrivilege(AccessRights right) => right switch
+    {
+        AccessRights.CreateAccess => Privilege.Create,
+        AccessRights.ReadAccess => Privilege.Read,
+        AccessRights.WriteAccess => Privilege.Write,
+        AccessRights.DeleteAccess => Privilege.Delete,
+        AccessRights.AppendAccess => Privilege.Append,
+        AccessRights.AppendToAccess => Privilege.AppendTo,
+        AccessRights.AssignAccess => Privilege.Assign,
+        AccessRights.ShareAccess => Privilege.Share,
+        _ => null,
+    };
+
+    // XrmMockup treats RecordFilter like Global (Security.HasPermission), so it maps to Organization here too.
+    private static PrivilegeDepth ToDepth(CrmDepth depth) => depth switch
+    {
+        CrmDepth.Basic => PrivilegeDepth.User,
+        CrmDepth.Local => PrivilegeDepth.BusinessUnit,
+        CrmDepth.Deep => PrivilegeDepth.ParentChildBusinessUnit,
+        _ => PrivilegeDepth.Organization,
+    };
+}

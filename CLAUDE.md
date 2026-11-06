@@ -12,8 +12,8 @@ XrmMockup is a simulation engine that mocks Microsoft Dynamics 365/CRM instances
 # Build the solution (debug)
 dotnet build XrmMockup.slnx
 
-# Build for release (uses FAKE build script)
-build.cmd Build
+# Build for release
+dotnet build XrmMockup.slnx --configuration Release
 
 # Run all tests
 dotnet test
@@ -24,9 +24,11 @@ dotnet test --filter "FullyQualifiedName~TestCreate"
 # Run tests for a specific class
 dotnet test --filter "FullyQualifiedName~DG.XrmMockupTest.TestWorkflow"
 
-# Create NuGet package (uses FAKE build script)
-build.cmd NuGet
+# Create a NuGet package (CI packs XrmMockup365, MetadataGenerator.Tool and PermissionAnalyzer.Tool)
+dotnet pack src/XrmMockup365/XrmMockup365.csproj --configuration Release --output ./nupkg
 ```
+
+Releases are built by `.github/workflows/release.yml` when a GitHub release is published. Each package's version comes from the first `### vX.Y.Z` heading of its changelog (`RELEASE_NOTES.md` for XrmMockup365, `CHANGELOG.md` next to each tool), set by `scripts/Set-VersionFromChangelog.ps1`.
 
 ## Architecture
 
@@ -89,6 +91,20 @@ There are two metadata generators:
   - `MetadataGenerator.Core` - Business logic and readers for entity metadata, plugins, workflows, security roles, option sets, currencies, and organization data
   - `MetadataGenerator.Tool` - CLI entry point, packaged as a .NET tool (`xrmmockup-metadata`)
   - `MetadataGenerator.Tool.Tests` - Integration tests using XrmMockup365. To regenerate test metadata and context classes, run: `.\scripts\Regenerate-TestMetadata.ps1` (use `-ContextOnly` to only regenerate context classes). Always use early-bound entity types in tests (e.g., `new Workflow { Name = "Test" }` instead of `new Entity("workflow") { ["name"] = "Test" }`).
+
+## Shared tool code
+
+`src/ToolsCommon/` (`XrmMockup.Tools.Common`) holds code both CLI tools use, such as the short-category console log formatter. It isn't packed on its own: each tool's package ships the DLL.
+
+## Permission Analyzer
+
+`src/PermissionAnalyzer/` holds a separate .NET tool (`xrmmockup-permissions`) that statically analyzes a consumer codebase for the Dataverse table privileges it needs. Design: `docs/design/permission-analyzer.md`.
+
+- `PermissionAnalyzer.Core` (netstandard2.0, Roslyn only) - operation extraction (`Extraction/`), manifest building (`Analysis/`) and the SDK-free model
+- `PermissionAnalyzer.Tool` - CLI, `MSBuildWorkspace` loading, `appsettings.json` (`XrmMockup:Permissions`), and security role loading through the shared MetadataSkeleton
+- `PermissionAnalyzer.Tests` - compiles snippets in memory against the real SDK; `dotnet test src/PermissionAnalyzer/PermissionAnalyzer.Tests`
+
+Output must stay deterministic: use ordinal comparers, sort everything, and write `\n` line endings.
 
 Tests consume metadata files from a `Metadata/` directory. Configure metadata generation via `appsettings.json`:
 

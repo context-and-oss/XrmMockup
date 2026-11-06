@@ -17,6 +17,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\MetadataGenerator.Core\MetadataGenerator.Core.csproj" />
+    <ProjectReference Include="..\..\ToolsCommon\ToolsCommon.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />

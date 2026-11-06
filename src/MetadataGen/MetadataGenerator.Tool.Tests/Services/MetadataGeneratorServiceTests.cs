@@ -23,6 +23,7 @@ public class MetadataGeneratorServiceTests
     private readonly MetadataSkeleton _skeleton;
     private readonly List<Entity> _workflows;
     private readonly Dictionary<Guid, SecurityRole> _securityRoles;
+    private readonly PrivilegeCatalog _privilegeCatalog;
 
     public MetadataGeneratorServiceTests()
     {
@@ -47,6 +48,7 @@ public class MetadataGeneratorServiceTests
         {
             { Guid.NewGuid(), new SecurityRole { Name = "Test Role", RoleId = Guid.NewGuid(), Privileges = [] } }
         };
+        _privilegeCatalog = new PrivilegeCatalog { Privileges = [], CustomApis = [] };
 
         // Setup mocks
         _metadataSource.GetMetadataAsync(Arg.Any<CancellationToken>())
@@ -55,6 +57,8 @@ public class MetadataGeneratorServiceTests
             .Returns(_workflows);
         _metadataSource.GetSecurityRolesAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(_securityRoles);
+        _metadataSource.GetPrivilegeCatalogAsync(Arg.Any<CancellationToken>())
+            .Returns(_privilegeCatalog);
     }
 
     private MetadataGeneratorService CreateService(GeneratorOptions options)
@@ -148,6 +152,19 @@ public class MetadataGeneratorServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_SerializesPrivilegeCatalog()
+    {
+        var options = new GeneratorOptions { OutputDirectory = "/test", Solutions = [], Entities = [] };
+        var service = CreateService(options);
+
+        await service.GenerateAsync();
+
+        await _serializer.Received(1).SerializePrivilegeCatalogAsync(
+            Arg.Is<PrivilegeCatalog>(c => c == _privilegeCatalog),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task GenerateAsync_GeneratesTypeDeclarations()
     {
         var options = new GeneratorOptions { OutputDirectory = "/test", Solutions = [], Entities = [] };
@@ -173,9 +190,11 @@ public class MetadataGeneratorServiceTests
             _metadataSource.GetMetadataAsync(Arg.Any<CancellationToken>());
             _metadataSource.GetWorkflowsAsync(Arg.Any<CancellationToken>());
             _metadataSource.GetSecurityRolesAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+            _metadataSource.GetPrivilegeCatalogAsync(Arg.Any<CancellationToken>());
             _serializer.SerializeMetadataAsync(Arg.Any<MetadataSkeleton>(), Arg.Any<CancellationToken>());
             _serializer.SerializeWorkflowsAsync(Arg.Any<IEnumerable<Entity>>(), Arg.Any<CancellationToken>());
             _serializer.SerializeSecurityRolesAsync(Arg.Any<Dictionary<Guid, SecurityRole>>(), Arg.Any<CancellationToken>());
+            _serializer.SerializePrivilegeCatalogAsync(Arg.Any<PrivilegeCatalog>(), Arg.Any<CancellationToken>());
             _serializer.GenerateTypeDeclarationsAsync(Arg.Any<Dictionary<Guid, SecurityRole>>(), Arg.Any<CancellationToken>());
         });
     }
