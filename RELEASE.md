@@ -11,7 +11,9 @@ Core and metadata releases are independent. A product tag chooses the package an
 
 The separate **Release automation tests** workflow runs only for automation/workflow or packaging-configuration changes, or a manual dispatch. Do not make this path-filtered check globally required; if an old `release-automation` check was required, remove that requirement so unrelated PRs are not blocked. Product/category checks and .NET CI still run on every PR.
 
-Automation uses Node 24 and GitHub CLI (`gh`). For local use, install both and authenticate with `gh auth login` or `GH_TOKEN`; set `GITHUB_REPOSITORY` to `owner/repository`.
+Automation uses PowerShell 7, Git and GitHub CLI (`gh`); release builds also need .NET. Node is not needed. For live local operations, authenticate with `gh auth login` or `GH_TOKEN` and set `GITHUB_REPOSITORY` to `owner/repository`.
+
+Run offline functional tests with `pwsh -NoProfile -File scripts/release/Test-Release.ps1`. These use temporary local Git repositories, mocked `gh` responses and synthetic package archives; no remote access, GitHub authentication or NuGet publication is needed.
 
 ## Required PR labels
 
@@ -42,7 +44,7 @@ Prefixes are case-insensitive and require descriptive text. Multiple category la
 
 After merges to `master`, the writer regenerates pending notes from merged PRs since each product's previous **successful GitHub release**. It creates/updates **one combined PR** on `automation/update-changelogs`. Additional merges and published-release history updates refresh that same open PR.
 
-The bot PR has `product:none` and `change:chore`, so it does not appear in its own notes. It changes only `RELEASE_NOTES.md` and `src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md`. The writer explicitly dispatches its label checks and CI; maintainers review and merge it normally.
+The bot PR has `product:none` and `change:chore`, so it does not appear in its own notes. It changes only `RELEASE_NOTES.md` and `src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md`. The writer explicitly dispatches its label checks. Normal PR CI is not manually dispatched; check the bot PR for **Approve workflows to run** and approve its native CI run when requested. Verify that the required `ci` check is attached to the bot PR during initial setup. Maintainers review and merge it normally.
 
 Labels and titles are read when notes are regenerated. Correct them before merging feature PRs; a deliberate later correction can update pending notes. Published history is preserved in the files, not rewritten from current PR metadata. Do not edit the generated branch by hand.
 
@@ -61,7 +63,7 @@ Use semantic versions such as `1.20.3` or `1.3.0-rc.1`. No combined-version tags
 
 1. Review and merge the changelog PR; confirm source CI is green.
 2. Choose a version newer than the previous successful release of that product. Changing prerelease letter casing does not create a new NuGet version.
-3. Optionally run **Release** manually with product, version, source ref, and `dry_run: true`. This builds a preview without NuGet login, publication, or repository writes.
+3. Optionally run **Release** manually with a candidate `tag` (for example `core-v1.20.3`) and `source_ref`. Manual dispatch is preview-only. This builds a preview without NuGet login, publication, or repository writes.
 4. Fetch current refs, choose the exact reviewed source, and create/push an annotated tag:
 
 ```bash
@@ -93,4 +95,4 @@ If GitHub release creation or changelog PR updating fails after NuGet succeeds, 
 
 Use PRs for normal source changes. If someone bypasses protection with an emergency direct push, it has no automatic PR-derived note; document/classify the change through a follow-up PR and handle its release manually as needed.
 
-See [the release-flow specification](docs/release-flow.md) for workflow boundaries and tests.
+See [the sequence diagram and simplification options](docs/release-sequence.md), or [the release-flow specification](docs/release-flow.md) for workflow boundaries and tests.

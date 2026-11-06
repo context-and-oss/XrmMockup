@@ -1,6 +1,8 @@
 # Simplified independent release flow
 
-Updated: 5 November 2026. Implemented in the repository; complete the setup in [RELEASE.md](../RELEASE.md) before production use.
+Updated: 6 November 2026. Implemented in the repository; complete the setup in [RELEASE.md](../RELEASE.md) before production use.
+
+See [the current sequence diagram and simplification analysis](release-sequence.md). The diagram reflects the simplified PowerShell implementation.
 
 ## Contract
 
@@ -13,9 +15,9 @@ Updated: 5 November 2026. Implemented in the repository; complete the setup in [
 
 ## PR checks
 
-`pr-product-labels.yml` and `pr-change-category.yml` run on PR metadata changes targeting master and support explicit dispatch by PR number. They use trusted default-branch code, read current labels/title, and post their required checks against the actual PR head. They never build or execute PR-head code with write credentials.
+`pr-classification.yml` runs on PR metadata changes targeting master and support explicit dispatch by PR number. It fetches current PR metadata once and independently posts both existing required checks against the actual PR head, using trusted default-branch code. It never builds or executes PR-head code with write credentials.
 
-The bot-owned changelog PR must have `product:none` and `change:chore`. Normal maintenance PRs use the same classification rules. The writer explicitly dispatches both validators and read-only CI because GITHUB_TOKEN-generated events are not a reliable downstream trigger.
+The bot-owned changelog PR must have `product:none` and `change:chore`. Normal maintenance PRs use the same classification rules. The writer explicitly dispatches classification by PR number. CI uses its native pull-request event rather than workflow dispatch; maintainers must approve its run when requested and verify required-check binding during initial setup.
 
 ## Notes generation
 
@@ -26,7 +28,7 @@ The bot-owned changelog PR must have `product:none` and `change:chore`. Normal m
 3. Find merged PRs in the relevant commit ranges through gh. Ignore open PRs, changes already released for that product, and `product:none` notes. Determine pending products before validating category/title, so later edits to released-only PRs do not block unrelated pending changes; shared PRs still validate for any unreleased product. Unassociated direct commits have no automatic PR note and are not special-cased.
 4. Regenerate each Unreleased section, preserving recorded versioned history. Add new published sections from GitHub release bodies once. PR metadata may update pending notes; published sections do not change.
 5. Update one open PR using the fixed head/base. Further merges refresh that PR; identical content makes no new commit. Leases protect the reserved branch, and unrelated branch-file changes fail rather than being overwritten.
-6. Apply the maintenance labels, dispatch checks/CI, and leave approval/merge to maintainers. Merging the bot PR does not add a note and therefore does not generate another PR for itself.
+6. Apply the maintenance labels, dispatch classification, and leave approval/merge to maintainers. Merging the bot PR does not add a note and therefore does not generate another PR for itself.
 
 There is no mutable release-state file. Existing historical changelog sections remain the archive. Pending notes are derived, not a second manually maintained version source.
 
@@ -34,7 +36,7 @@ There is no mutable release-state file. Existing historical changelog sections r
 
 ### Read-only build
 
-The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. Preparation scopes release boundaries and range ancestry to the selected product; a later release of the other product does not invalidate an earlier reviewed source. The changelog writer still collects both products on current master. An unmerged source cannot replace privileged preparation code. Preview dispatch defaults to dry-run; live dispatch requires a matching existing tag.
+The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. Preparation scopes release boundaries and range ancestry to the selected product; a later release of the other product does not invalidate an earlier reviewed source. The changelog writer still collects both products on current master. An unmerged source cannot replace privileged preparation code. Manual dispatch takes a candidate tag and source ref and is always preview-only. Only a tag push enables publication.
 
 Prerelease identifiers are compared case-insensitively to match NuGet version identity. Release sections are inserted literally, preserving dollar-sign sequences from PR titles in both saved notes and the packaged changelog.
 
@@ -57,7 +59,9 @@ GitHub and NuGet are not atomic. A failure before NuGet acceptance can be restar
 
 `release-automation.yml` runs the automation suite only when `scripts/release/**`, workflow definitions, or the package project/shared build configuration changes. It also supports manual dispatch. It is path-filtered and must not be required globally. The ordinary `ci.yml` .NET job and product/category validators remain unconditional for PRs; bot changelog-only updates do not run the automation unit suite.
 
-Tests cover classification, safe note rendering/history, several merges producing one PR, bot-PR exclusion, merge/squash/rebase of that ordinary PR, exact-source preview safety, independent product releases/history, package ID/version validation and command failure propagation. Deployment-contract tests cover trusted script execution, read-only builds, dry-run gating, and one push that fails before GitHub creation. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
+Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It covers classification/check conclusions, literal notes/history, several merges producing one PR without pushing master, bot-PR exclusion, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
+
+These tests do not prove live GitHub permissions, required-check binding, runner builds or NuGet/OIDC/symbol publication. Verify those in GitHub during rollout. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
 
 ## References
 

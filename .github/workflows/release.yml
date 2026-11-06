@@ -1,35 +1,22 @@
 name: Release
-
 on:
   push:
     tags: ['core-v*', 'metadata-v*']
   workflow_dispatch:
     inputs:
-      product:
-        description: Product to preview or release
-        type: choice
-        options: [core, metadata]
-        required: true
-      version:
-        description: Semantic version without a v prefix
+      tag:
+        description: Candidate tag to preview, e.g. core-v1.20.3
         type: string
         required: true
       source_ref:
-        description: Source with merged changelog updates (publishing requires a matching tag)
+        description: Reviewed source with merged changelog updates
         type: string
-        required: true
-      dry_run:
-        description: Build only; do not publish
-        type: boolean
-        default: true
-
+        default: master
 permissions:
   contents: read
-
 concurrency:
-  group: release-product-${{ inputs.product || (startsWith(github.ref_name, 'metadata-v') && 'metadata' || 'core') }}
+  group: release-product-${{ startsWith(inputs.tag || github.ref_name, 'metadata-v') && 'metadata' || 'core' }}
   cancel-in-progress: false
-
 jobs:
   build:
     if: github.event_name != 'push' || !github.event.deleted
@@ -39,10 +26,11 @@ jobs:
       pull-requests: read
     defaults:
       run:
+        shell: pwsh
         working-directory: release-source
     outputs:
       tag: ${{ steps.prepare.outputs.tag }}
-      dry_run: ${{ steps.prepare.outputs.dry_run }}
+      publish: ${{ steps.prepare.outputs.publish }}
     steps:
       - name: Check out trusted release scripts
         uses: actions/checkout@v7
@@ -50,45 +38,37 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           path: release-tools
           persist-credentials: false
-      - name: Check out requested source
+      - name: Check out exact source
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_ref || github.ref }}
           path: release-source
           fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Resolve tag and verify changelog
+      - name: Prepare product version and notes
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
-          PRODUCT: ${{ inputs.product }}
-          VERSION: ${{ inputs.version }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: node ../release-tools/scripts/release/prepare-release.mjs
+          CANDIDATE_TAG: ${{ inputs.tag || github.ref_name }}
+          PREVIEW: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          ../release-tools/scripts/release/Prepare-Release.ps1 -Tag $env:CANDIDATE_TAG -Preview:($env:PREVIEW -eq 'true')
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.x
             10.x
-      - name: Build, test, and pack the selected product
-        shell: pwsh
+      - name: Build, test and pack the selected product
         env:
           PACK_PROJECT: ${{ steps.prepare.outputs.project }}
         run: |
           $props = (Resolve-Path '.release/version.props').Path
-          dotnet restore "-p:ReleaseBuildProps=$props"
+          dotnet build --configuration Release "-p:ReleaseBuildProps=$props"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet build --configuration Release --no-restore "-p:ReleaseBuildProps=$props"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test --configuration Release --no-build --verbosity normal "-p:ReleaseBuildProps=$props"
+          dotnet test --configuration Release --no-build "-p:ReleaseBuildProps=$props"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet pack $env:PACK_PROJECT --configuration Release --no-build --output .release/packages "-p:ReleaseBuildProps=$props"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Validate package ID and version
-        shell: pwsh
+      - name: Validate the package pair
         run: '& ../release-tools/scripts/release/validate-packages.ps1'
       - uses: actions/upload-artifact@v7
         with:
@@ -99,12 +79,15 @@ jobs:
 
   publish:
     needs: build
-    if: needs.build.outputs.dry_run == 'false'
+    if: needs.build.outputs.publish == 'true'
     runs-on: windows-latest
     permissions:
       contents: write
       id-token: write
       actions: write
+    defaults:
+      run:
+        shell: pwsh
     env:
       RELEASE_TAG: ${{ needs.build.outputs.tag }}
     steps:
@@ -113,30 +96,35 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
       - uses: actions/download-artifact@v7
         with:
           name: release-${{ needs.build.outputs.tag }}
           path: .release/
       - name: Validate package and tag
-        shell: pwsh
         run: '& ./scripts/release/validate-packages.ps1'
       - name: Log in to NuGet
         id: nuget-login
         uses: nuget/login@v1
         with:
           user: ${{ secrets.NUGET_USER }}
-      - name: Push the selected package and its symbols
-        shell: pwsh
+      - name: Push package and symbols together
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
           $package = Get-ChildItem '.release/packages/*.nupkg' -File
           dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Create GitHub release and update changelog PR
+      - name: Create GitHub release and request history update
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/publish-release.mjs
+        run: |
+          $release = Get-Content '.release/release.json' -Raw | ConvertFrom-Json
+          $config = Get-Content scripts/release/config.json -Raw | ConvertFrom-Json -AsHashtable
+          $id = $config.products[$release.product].packageId
+          $files = @(".release/packages/$id.$($release.version).nupkg", ".release/packages/$id.$($release.version).snupkg")
+          $arguments = @('release', 'create', $env:RELEASE_TAG) + $files + @('--repo', $env:GITHUB_REPOSITORY, '--verify-tag', '--title', "$id $($release.version)", '--notes-file', '.release/notes.md', "--latest=$($release.product -eq 'core' -and !$release.prerelease)")
+          if ($release.prerelease) { $arguments += '--prerelease' }
+          gh @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh workflow run update-changelogs.yml --repo $env:GITHUB_REPOSITORY --ref master
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

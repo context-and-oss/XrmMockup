@@ -23,12 +23,12 @@
     <File Path=".github/workflows/ci.yml" />
     <File Path=".github/workflows/release.yml" />
     <File Path=".github/workflows/release-automation.yml" />
-    <File Path=".github/workflows/pr-product-labels.yml" />
-    <File Path=".github/workflows/pr-change-category.yml" />
+    <File Path=".github/workflows/pr-classification.yml" />
     <File Path=".github/workflows/update-changelogs.yml" />
     <File Path=".github/workflows/setup-release-labels.yml" />
     <File Path="RELEASE.md" />
     <File Path="docs/release-flow.md" />
+    <File Path="docs/release-sequence.md" />
     <File Path="README.md" />
     <File Path="RELEASE_NOTES.md" />
     <File Path="scripts/Pack-Local.ps1" />

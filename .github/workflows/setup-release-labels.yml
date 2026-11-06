@@ -1,12 +1,9 @@
 name: Set up release labels
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
   issues: write
-
 jobs:
   labels:
     runs-on: ubuntu-latest
@@ -15,10 +12,14 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Create or update the approved product and category labels
+      - name: Provision configured labels
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release/setup-labels.mjs
+        run: |
+          $config = Get-Content scripts/release/config.json -Raw | ConvertFrom-Json -AsHashtable
+          $labels = @('product:core', 'product:metadata', 'product:none') + @($config.categories.Keys)
+          foreach ($label in $labels) {
+            gh label create $label --color 5319e7 --description 'Release classification' --force --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
