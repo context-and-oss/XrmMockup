@@ -213,3 +213,8 @@ try {
     Set-Location $old; $env:RELEASE_TAG = $oldTag
     Remove-Item $root -Recurse -Force
 }
+
+# All assertions and cleanup succeeded. GitHub's pwsh wrapper returns
+# LASTEXITCODE, so do not leak a deliberately failing validator's exit code.
+# This must stay after the tests, not in finally, so real failures still fail.
+$global:LASTEXITCODE = 0
