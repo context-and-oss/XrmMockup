@@ -22,6 +22,7 @@
   <Folder Name="/project/">
     <File Path=".github/workflows/ci.yml" />
     <File Path=".github/workflows/release.yml" />
+    <File Path=".github/workflows/release-automation.yml" />
     <File Path=".github/workflows/pr-product-labels.yml" />
     <File Path=".github/workflows/pr-change-category.yml" />
     <File Path=".github/workflows/update-changelogs.yml" />

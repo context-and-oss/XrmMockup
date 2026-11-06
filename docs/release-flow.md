@@ -55,6 +55,8 @@ GitHub and NuGet are not atomic. A failure before NuGet acceptance can be restar
 
 ## Functional tests
 
+`release-automation.yml` runs the automation suite only when `scripts/release/**`, workflow definitions, or the package project/shared build configuration changes. It also supports manual dispatch. It is path-filtered and must not be required globally. The ordinary `ci.yml` .NET job and product/category validators remain unconditional for PRs; bot changelog-only updates do not run the automation unit suite.
+
 Tests cover classification, safe note rendering/history, several merges producing one PR, bot-PR exclusion, merge/squash/rebase of that ordinary PR, exact-source preview safety, independent product releases/history, package ID/version validation and command failure propagation. Deployment-contract tests cover trusted script execution, read-only builds, dry-run gating, and one push that fails before GitHub creation. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
 
 ## References

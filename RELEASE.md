@@ -5,9 +5,11 @@ Core and metadata releases are independent. A product tag chooses the package an
 ## Repository setup
 
 1. Run **Set up release labels** from `master` to create the labels below. For the initial implementation PR, create/apply its labels manually before merging.
-2. Require **PR product labels**, **PR change category**, and the normal CI checks on `master`. Keep normal PR reviews and branch protection.
+2. Require **PR product labels**, **PR change category**, and the normal .NET **ci** check on `master`. Keep normal PR reviews and branch protection.
 3. Enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**, including the organization permission if applicable. The writer uses `GITHUB_TOKEN`; it creates PRs but does not approve or merge them. No App, PAT, or direct-master bypass is needed.
 4. Keep `NUGET_USER` and the NuGet Trusted Publishing policy configured for `release.yml` and the two packages. Restrict who can create release tags.
+
+The separate **Release automation tests** workflow runs only for automation/workflow or packaging-configuration changes, or a manual dispatch. Do not make this path-filtered check globally required; if an old `release-automation` check was required, remove that requirement so unrelated PRs are not blocked. Product/category checks and .NET CI still run on every PR.
 
 Automation uses Node 24 and GitHub CLI (`gh`). For local use, install both and authenticate with `gh auth login` or `GH_TOKEN`; set `GITHUB_REPOSITORY` to `owner/repository`.
 

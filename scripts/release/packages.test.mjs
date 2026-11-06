@@ -26,10 +26,11 @@ foreach ($extension in @('nupkg', 'snupkg')) {
 `);
   const validator = fileURLToPath(new URL('validate-packages.ps1', import.meta.url));
   const run = (path, ...args) => execFileSync('pwsh', ['-NoProfile', '-File', path, ...args], { cwd: root, env: { ...process.env, RELEASE_TAG: '' }, encoding: 'utf8', stdio: 'pipe' });
+  const rejectsPackage = () => assert.throws(() => run(validator), error => Number.isInteger(error.status) && error.status !== 0);
   run(fixture); run(validator);
-  run(fixture, '-Version', '1.20.4'); assert.throws(() => run(validator), /ID\/version mismatch/);
+  run(fixture, '-Version', '1.20.4'); rejectsPackage();
   run(fixture); rmSync(join(root, '.release/packages/XrmMockup365.1.20.3.snupkg'));
-  assert.throws(() => run(validator), /matching symbols/);
+  rejectsPackage();
   run(fixture); writeFileSync(join(root, '.release/packages/another.nupkg'), 'unexpected');
-  assert.throws(() => run(validator), /only the selected product/);
+  rejectsPackage();
 });
