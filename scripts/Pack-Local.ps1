@@ -1,20 +1,17 @@
 param(
-    [string]$Output = "./nupkg",
-    [string]$Configuration = "Release"
+    [string]$Output = './nupkg',
+    [string]$Configuration = 'Release',
+    [string]$CoreVersion = '0.0.0-dev',
+    [string]$MetadataVersion = '0.0.0-dev'
 )
 
-# Local pack script for XrmMockup packages
-# Sets versions from changelogs and creates NuGet packages locally
+# Local packaging is a preview only: no changelog writes, release state, or credentials.
+$ErrorActionPreference = 'Stop'
+$versionArgs = @("-p:CoreReleaseVersion=$CoreVersion", "-p:MetadataReleaseVersion=$MetadataVersion")
+dotnet build --configuration $Configuration @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Set XrmMockup365 version from RELEASE_NOTES.md
-./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./RELEASE_NOTES.md -CsprojPath ./src/XrmMockup365/XrmMockup365.csproj
-
-# Set MetadataGenerator version from CHANGELOG.md (shared via Directory.Build.props)
-./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -PropsPath ./src/MetadataGen/Directory.Build.props
-
-# Build
-dotnet build --configuration $Configuration
-
-# Pack specific projects (not the entire solution to avoid legacy project errors)
-dotnet pack ./src/XrmMockup365/XrmMockup365.csproj --configuration $Configuration --no-build --output $Output
-dotnet pack ./src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj --configuration $Configuration --no-build --output $Output
+dotnet pack './src/XrmMockup365/XrmMockup365.csproj' --configuration $Configuration --no-build --output $Output @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+dotnet pack './src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj' --configuration $Configuration --no-build --output $Output @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

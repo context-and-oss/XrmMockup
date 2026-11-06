@@ -1,120 +1,131 @@
 name: Release
-
 on:
-  release:
-    types: [released]
+  push:
+    tags: ['core-v*', 'metadata-v*']
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Perform a dry run (skip actual NuGet publish)'
-        required: false
-        default: true
-        type: boolean
-
-run-name: ${{ github.event_name == 'release' && format('Release {0}', github.event.release.tag_name) || (github.event.inputs.dry_run == 'false' && 'Release (Manual)' || 'Release (Dry Run)') }}
-
+      tag:
+        description: Candidate tag to preview, e.g. core-v1.20.3
+        type: string
+        required: true
+      source_ref:
+        description: Reviewed source with merged changelog updates
+        type: string
+        default: master
+permissions:
+  contents: read
+concurrency:
+  group: release-product-${{ startsWith(inputs.tag || github.ref_name, 'metadata-v') && 'metadata' || 'core' }}
+  cancel-in-progress: false
+  queue: max
 jobs:
   build:
+    if: github.event_name != 'push' || !github.event.deleted
     runs-on: windows-latest
     permissions:
-      contents: write      # For release asset upload
-      id-token: write      # Required for OIDC token (NuGet Trusted Publishing)
+      contents: read
+      pull-requests: read
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: release-source
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      publish: ${{ steps.prepare.outputs.publish }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
+      - name: Check out trusted release scripts
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: release-tools
+          persist-credentials: false
+      - name: Check out exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          path: release-source
+          fetch-depth: 0
+      - name: Prepare product version and notes
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.tag || github.ref_name }}
+          PREVIEW: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          ../release-tools/scripts/release/Prepare-Release.ps1 -Tag $env:CANDIDATE_TAG -Preview:($env:PREVIEW -eq 'true')
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.x
+            10.x
+      - name: Build, test and pack the selected product
+        env:
+          PACK_PROJECT: ${{ steps.prepare.outputs.project }}
+        run: |
+          $props = (Resolve-Path '.release/version.props').Path
+          dotnet build --configuration Release "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test --configuration Release --no-build "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet pack $env:PACK_PROJECT --configuration Release --no-build --output .release/packages "-p:ReleaseBuildProps=$props"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate the package pair
+        run: '& ../release-tools/scripts/release/validate-packages.ps1'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ steps.prepare.outputs.tag }}
+          path: release-source/.release/
+          include-hidden-files: true
+          if-no-files-found: error
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v6
-      with:
-        dotnet-version: |
-          8.x
-          10.x
-
-    - name: Set XrmMockup365 version from RELEASE_NOTES.md
-      shell: pwsh
-      run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./RELEASE_NOTES.md -CsprojPath ./src/XrmMockup365/XrmMockup365.csproj
-
-    - name: Set MetadataGenerator version from CHANGELOG.md
-      shell: pwsh
-      run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -PropsPath ./src/MetadataGen/Directory.Build.props
-
-    - name: Restore dependencies
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Run tests
-      run: dotnet test --configuration Release --no-build --verbosity normal
-
-    - name: Pack XrmMockup365
-      run: dotnet pack src/XrmMockup365/XrmMockup365.csproj --configuration Release --no-build --output ./nupkg
-
-    - name: Pack MetadataGenerator.Tool
-      run: dotnet pack src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj --configuration Release --no-build --output ./nupkg
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: packages
-        path: ./nupkg
-
-    - name: Add packages to release
-      if: github.event_name == 'release'
-      shell: pwsh
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        $assets = @(Get-ChildItem -Path ./nupkg -File | Where-Object { $_.Extension -in '.nupkg', '.snupkg' })
-        if ($assets.Count -eq 0) {
-          Write-Error "No NuGet packages found to upload to the release"
-          exit 1
-        }
-
-        $assetPaths = @($assets | ForEach-Object { $_.FullName })
-        gh release upload "${{ github.event.release.tag_name }}" $assetPaths --clobber
-
-    - name: Login to NuGet (OIDC)
-      id: nuget-login
-      uses: nuget/login@v1
-      with:
-        user: ${{ secrets.NUGET_USER }}
-
-    - name: Publish to NuGet
-      shell: pwsh
-      run: |
-        Write-Host "Looking for nupkg files..."
-        $nupkgFiles = Get-ChildItem -Path "./nupkg/*.nupkg" -File
-
-        if ($nupkgFiles.Count -eq 0) {
-            Write-Host "No nupkg files found in nupkg"
-            exit 1
-        }
-
-        Write-Host "Found $($nupkgFiles.Count) nupkg file(s):"
-        foreach ($file in $nupkgFiles) {
-            Write-Host "  Full path: $($file.FullName)"
-            Write-Host "  Size: $([math]::Round($file.Length / 1KB, 2)) KB"
-        }
-
-        # For automatic triggers (release events), always publish
-        # For manual triggers, only publish if dry_run is explicitly set to false
-        $isDryRun = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.dry_run }}" -ne "false"
-
-        $apiKey = "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
-
-        if ($isDryRun) {
-            Write-Host "Dry run mode - skipping NuGet publish"
-            if ($apiKey -ne "") {
-                Write-Host "- Has NuGet API key from login"
-            } else {
-                Write-Host "- WARNING: Missing NuGet API key from login"
-                exit 1
-            }
-        } else {
-            Write-Host "Publishing to NuGet..."
-            foreach ($file in $nupkgFiles) {
-                Write-Host "Publishing: $($file.FullName)"
-                dotnet nuget push "$($file.FullName)" --api-key $apiKey --source "https://api.nuget.org/v3/index.json" --skip-duplicate
-            }
-        }
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      actions: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-${{ needs.build.outputs.tag }}
+          path: .release/
+      - name: Validate package and tag
+        run: '& ./scripts/release/validate-packages.ps1'
+      - name: Log in to NuGet
+        id: nuget-login
+        uses: nuget/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push package and symbols together
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          $package = Get-ChildItem '.release/packages/*.nupkg' -File
+          dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source 'https://api.nuget.org/v3/index.json'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create GitHub release and request history update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = Get-Content '.release/release.json' -Raw | ConvertFrom-Json
+          $config = Get-Content scripts/release/config.json -Raw | ConvertFrom-Json -AsHashtable
+          $id = $config.products[$release.product].packageId
+          $files = @(".release/packages/$id.$($release.version).nupkg", ".release/packages/$id.$($release.version).snupkg")
+          $arguments = @('release', 'create', $env:RELEASE_TAG) + $files + @('--repo', $env:GITHUB_REPOSITORY, '--verify-tag', '--title', "$id $($release.version)", '--notes-file', '.release/notes.md', "--latest=$($release.product -eq 'core' -and !$release.prerelease)")
+          if ($release.prerelease) { $arguments += '--prerelease' }
+          gh @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh workflow run update-changelogs.yml --repo $env:GITHUB_REPOSITORY --ref master
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

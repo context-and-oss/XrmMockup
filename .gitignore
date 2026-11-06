@@ -212,3 +212,10 @@ docs/tools/FSharp.Formatting.svclog
 # Claude files
 tmpclaude-*-cwd
 .claude/*.local.json
+
+# Temporary release-build artifacts (never committed)
+.release/
+
+# Release automation source is not a .NET Release output directory.
+!/scripts/release/
+!/scripts/release/**

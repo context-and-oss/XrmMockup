@@ -1,0 +1,25 @@
+name: Update product changelogs
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+concurrency:
+  group: release-changelog-writer
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Create or update the single notes PR
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/release/Update-Changelogs.ps1

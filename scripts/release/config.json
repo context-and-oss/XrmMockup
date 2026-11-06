@@ -1,0 +1,29 @@
+{
+  "historyBaseline": "46f2af04b6d5dc4797f6069c31610c7101de3b47",
+  "changelogBranch": "automation/update-changelogs",
+  "products": {
+    "core": {
+      "packageId": "XrmMockup365",
+      "project": "src/XrmMockup365/XrmMockup365.csproj",
+      "changelog": "RELEASE_NOTES.md",
+      "versionProperty": "CoreReleaseVersion",
+      "notesProperty": "CoreReleaseNotesPath",
+      "baselineVersion": "1.20.2"
+    },
+    "metadata": {
+      "packageId": "XrmMockup.MetadataGenerator",
+      "project": "src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj",
+      "changelog": "src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md",
+      "versionProperty": "MetadataReleaseVersion",
+      "notesProperty": "MetadataReleaseNotesPath",
+      "baselineVersion": "1.2.0"
+    }
+  },
+  "categories": {
+    "change:feature": "Add",
+    "change:fix": "Fix",
+    "change:change": "Change",
+    "change:breaking": "Breaking",
+    "change:chore": "Chore"
+  }
+}
