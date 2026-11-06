@@ -7,6 +7,13 @@ function Reject([scriptblock]$Action) {
     try { & $Action | Out-Null } catch { $rejected = $true }
     Assert $rejected 'Expected an invalid operation to fail'
 }
+# Guard the workflow queue policy; actual scheduling remains GitHub's responsibility.
+$workflow = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/release.yml') -Raw
+$concurrency = [regex]::Match($workflow, '(?m)^concurrency:\r?\n(?:[ \t]+[^\r\n]*\r?\n)+').Value
+Assert ($concurrency -match '(?m)^  queue: max\s*$') 'Release requests must queue instead of replacing a pending release'
+Assert ($concurrency -match '(?m)^  cancel-in-progress: false\s*$') 'Queued releases must not cancel running publication'
+Write-Output 'PASS: release workflow retains pending requests without canceling running publication'
+
 $config = Get-ReleaseConfig
 Assert ((Compare-Version '1.20.3-RC.1' '1.20.3-rc.1') -eq 0) 'NuGet casing identity'
 Assert ((Compare-Version '1.20.3-rc.10' '1.20.3-rc.2') -gt 0) 'Numeric prerelease order'

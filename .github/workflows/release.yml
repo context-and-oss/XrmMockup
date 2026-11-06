@@ -17,6 +17,7 @@ permissions:
 concurrency:
   group: release-product-${{ startsWith(inputs.tag || github.ref_name, 'metadata-v') && 'metadata' || 'core' }}
   cancel-in-progress: false
+  queue: max
 jobs:
   build:
     if: github.event_name != 'push' || !github.event.deleted

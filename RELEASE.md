@@ -78,6 +78,8 @@ git push origin metadata-v1.2.1
 
 These versions are examples. Releasing both products means two tags and two releases.
 
+Release runs and manual previews share a separate concurrency queue for each product. One run executes at a time, and `queue: max` retains up to 100 pending runs rather than replacing a pending release when another request arrives. Requests beyond that limit are canceled. Queue order follows when runs start waiting, not necessarily tag-push order; choose and push release versions in order.
+
 The workflow checks out the exact source, builds/tests the solution, packs only the selected product, and makes **one NuGet push**. The matching `.snupkg` is packed beside the `.nupkg` and published automatically by that same command. Both files are retained as artifacts and attached to the GitHub release. Only after that push succeeds does it create the GitHub release, attach the package, and request the changelog PR's versioned history update. Review/merge that PR afterward. The published tag is not moved to include this later history commit.
 
 ## Failed release

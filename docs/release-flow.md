@@ -34,6 +34,8 @@ There is no mutable release-state file. Existing historical changelog sections r
 
 ## Release workflow
 
+Workflow-level concurrency serializes each product independently. Tag releases and manual previews share that product's group, with `cancel-in-progress: false` and `queue: max`: running requests are not canceled and up to 100 pending requests are retained. Additional requests are canceled when the queue is full. Runs are ordered by when they start waiting, not guaranteed dispatch order.
+
 ### Read-only build
 
 The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. Preparation scopes release boundaries and range ancestry to the selected product; a later release of the other product does not invalidate an earlier reviewed source. The changelog writer still collects both products on current master. An unmerged source cannot replace privileged preparation code. Manual dispatch takes a candidate tag and source ref and is always preview-only. Only a tag push enables publication.
@@ -59,9 +61,9 @@ GitHub and NuGet are not atomic. A failure before NuGet acceptance can be restar
 
 `release-automation.yml` runs the automation suite only when `scripts/release/**`, workflow definitions, or the package project/shared build configuration changes. It also supports manual dispatch. It is path-filtered and must not be required globally. The ordinary `ci.yml` .NET job and product/category validators remain unconditional for PRs; bot changelog-only updates do not run the automation unit suite.
 
-Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It covers classification/check conclusions, literal notes/history, several merges producing one PR without pushing master, bot-PR exclusion, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
+Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It checks the release workflow's queue configuration and covers classification/check conclusions, literal notes/history, several merges producing one PR without pushing master, bot-PR exclusion, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
 
-These tests do not prove live GitHub permissions, required-check binding, runner builds or NuGet/OIDC/symbol publication. Verify those in GitHub during rollout. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
+These tests do not prove live GitHub queue scheduling, permissions, required-check binding, runner builds or NuGet/OIDC/symbol publication. Verify those in GitHub during rollout. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
 
 ## References
 
