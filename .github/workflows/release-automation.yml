@@ -1,0 +1,26 @@
+name: Release automation tests
+on:
+  pull_request:
+    paths:
+      - 'scripts/release/**'
+      - '.github/workflows/**'
+      - 'Directory.Build.props'
+      - 'src/MetadataGen/Directory.Build.props'
+      - 'src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj'
+      - 'src/XrmMockup365/XrmMockup365.csproj'
+  push:
+    branches: [master]
+    paths:
+      - 'scripts/release/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test release behavior
+        shell: pwsh
+        run: ./scripts/release/Test-Release.ps1

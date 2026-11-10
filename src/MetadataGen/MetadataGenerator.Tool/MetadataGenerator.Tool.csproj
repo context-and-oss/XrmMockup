@@ -12,7 +12,8 @@
     <PackageId>XrmMockup.MetadataGenerator</PackageId>
     <!-- Project-specific metadata (shared metadata comes from Directory.Build.props) -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/CHANGELOG.md'))</PackageReleaseNotes>
+    <PackageReleaseNotes>Development build. See CHANGELOG.md for release history.</PackageReleaseNotes>
+    <PackageReleaseNotes Condition="'$(MetadataReleaseNotesPath)' != ''">$([System.IO.File]::ReadAllText('$(MetadataReleaseNotesPath)'))</PackageReleaseNotes>
     <Description>CLI tool for generating XrmMockup metadata from Dataverse</Description>
   </PropertyGroup>
   <ItemGroup>

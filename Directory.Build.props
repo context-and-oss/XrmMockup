@@ -1,4 +1,6 @@
 <Project>
+  <!-- Release inputs are product-scoped and generated before restore/build. -->
+  <Import Project="$(ReleaseBuildProps)" Condition="'$(ReleaseBuildProps)' != ''" />
   <PropertyGroup>
     <!-- Author Information (unified) -->
     <Authors>Context&amp;</Authors>
