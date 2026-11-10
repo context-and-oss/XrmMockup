@@ -37,13 +37,16 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('release-test-' + [guid]::NewGuid(
 $old = $PWD
 $oldRepository = $env:GITHUB_REPOSITORY
 $oldOutput = $env:GITHUB_OUTPUT
+$oldHistoryBaseline = $config.historyBaseline
 try {
     New-Item $root -ItemType Directory | Out-Null; Set-Location $root
     [void](Invoke-Git -Arguments @('init', '-b', 'master'))
     [void](Invoke-Git -Arguments @('config', 'user.name', 'maintainer'))
     [void](Invoke-Git -Arguments @('config', 'user.email', 'maintainer@example.test'))
+    [void](Invoke-Git -Arguments @('commit', '--allow-empty', '-m', 'Legacy unclassified PR'))
+    $legacySha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
     '.release/' | Set-Content '.gitignore'
-    $global:TestPrs = @(); $global:TestBotPr = $null; $global:TestChecks = @(); $global:TestWrites = @()
+    $global:TestAssociatedPrs = @(); $global:TestPrs = @(); $global:TestBotPr = $null; $global:TestChecks = @(); $global:TestWrites = @()
     $global:TestReleases = foreach ($product in @('core', 'metadata')) {
         $version = $config.products[$product].baselineVersion
         $path = $config.products[$product].changelog
@@ -52,6 +55,7 @@ try {
         @{ tag_name = "$product-v$version"; draft = $false; published_at = '2026-11-06T00:00:00Z'; body = '* History' }
     }
     [void](Invoke-Git -Arguments @('add', '.')); [void](Invoke-Git -Arguments @('commit', '-m', 'Baseline'))
+    $rolloutSha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
     foreach ($release in $global:TestReleases) { [void](Invoke-Git -Arguments @('tag', $release.tag_name)) }
     $remote = "$root-remote.git"
     [void](Invoke-Git -Arguments @('init', '--bare', $remote))
@@ -66,7 +70,7 @@ try {
             if ($Arguments[0] -eq 'api') {
                 $path = [string]$Arguments[1]
                 if ($path -match '/releases(\?|$)') { foreach ($item in $global:TestReleases) { $item | ConvertTo-Json -Compress -Depth 10 }; return }
-                if ($path -match '/commits/([^/]+)/pulls') { foreach ($pr in $global:TestPrs | Where-Object { $_.merge_commit_sha -eq $Matches[1] }) { $pr | ConvertTo-Json -Compress -Depth 10 }; return }
+                if ($path -match '/commits/([^/]+)/pulls') { foreach ($pr in @($global:TestPrs + $global:TestAssociatedPrs) | Where-Object { $_.merge_commit_sha -eq $Matches[1] -or $_.associated_commit_sha -eq $Matches[1] }) { $pr | ConvertTo-Json -Compress -Depth 10 }; return }
                 if ($path.Contains('pulls?')) {
                     if ($global:TestBotPr -and $global:TestBotPr.state -eq 'open') { $global:TestBotPr | ConvertTo-Json -Compress -Depth 10 }; return
                 }
@@ -102,8 +106,33 @@ try {
         [void](Invoke-Git -Arguments @('push', 'origin', 'master'))
     }
     $scripts = $PSScriptRoot
+    # First deployment has no new-format releases. The rollout and legacy PRs
+    # are unclassified, including an old PR associated with a later commit.
+    $config.historyBaseline = $rolloutSha
+    $baselineReleases = $global:TestReleases
+    $global:TestReleases = @()
+    $global:TestAssociatedPrs = @(
+        @{ number = 901; merged_at = '2026-11-05'; merge_commit_sha = $legacySha; title = 'Legacy change'; labels = @(); base = @{ ref = 'master' } },
+        @{ number = 902; merged_at = '2026-11-06'; merge_commit_sha = $rolloutSha; title = 'Release automation rollout'; labels = @(); base = @{ ref = 'master' } }
+    )
+    Assert (@(Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' @()).Count -eq 0) 'Migration excludes unclassified rollout and historical PRs'
     Add-Feature @('product:core') 'Fix: Preserve $$ and $& in templates'
+    foreach ($pr in $global:TestAssociatedPrs) { $pr.associated_commit_sha = $global:TestPrs[0].merge_commit_sha }
+    $migration = @(Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' @())
+    Assert ($migration.Count -eq 1 -and $migration[0].number -eq 1 -and $migration[0].products.Count -eq 1 -and $migration[0].products[0] -eq 'core') 'First classified post-migration PR is collected for its product only'
+    $global:TestPrs[0].labels = @()
+    Reject { Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' @() }
+    $global:TestPrs[0].labels = @('product:core')
+    $global:TestPrs[0].title = 'Missing category after migration'
+    Reject { Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' @() }
+    $global:TestPrs[0].title = 'Fix: Preserve $$ and $& in templates'
     & "$scripts/Update-Changelogs.ps1"
+    Assert (@($global:TestWrites | Where-Object { $_ -eq 'create' }).Count -eq 1) 'First deployment creates a notes PR without product releases'
+    $config.historyBaseline = $oldHistoryBaseline
+    $global:TestReleases = $baselineReleases
+    # Released-only associated PRs must also be ignored with product tags present.
+    Assert (@(Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' $global:TestReleases).Count -eq 1) 'Released unclassified associated PRs do not block pending notes'
+    Write-Output 'PASS: migration without product tags, legacy PR exclusion and strict post-migration classification'
     Add-Feature @('product:metadata') 'Add: Tool feature'
     Add-Feature @('product:core', 'product:metadata') 'Change: Shared behavior'
     $master = Invoke-Git -Arguments @('rev-parse', 'origin/master')
@@ -171,6 +200,7 @@ try {
     Write-Output 'PASS: single PR aggregation, no master push, no recursive PR, product previews and checks'
 } finally {
     Remove-Item Function:global:gh -ErrorAction SilentlyContinue
+    $config.historyBaseline = $oldHistoryBaseline
     Set-Location $old; $env:GITHUB_REPOSITORY = $oldRepository; $env:GITHUB_OUTPUT = $oldOutput
     Remove-Item $root -Recurse -Force
     Remove-Item $remote -Recurse -Force -ErrorAction SilentlyContinue
