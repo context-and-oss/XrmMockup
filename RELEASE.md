@@ -4,7 +4,7 @@ Core and metadata releases are independent. A product tag chooses the package an
 
 ## Repository setup
 
-1. Run **Set up release labels** from `master` to create the labels below. For the initial implementation PR, create/apply its labels manually before merging.
+1. Run **Set up release labels** from `master` to create the labels below. The initial implementation PR is excluded by the migration cutoff; all subsequent PRs must be classified before merging.
 2. Require **PR product labels**, **PR change category**, and the normal .NET **ci** check on `master`. Keep normal PR reviews and branch protection.
 3. Enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**, including the organization permission if applicable. The writer uses `GITHUB_TOKEN`; it creates PRs but does not approve or merge them. No App, PAT, or direct-master bypass is needed.
 4. Keep `NUGET_USER` and the NuGet Trusted Publishing policy configured for `release.yml` and the two packages. Restrict who can create release tags.
@@ -50,7 +50,7 @@ Labels and titles are read when notes are regenerated. Correct them before mergi
 
 **Merge the changelog PR covering your source before tagging.** The release workflow rejects stale notes. If more changes merge, let the open PR refresh, or merge the next PR if the previous one already merged.
 
-The initial notes collection cutoff is `46f2af04b6d5dc4797f6069c31610c7101de3b47`; existing core `1.20.2` and metadata `1.2.0` history is retained. Audit any old metadata changes not covered by that legacy release before the first new metadata release.
+The initial notes collection cutoff is the release-automation rollout merge, PR #361 (`6e689d959b9013e2318320e9c317449d0de02c2d`, 10 November 2026). The cutoff is exclusive: the rollout PR and older PRs do not need retroactive product/category labels. Existing core `1.20.2` and metadata `1.2.0` history is retained. Audit any old metadata changes not covered by that legacy release before the first new metadata release. Missing or invalid classification on subsequent pending PRs still fails; it is not silently skipped.
 
 ## Release a product
 

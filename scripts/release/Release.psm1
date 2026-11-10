@@ -100,6 +100,9 @@ function Get-PendingChanges {
         foreach ($pr in @(Get-GhList "/repos/$Repository/commits/$sha/pulls")) {
             if (!$pr.merged_at -or !$pr.merge_commit_sha -or $pr.base.ref -ne 'master' -or $seen.ContainsKey($pr.number) -or !(Test-Ancestor $pr.merge_commit_sha $Source)) { continue }
             $seen[$pr.number] = $true
+            # Associated PRs may already be released for every selected product.
+            # Check commit membership before requiring modern classification labels.
+            if (!@($selected | Where-Object { $pr.merge_commit_sha -in $ranges[$_] }).Count) { continue }
             $pending = @(Get-PrProducts $pr | Where-Object { $ranges.ContainsKey($_) -and $pr.merge_commit_sha -in $ranges[$_] })
             if (!$pending.Count) { continue }
             $note = Get-PrNote $pr
