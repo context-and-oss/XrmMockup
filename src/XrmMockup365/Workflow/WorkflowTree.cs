@@ -38,6 +38,8 @@ namespace WorkflowExecuter
     internal class WorkflowTree
     {
         [DataMember]
+        public bool IsCalculatedField;
+        [DataMember]
         public IWorkflowNode StartActivity;
         [DataMember]
         public Dictionary<string, object> Variables;
@@ -108,6 +110,9 @@ namespace WorkflowExecuter
         // data, or trip the update-time circular-reference guard. Real workflows and rollups pass the
         // default (false) so their genuine "update record" steps still write.
         public const string SuppressWritesKey = "SuppressWrites";
+        // Classic calculated fields retain fractional Int32 intermediates until field assignment.
+        // Keep this separate from write suppression so ordinary workflow arithmetic is unaffected.
+        public const string IsCalculatedFieldKey = "IsCalculatedField";
 
         public WorkflowTree Execute(Entity primaryEntity, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace,
@@ -123,6 +128,7 @@ namespace WorkflowExecuter
             // value left over from a previous suppressWrites: true run, which would otherwise silently
             // suppress a real workflow's Update.
             Variables[SuppressWritesKey] = suppressWrites;
+            Variables[IsCalculatedFieldKey] = IsCalculatedField;
             Variables["InputEntities(\"primaryEntity\")"] = primaryEntity;
             Variables["ExecutionTime"] = DateTime.Now.Add(timeOffset);
             var transactioncurrencyid = "transactioncurrencyid";
