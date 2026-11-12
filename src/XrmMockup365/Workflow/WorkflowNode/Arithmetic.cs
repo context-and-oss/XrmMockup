@@ -99,6 +99,10 @@ namespace WorkflowExecuter
                 return;
             }
 
+            var preserveWholeNumberPrecision = TargetType == "Int32"
+                && variables.TryGetValue(WorkflowTree.IsCalculatedFieldKey, out var calculated)
+                && calculated is bool isCalculated && isCalculated;
+
             switch (TargetType)
             {
                 case "Money":
@@ -106,12 +110,13 @@ namespace WorkflowExecuter
                     dec2 = ConvertMoneyToDecimal(var2);
                     break;
                 case "Int32":
-                    dec1 = var1 == null ? 0 : (int)var1;
-                    dec2 = var2 == null ? 0 : (int)var2;
+                    dec1 = preserveWholeNumberPrecision ? ConvertNumericToDecimal(var1) : var1 == null ? 0 : (int)var1;
+                    dec2 = preserveWholeNumberPrecision ? ConvertNumericToDecimal(var2) : var2 == null ? 0 : (int)var2;
                     break;
                 case "Decimal":
-                    dec1 = var1 == null ? 0 : Convert.ToDecimal(var1);
-                    dec2 = var2 == null ? 0 : Convert.ToDecimal(var2);
+                    // The target type describes the result; operands can still be Money fields.
+                    dec1 = ConvertNumericToDecimal(var1);
+                    dec2 = ConvertNumericToDecimal(var2);
                     break;
                 default:
                     break;
@@ -152,7 +157,9 @@ namespace WorkflowExecuter
                     variables[VariableName] = new Money(result.Value);
                     break;
                 case "Int32":
-                    variables[VariableName] = (int)result.Value;
+                    // Dataverse tags calculated-field operators Int32 even when their inputs
+                    // are Money. Rounding an intermediate would change expressions like (Money / 2) * 2.
+                    variables[VariableName] = preserveWholeNumberPrecision ? (object)result.Value : (int)result.Value;
                     break;
                 case "Decimal":
                     variables[VariableName] = result.Value;
@@ -160,6 +167,11 @@ namespace WorkflowExecuter
                 default:
                     break;
             }
+        }
+
+        private static decimal ConvertNumericToDecimal(object value)
+        {
+            return value is Money money ? money.Value : Convert.ToDecimal(value);
         }
 
         private static decimal? ConvertMoneyToDecimal(object value)
