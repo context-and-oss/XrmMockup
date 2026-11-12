@@ -65,6 +65,7 @@ namespace DG.Tools.XrmMockup.Internal
                 clone[metadata.PrimaryIdAttribute] = entity.Id;
             }
             clone.EntityState = entity.EntityState;
+            clone.RowVersion = entity.RowVersion;
             clone.KeyAttributes = entity.CloneKeyAttributes();
 
             return clone.SetAttributes(entity.Attributes, metadata, cols);
