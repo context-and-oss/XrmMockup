@@ -38,7 +38,21 @@ namespace WorkflowExecuter
             }
 
             var attr = variables[VariableId];
-            if (attr is Money money)
+            if (TargetType == "Int32" && attr != null)
+            {
+                // Round only when assigning the final whole-number value, including direct
+                // Money mappings. A numeric conversion must not apply a currency exchange rate.
+                var value = attr is Money moneyValue ? moneyValue.Value : Convert.ToDecimal(attr);
+                attr = decimal.ToInt32(decimal.Round(value, 0, MidpointRounding.AwayFromZero));
+            }
+            else if (TargetType == "Money" && attr != null && !(attr is Money))
+            {
+                // Direct whole-number/decimal mappings need the SDK Money wrapper too.
+                // Preserve the numeric value; the existing Money exchange conversion below
+                // applies only to values that were already Money, not to this new wrapper.
+                attr = new Money(Convert.ToDecimal(attr));
+            }
+            else if (attr is Money money)
             {
                 var exchangeRate = variables["ExchangeRate"] as decimal?;
                 var amount = money.Value * exchangeRate.GetValueOrDefault(1.0m);
