@@ -531,6 +531,7 @@ namespace DG.Tools.XrmMockup
             {
                 toReturn = entity.CloneEntity(metadata, colsToKeep);
             }
+            toReturn.RowVersion = entity.RowVersion;
             toReturn.KeyAttributes = entity.CloneKeyAttributes();
             Utility.PopulateEntityReferenceNames(toReturn, db);
             return toReturn;

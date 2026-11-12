@@ -19,6 +19,8 @@ namespace DG.Tools.XrmMockup.Database {
         private readonly SortedDictionary<string, EntityMetadata> EntityMetadata;
         private readonly IOnlineDataService OnlineDataService;
         private int sequence;
+        // Database-wide monotonically increasing version, independent of insertion order.
+        private long rowVersion;
 
         public XrmDb(SortedDictionary<string, EntityMetadata> entityMetadata, IOnlineDataService onlineDataService) {
             this.EntityMetadata = entityMetadata;
@@ -41,6 +43,7 @@ namespace DG.Tools.XrmMockup.Database {
         {
             int nextSequence = Interlocked.Increment(ref sequence);
             var dbEntity = ToDbRow(xrmEntity,nextSequence, withReferenceChecks);
+            dbEntity.SetRowVersion(Interlocked.Increment(ref rowVersion));
             this[dbEntity.Table.TableName][dbEntity.Id] = dbEntity;
         }
 
@@ -81,7 +84,8 @@ namespace DG.Tools.XrmMockup.Database {
         public void Update(Entity xrmEntity, bool withReferenceChecks = true) {
             var currentDbRow = GetDbRow(xrmEntity);
 
-            var dbEntity = DbRow.FromEntity(xrmEntity, withReferenceChecks ? this : null);
+            var dbEntity = DbRow.FromEntity(xrmEntity, this, withReferenceChecks);
+            dbEntity.SetRowVersion(Interlocked.Increment(ref rowVersion));
             this[dbEntity.Table.TableName][dbEntity.Id] = dbEntity;
         }
 
@@ -277,7 +281,8 @@ namespace DG.Tools.XrmMockup.Database {
             var clonedTables = this.TableDict.ToDictionary(x => x.Key, x => x.Value.Clone());
             var clonedDB = new XrmDb(this.EntityMetadata, this.OnlineDataService)
             {
-                TableDict = new ConcurrentDictionary<string, DbTable>(clonedTables)
+                TableDict = new ConcurrentDictionary<string, DbTable>(clonedTables),
+                rowVersion = this.rowVersion
             };
 
             return clonedDB;
@@ -286,7 +291,8 @@ namespace DG.Tools.XrmMockup.Database {
         {
             var jsonObj = new DbDTO
             {
-                Tables = this.TableDict.ToDictionary(x => x.Key, x => x.Value.ToSerializableDTO())
+                Tables = this.TableDict.ToDictionary(x => x.Key, x => x.Value.ToSerializableDTO()),
+                RowVersion = this.rowVersion
             };
             return jsonObj;
         }
@@ -295,7 +301,9 @@ namespace DG.Tools.XrmMockup.Database {
             var clonedTables = model.Tables.ToDictionary(x => x.Key, x => DbTable.RestoreSerializableDTO(new DbTable(current.EntityMetadata[x.Key]), x.Value));
             var clonedDB = new XrmDb(current.EntityMetadata, current.OnlineDataService)
             {
-                TableDict = new ConcurrentDictionary<string, DbTable>(clonedTables)
+                TableDict = new ConcurrentDictionary<string, DbTable>(clonedTables),
+                rowVersion = Math.Max(model.RowVersion, clonedTables.Values
+                    .SelectMany(table => table).Select(row => row.RowVersion).DefaultIfEmpty().Max())
             };
 
             foreach (var table in clonedTables)

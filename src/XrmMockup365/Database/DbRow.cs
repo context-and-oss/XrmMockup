@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Metadata;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 
 namespace DG.Tools.XrmMockup.Database
@@ -18,6 +19,17 @@ namespace DG.Tools.XrmMockup.Database
         public bool IsDeleted { get; private set; } = false;
 
         public int Sequence { get; set; }
+
+        public long RowVersion { get; private set; }
+
+        internal void SetRowVersion(long version)
+        {
+            RowVersion = version;
+            if (AttributeMetadata.ContainsKey("versionnumber"))
+            {
+                this["versionnumber"] = version;
+            }
+        }
 
         private Dictionary<string, object> Columns = new Dictionary<string, object>();
         private Dictionary<string, object> Keys = new Dictionary<string, object>();
@@ -113,7 +125,8 @@ namespace DG.Tools.XrmMockup.Database
 
         public Entity ToEntity() {
             var xrmEntity = new Entity(Table.TableName) {
-                Id = Id
+                Id = Id,
+                RowVersion = RowVersion == 0 ? null : RowVersion.ToString(CultureInfo.InvariantCulture)
             };
 
             // Prune deleted references
@@ -205,7 +218,8 @@ namespace DG.Tools.XrmMockup.Database
             var clonedColumns = this.Columns.ToDictionary(x => x.Key, x => x.Value);
             var clonedDBRow = new DbRow(table, this.Id, clonedColumns)
             {
-                IsDeleted = this.IsDeleted
+                IsDeleted = this.IsDeleted,
+                RowVersion = this.RowVersion
             };
             return clonedDBRow;
         }
@@ -215,6 +229,7 @@ namespace DG.Tools.XrmMockup.Database
             {
                 Id = this.Id,
                 IsDeleted = this.IsDeleted,
+                RowVersion = this.RowVersion,
                 Columns = this.Columns.ToDictionary(x => x.Key, x => Utility.ConvertValueToSerializableDTO(x.Value))
             };
             return jsonObj;
@@ -225,7 +240,10 @@ namespace DG.Tools.XrmMockup.Database
             var clonedColumns = model.Columns.ToDictionary(x => x.Key, x => Utility.ConvertValueFromSerializableDTO(x.Value));
             var clonedDBRow = new DbRow(table, model.Id, clonedColumns)
             {
-                IsDeleted = model.IsDeleted
+                IsDeleted = model.IsDeleted,
+                // Older snapshots only stored the versionnumber column.
+                RowVersion = model.RowVersion != 0 ? model.RowVersion :
+                    (clonedColumns.TryGetValue("versionnumber", out var version) && version is long value ? value : 0)
             };
             return clonedDBRow;
         }
