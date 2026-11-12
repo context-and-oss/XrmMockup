@@ -45,6 +45,13 @@ namespace WorkflowExecuter
                 var value = attr is Money moneyValue ? moneyValue.Value : Convert.ToDecimal(attr);
                 attr = decimal.ToInt32(decimal.Round(value, 0, MidpointRounding.AwayFromZero));
             }
+            else if (TargetType == "Money" && attr != null && !(attr is Money))
+            {
+                // Direct whole-number/decimal mappings need the SDK Money wrapper too.
+                // Preserve the numeric value; the existing Money exchange conversion below
+                // applies only to values that were already Money, not to this new wrapper.
+                attr = new Money(Convert.ToDecimal(attr));
+            }
             else if (attr is Money money)
             {
                 var exchangeRate = variables["ExchangeRate"] as decimal?;
