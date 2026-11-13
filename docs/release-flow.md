@@ -1,6 +1,6 @@
 # Simplified independent release flow
 
-Updated: 6 November 2026. Implemented in the repository; complete the setup in [RELEASE.md](../RELEASE.md) before production use.
+Updated: 13 November 2026. Implemented in the repository; complete the setup in [RELEASE.md](../RELEASE.md) before production use.
 
 See [the current sequence diagram and simplification analysis](release-sequence.md). The diagram reflects the simplified PowerShell implementation.
 
@@ -15,9 +15,9 @@ See [the current sequence diagram and simplification analysis](release-sequence.
 
 ## PR checks
 
-`pr-classification.yml` runs on PR metadata changes targeting master and support explicit dispatch by PR number. It fetches current PR metadata once and independently posts both existing required checks against the actual PR head, using trusted default-branch code. It never builds or executes PR-head code with write credentials.
+`pr-classification.yml` runs on `pull_request` metadata/head changes targeting master and supports explicit dispatch by PR number on the PR head branch. It fetches current PR metadata once and validates both product and category rules in one native **PR release labels** job, with read-only contents/PR permissions and no custom check-run publishing. Missing or invalid classification fails that job. A dispatch verifies that the selected commit matches the PR head, so its native check is attached to the correct commit. PR runs check out the normal PR merge ref; review workflow/validator changes as part of normal code review. Fork runs may require maintainer approval.
 
-The bot-owned changelog PR must have `product:none` and `change:chore`. Normal maintenance PRs use the same classification rules. The writer explicitly dispatches classification by PR number. CI uses its native pull-request event rather than workflow dispatch; maintainers must approve its run when requested and verify required-check binding during initial setup.
+The bot-owned changelog PR must have `product:none` and `change:chore`. Normal maintenance PRs use the same classification rules. The writer explicitly dispatches classification by PR number on the changelog head branch. CI uses its native pull-request event rather than workflow dispatch; maintainers must approve its run when requested and verify both required checks are bound to the bot PR during initial setup.
 
 ## Notes generation
 
@@ -59,9 +59,9 @@ GitHub and NuGet are not atomic. A failure before NuGet acceptance can be restar
 
 ## Functional tests
 
-`release-automation.yml` runs the automation suite only when `scripts/release/**`, workflow definitions, or the package project/shared build configuration changes. It also supports manual dispatch. It is path-filtered and must not be required globally. The ordinary `ci.yml` .NET job and product/category validators remain unconditional for PRs; bot changelog-only updates do not run the automation unit suite.
+`release-automation.yml` runs the automation suite only when `scripts/release/**`, workflow definitions, or the package project/shared build configuration changes. It also supports manual dispatch. It is path-filtered and must not be required globally. The ordinary `ci.yml` .NET job and single **PR release labels** check remain unconditional for PRs; bot changelog-only updates do not run the automation unit suite.
 
-Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It checks the release workflow's queue configuration and covers classification/check conclusions, literal notes/history, several merges producing one PR without pushing master, bot-PR exclusion, first-deployment migration with no product releases and unclassified legacy PRs, strict post-migration classification, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
+Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It checks the release workflow's queue configuration and covers single-check classification failures and dispatch commit binding, literal notes/history, several merges producing one PR without pushing master, bot-PR exclusion, first-deployment migration with no product releases and unclassified legacy PRs, strict post-migration classification, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
 
 These tests do not prove live GitHub queue scheduling, permissions, required-check binding, runner builds or NuGet/OIDC/symbol publication. Verify those in GitHub during rollout. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
 
