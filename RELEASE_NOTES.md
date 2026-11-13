@@ -1,8 +1,11 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
+* No unreleased changes.
+<!-- END GENERATED RELEASE NOTES -->
+
+### 1.20.3 - 2026-11-13
 * Add: Support RowVersion and versionnumber (#366)
 * Fix: Handle money input for calculated decimal and whole number fields (#365)
-<!-- END GENERATED RELEASE NOTES -->
 
 ### 1.20.2 - 5 November 2026
 * Chore: Refresh the internal `workflow` option set enums against current Dataverse, and use them in place of the hardcoded `category`/`statecode` literals in the workflow manager and metadata generator (#352)
