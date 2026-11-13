@@ -40,6 +40,16 @@ Assert ($classification.Contains("github.event_name == 'workflow_dispatch' && gi
 Write-Output 'PASS: single read-only native classification workflow and metadata triggers'
 
 $config = Get-ReleaseConfig
+foreach ($product in @('core', 'metadata')) {
+    [xml]$project = Get-Content (Join-Path $PSScriptRoot "../../$($config.products[$product].project)") -Raw
+    $changelogName = Split-Path $config.products[$product].changelog -Leaf
+    $packedChangelog = @($project.SelectNodes('/Project/ItemGroup/None[@Pack="true"]') | Where-Object {
+        $path = if ($_.Include) { $_.Include } else { $_.Update }
+        (($path -replace '\\', '/') -split '/')[-1] -ceq $changelogName
+    })
+    Assert ($packedChangelog.Count -eq 1 -and $packedChangelog[0].PackagePath -in @('', '\')) 'Both products must pack their changelog at the package root'
+}
+Write-Output 'PASS: both product projects include their changelog in the NuGet package'
 Assert ((Compare-Version '1.20.3-RC.1' '1.20.3-rc.1') -eq 0) 'NuGet casing identity'
 Assert ((Compare-Version '1.20.3-rc.10' '1.20.3-rc.2') -gt 0) 'Numeric prerelease order'
 Assert ((Get-ReleaseTag 'metadata-v1.2.1').product -eq 'metadata') 'Product tag'
@@ -255,13 +265,31 @@ done
         [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
         [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
         $version = if ($product -eq 'core') { '1.20.3' } else { '1.2.1' }
+        $otherProduct = if ($product -eq 'core') { 'metadata' } else { 'core' }
+        $otherHistory = Get-Content $config.products[$otherProduct].changelog -Raw
         & "$scripts/Prepare-Release.ps1" -Tag "$product-v$version" -Preview
+        $savedNotes = (Get-Content '.release/notes.md' -Raw).TrimEnd()
+        $history = Get-Content $config.products[$product].changelog -Raw
+        Assert ($savedNotes.StartsWith("### $version - ")) 'Saved notes use the selected release version'
+        Assert ($history.Contains("$savedNotes`n")) 'Both product changelogs include the exact saved release section'
+        Assert (!$history.Contains('### Unreleased')) 'Packaged changelog must not label released changes Unreleased'
+        Assert ((Get-Content $config.products[$otherProduct].changelog -Raw) -ceq $otherHistory) 'Preparing one release leaves the other product changelog untouched'
+        [xml]$props = Get-Content '.release/version.props' -Raw
+        Assert ($props.Project.PropertyGroup.($config.products[$product].versionProperty) -ceq $version) 'Build version matches the release notes'
+        Assert ((Get-Content $props.Project.PropertyGroup.($config.products[$product].notesProperty) -Raw).TrimEnd() -ceq $savedNotes) 'Build consumes the saved release notes'
         $metadata = Get-Content '.release/release.json' -Raw | ConvertFrom-Json
         Assert ($metadata.product -eq $product) 'Independent product selection'
         if ($product -eq 'core') {
             Assert ((Get-Content '.release/notes.md' -Raw).Contains('Preserve $$')) 'Saved notes preserve dollars'
             Assert ((Get-Content $config.products.core.changelog -Raw).Contains((Get-Content '.release/notes.md' -Raw).Trim())) 'Packaged history exactly includes saved release section'
         }
+    }
+    foreach ($product in @('core', 'metadata')) {
+        [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
+        $version = if ($product -eq 'core') { '1.20.3-rc.1' } else { '1.2.1-rc.1' }
+        & "$scripts/Prepare-Release.ps1" -Tag "$product-v$version" -Preview
+        Assert ((Get-Content '.release/notes.md' -Raw).StartsWith("### $version - ")) 'Prerelease notes retain the exact candidate version'
+        Assert ((Get-Content $config.products[$product].changelog -Raw).Contains((Get-Content '.release/notes.md' -Raw).TrimEnd())) 'Prerelease changelog matches the saved notes'
     }
     # A newer release of the other product must not invalidate an older core source.
     [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
@@ -494,13 +522,24 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('package-test-' + [guid]::NewGuid(
 $old = $PWD; $oldTag = $env:RELEASE_TAG
 $pwsh = (Get-Process -Id $PID).Path
 $validator = Join-Path $PSScriptRoot 'validate-packages.ps1'
-function Write-TestPackage([string]$Path, [string]$Id, [string]$Version) {
+function Write-TestPackage(
+    [string]$Path, [string]$Id, [string]$Version,
+    [string]$Notes = $script:TestPackageNotes,
+    [string]$Changelog = $script:TestPackageChangelog,
+    [string]$ChangelogName = $script:TestPackageChangelogName,
+    [switch]$OmitChangelog
+) {
     if (Test-Path $Path) { Remove-Item $Path }
     $zip = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
     try {
         $writer = [IO.StreamWriter]::new($zip.CreateEntry("$Id.nuspec").Open())
-        try { $writer.Write("<package><metadata><id>$Id</id><version>$Version</version></metadata></package>") }
+        $escapedNotes = [Security.SecurityElement]::Escape($Notes)
+        try { $writer.Write("<package><metadata><id>$Id</id><version>$Version</version><releaseNotes>$escapedNotes</releaseNotes></metadata></package>") }
         finally { $writer.Dispose() }
+        if ($Path.EndsWith('.nupkg') -and !$OmitChangelog) {
+            $writer = [IO.StreamWriter]::new($zip.CreateEntry($ChangelogName).Open())
+            try { $writer.Write($Changelog) } finally { $writer.Dispose() }
+        }
     } finally { $zip.Dispose() }
 }
 function Assert-PackageValidation([bool]$Valid) {
@@ -514,10 +553,30 @@ try {
     foreach ($product in @('core', 'metadata')) {
         Remove-Item '.release/packages/*' -Force -ErrorAction SilentlyContinue
         $id = $config.products[$product].packageId; $version = '2.0.0-rc.1'
+        $script:TestPackageNotes = "### $version - 2026-11-13`n" + '* Fix: Preserve $$ and $& <templates> (#1)'
+        $script:TestPackageChangelogName = Split-Path $config.products[$product].changelog -Leaf
+        $script:TestPackageChangelog = "# History`n`n<!-- BEGIN GENERATED RELEASE NOTES -->`n$script:TestPackageNotes`n<!-- END GENERATED RELEASE NOTES -->`n`n### 1.0.0 - old`n* History`n"
+        Set-Content '.release/notes.md' $script:TestPackageNotes -Encoding utf8NoBOM
         @{ product = $product; tag = "$product-v$version"; version = $version } | ConvertTo-Json | Set-Content '.release/release.json'
         $package = Join-Path $PWD ".release/packages/$id.$version.nupkg"
         $symbols = Join-Path $PWD ".release/packages/$id.$version.snupkg"
         Write-TestPackage $package $id $version; Write-TestPackage $symbols $id $version
+        Assert-PackageValidation $true
+        Write-TestPackage $package $id $version -Notes 'Development build'; Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Notes $script:TestPackageNotes.Replace($version, '1.0.0'); Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -OmitChangelog; Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -ChangelogName "docs/$script:TestPackageChangelogName"; Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Changelog $script:TestPackageChangelog.Replace("### $version -", '### Unreleased -'); Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Changelog $script:TestPackageChangelog.Replace('Preserve $$', 'Stale note'); Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Changelog "### 1.0.0 - old`n* History`n`n$script:TestPackageChangelog"; Assert-PackageValidation $false
+        Write-TestPackage $package $id $version
+        Write-TestPackage $symbols $id $version -Notes 'Development build'; Assert-PackageValidation $false
+        Write-TestPackage $symbols $id $version
+        Set-Content '.release/notes.md' $script:TestPackageNotes.Replace($version, '1.0.0')
+        Assert-PackageValidation $false
+        Set-Content '.release/notes.md' $script:TestPackageNotes
+        # XML escaping and CRLF differences must not change the note text.
+        Write-TestPackage $package $id $version -Notes $script:TestPackageNotes.Replace("`n", "`r`n") -Changelog $script:TestPackageChangelog.Replace("`n", "`r`n")
         Assert-PackageValidation $true
         Write-TestPackage $package $id '9.9.9'; Assert-PackageValidation $false
         Write-TestPackage $package $id $version
@@ -527,7 +586,7 @@ try {
         Remove-Item '.release/packages/other.nupkg'
         Remove-Item $symbols; Assert-PackageValidation $false
     }
-    Write-Output 'PASS: both product package/symbol pairs; wrong metadata, extra packages and missing symbols fail the process'
+    Write-Output 'PASS: both product package/symbol pairs include matching release notes and versioned changelogs; stale notes, missing changelogs, wrong metadata and invalid pairs fail'
 } finally {
     Set-Location $old; $env:RELEASE_TAG = $oldTag
     Remove-Item $root -Recurse -Force
