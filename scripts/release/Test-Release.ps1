@@ -66,6 +66,33 @@ Assert ($rendered.Contains('Published history')) 'Archive preservation'
 Assert ((Get-Changelog $rendered $entries 'core') -ceq $rendered) 'Idempotent notes'
 Write-Output 'PASS: classification, version identity, literal notes and history'
 
+# Dates are English and unpadded even when the runner has a different culture.
+$oldCulture = [Globalization.CultureInfo]::CurrentCulture
+try {
+    [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('da-DK')
+    Assert ((Format-ReleaseDate ([DateTime]'2026-11-04')) -ceq '4 November 2026') 'Release dates use invariant English month names'
+    $published = @(@{ tag_name = 'core-v1.20.3'; published_at = '2026-11-04T23:30:00-02:00'; body = '* Published' })
+    Assert ((Get-Changelog $original @() 'core' $published).Contains('### 1.20.3 - 5 November 2026')) 'Imported release dates use UTC'
+    $published[0].body = "### 1.20.3 - 2026-11-04`n* Published"
+    Assert ((Get-Changelog $original @() 'core' $published).Contains('### 1.20.3 - 4 November 2026')) 'ISO release bodies are formatted on import'
+} finally { [Globalization.CultureInfo]::CurrentCulture = $oldCulture }
+foreach ($product in @('core', 'metadata')) {
+    foreach ($count in @(1, 9, 10, 11, 12)) {
+        $sections = @(for ($i = $count; $i -gt 0; $i--) {
+            $version = if ($i -eq $count) { "2.$i.0-rc.1" } else { "v2.$i.0" }
+            "### $version - 4 November 2026`n* Complete release $i`n* Preserve $$$$ and dollar &amp; signs"
+        })
+        $history = "# History`n`n<!-- BEGIN GENERATED RELEASE NOTES -->`n### Unreleased`n* Pending`n<!-- END GENERATED RELEASE NOTES -->`n`n" + ($sections -join "`n`n") + "`n"
+        $path = $config.products[$product].changelog
+        $expected = ($sections[0..([Math]::Min(10, $count) - 1)] -join "`n`n") + "`n`nFull release history: https://github.com/owner/repo/blob/master/$path"
+        $actual = Get-PackageReleaseNotes $history $product 'owner/repo'
+        Assert ($actual -ceq $expected) 'Package notes include at most ten complete newest releases and the product history link'
+        Assert ((Get-PackageReleaseNotes $history.Replace("`n", "`r`n") $product 'owner/repo') -ceq $expected) 'Package note extraction normalizes CRLF'
+    }
+}
+Reject { Get-PackageReleaseNotes "### Unreleased`n* Pending" 'core' 'owner/repo' }
+Write-Output 'PASS: English display dates, UTC imported dates and ten-release package notes for both products'
+
 # A real Git fixture plus a small in-memory gh double exercise aggregation and
 # preparation without duplicating gh's HTTP transport or a service implementation.
 $root = Join-Path ([IO.Path]::GetTempPath()) ('release-test-' + [guid]::NewGuid())
@@ -276,7 +303,12 @@ done
         Assert ((Get-Content $config.products[$otherProduct].changelog -Raw) -ceq $otherHistory) 'Preparing one release leaves the other product changelog untouched'
         [xml]$props = Get-Content '.release/version.props' -Raw
         Assert ($props.Project.PropertyGroup.($config.products[$product].versionProperty) -ceq $version) 'Build version matches the release notes'
-        Assert ((Get-Content $props.Project.PropertyGroup.($config.products[$product].notesProperty) -Raw).TrimEnd() -ceq $savedNotes) 'Build consumes the saved release notes'
+        $savedPackageNotes = (Get-Content '.release/package-notes.md' -Raw).TrimEnd()
+        Assert ($savedPackageNotes -ceq (Get-PackageReleaseNotes $history $product $env:GITHUB_REPOSITORY)) 'Preparation saves package release history separately'
+        Assert ($savedPackageNotes.StartsWith($savedNotes) -and $savedPackageNotes.Contains('* History')) 'Package notes include the current and previous releases'
+        Assert ((Get-Content $props.Project.PropertyGroup.($config.products[$product].notesProperty) -Raw).TrimEnd() -ceq $savedPackageNotes) 'Build consumes the saved package release history'
+        Assert (($savedNotes -split "`n", 2)[0] -ceq "### $version - $(Format-ReleaseDate ([DateTime]::UtcNow))") 'Preparation uses the English release date'
+        Assert (!$savedNotes.Contains('Full release history:')) 'GitHub release body remains the individual release'
         $metadata = Get-Content '.release/release.json' -Raw | ConvertFrom-Json
         Assert ($metadata.product -eq $product) 'Independent product selection'
         if ($product -eq 'core') {
@@ -345,7 +377,7 @@ done
     [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
     & "$scripts/Update-Changelogs.ps1"
     $metadataNotes = Get-Content $config.products.metadata.changelog -Raw
-    Assert ($metadataNotes.Contains('### 1.2.1 - 2026-11-06') -and $metadataNotes.Contains('* Published')) 'Successful release history is committed directly to master'
+    Assert ($metadataNotes.Contains('### 1.2.1 - 6 November 2026') -and $metadataNotes.Contains('* Published')) 'Successful release history is committed directly to master'
     Assert (!$metadataNotes.Contains('Later metadata change') -and !$metadataNotes.Contains('Tool feature')) 'Released entries leave the pending section'
     Assert ((Get-Content $config.products.core.changelog -Raw).Contains('Shared behavior')) 'Other product pending notes survive history refresh'
     $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
@@ -520,6 +552,7 @@ function global:gh {
 # is not sufficient; invalid artifacts must return a failing exit code.
 $root = Join-Path ([IO.Path]::GetTempPath()) ('package-test-' + [guid]::NewGuid())
 $old = $PWD; $oldTag = $env:RELEASE_TAG
+$oldPackageRepository = $env:GITHUB_REPOSITORY
 $pwsh = (Get-Process -Id $PID).Path
 $validator = Join-Path $PSScriptRoot 'validate-packages.ps1'
 function Write-TestPackage(
@@ -549,19 +582,25 @@ function Assert-PackageValidation([bool]$Valid) {
 }
 try {
     New-Item (Join-Path $root '.release/packages') -ItemType Directory -Force | Out-Null
-    Set-Location $root; $env:RELEASE_TAG = $null
+    Set-Location $root; $env:RELEASE_TAG = $null; $env:GITHUB_REPOSITORY = 'owner/repo'
     foreach ($product in @('core', 'metadata')) {
         Remove-Item '.release/packages/*' -Force -ErrorAction SilentlyContinue
         $id = $config.products[$product].packageId; $version = '2.0.0-rc.1'
-        $script:TestPackageNotes = "### $version - 2026-11-13`n" + '* Fix: Preserve $$ and $& <templates> (#1)'
+        $script:TestReleaseNotes = "### $version - 13 November 2026`n" + '* Fix: Preserve $$ and $& <templates> (#1)'
         $script:TestPackageChangelogName = Split-Path $config.products[$product].changelog -Leaf
-        $script:TestPackageChangelog = "# History`n`n<!-- BEGIN GENERATED RELEASE NOTES -->`n$script:TestPackageNotes`n<!-- END GENERATED RELEASE NOTES -->`n`n### 1.0.0 - old`n* History`n"
-        Set-Content '.release/notes.md' $script:TestPackageNotes -Encoding utf8NoBOM
+        $olderSections = @(for ($i = 11; $i -gt 0; $i--) { "### v1.0.$i - 4 November 2026`n* History $i" })
+        $script:TestPackageChangelog = "# History`n`n<!-- BEGIN GENERATED RELEASE NOTES -->`n$script:TestReleaseNotes`n<!-- END GENERATED RELEASE NOTES -->`n`n" + ($olderSections -join "`n`n") + "`n"
+        $script:TestPackageNotes = Get-PackageReleaseNotes $script:TestPackageChangelog $product 'owner/repo'
+        Set-Content '.release/notes.md' $script:TestReleaseNotes -Encoding utf8NoBOM
+        Set-Content '.release/package-notes.md' $script:TestPackageNotes -Encoding utf8NoBOM
         @{ product = $product; tag = "$product-v$version"; version = $version } | ConvertTo-Json | Set-Content '.release/release.json'
         $package = Join-Path $PWD ".release/packages/$id.$version.nupkg"
         $symbols = Join-Path $PWD ".release/packages/$id.$version.snupkg"
         Write-TestPackage $package $id $version; Write-TestPackage $symbols $id $version
         Assert-PackageValidation $true
+        Write-TestPackage $package $id $version -Notes $script:TestReleaseNotes; Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Notes ($script:TestPackageNotes + "`n`n" + $olderSections[9]); Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Notes $script:TestPackageNotes.Replace('Full release history:', 'Wrong history link:'); Assert-PackageValidation $false
         Write-TestPackage $package $id $version -Notes 'Development build'; Assert-PackageValidation $false
         Write-TestPackage $package $id $version -Notes $script:TestPackageNotes.Replace($version, '1.0.0'); Assert-PackageValidation $false
         Write-TestPackage $package $id $version -OmitChangelog; Assert-PackageValidation $false
@@ -569,12 +608,18 @@ try {
         Write-TestPackage $package $id $version -Changelog $script:TestPackageChangelog.Replace("### $version -", '### Unreleased -'); Assert-PackageValidation $false
         Write-TestPackage $package $id $version -Changelog $script:TestPackageChangelog.Replace('Preserve $$', 'Stale note'); Assert-PackageValidation $false
         Write-TestPackage $package $id $version -Changelog "### 1.0.0 - old`n* History`n`n$script:TestPackageChangelog"; Assert-PackageValidation $false
+        Write-TestPackage $package $id $version -Changelog $script:TestPackageChangelog.Replace('* History 11', '* Stale history'); Assert-PackageValidation $false
+        # A change beyond the ten-section cap does not affect package release notes.
+        Write-TestPackage $package $id $version -Changelog $script:TestPackageChangelog.Replace("* History 1`n", "* Archived history`n"); Assert-PackageValidation $true
         Write-TestPackage $package $id $version
         Write-TestPackage $symbols $id $version -Notes 'Development build'; Assert-PackageValidation $false
         Write-TestPackage $symbols $id $version
-        Set-Content '.release/notes.md' $script:TestPackageNotes.Replace($version, '1.0.0')
+        Set-Content '.release/notes.md' $script:TestReleaseNotes.Replace($version, '1.0.0')
         Assert-PackageValidation $false
-        Set-Content '.release/notes.md' $script:TestPackageNotes
+        Set-Content '.release/notes.md' $script:TestReleaseNotes
+        Set-Content '.release/package-notes.md' $script:TestReleaseNotes
+        Assert-PackageValidation $false
+        Set-Content '.release/package-notes.md' $script:TestPackageNotes
         # XML escaping and CRLF differences must not change the note text.
         Write-TestPackage $package $id $version -Notes $script:TestPackageNotes.Replace("`n", "`r`n") -Changelog $script:TestPackageChangelog.Replace("`n", "`r`n")
         Assert-PackageValidation $true
@@ -588,7 +633,7 @@ try {
     }
     Write-Output 'PASS: both product package/symbol pairs include matching release notes and versioned changelogs; stale notes, missing changelogs, wrong metadata and invalid pairs fail'
 } finally {
-    Set-Location $old; $env:RELEASE_TAG = $oldTag
+    Set-Location $old; $env:RELEASE_TAG = $oldTag; $env:GITHUB_REPOSITORY = $oldPackageRepository
     Remove-Item $root -Recurse -Force
 }
 

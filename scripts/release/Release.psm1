@@ -112,6 +112,21 @@ function Get-NoteText {
     }
     return $lines -join "`n"
 }
+function Format-ReleaseDate {
+    param([DateTime]$Date)
+    return $Date.ToString('d MMMM yyyy', [Globalization.CultureInfo]::InvariantCulture)
+}
+function Get-PackageReleaseNotes {
+    param([string]$Changelog, [string]$Product, [string]$Repository)
+    # Select complete versioned sections, excluding preambles, Unreleased and generator markers.
+    $text = $Changelog.Replace("`r`n", "`n").Replace($script:Begin, '').Replace($script:End, '')
+    $sections = @([regex]::Matches($text, '^### v?\d[^\n]*(?:\n(?!### )[^\n]*)*', 'Multiline') |
+        Select-Object -First 10 | ForEach-Object { $_.Value.TrimEnd() })
+    if (!$sections.Count) { throw 'No released sections in the changelog' }
+    if (!$Repository) { throw 'Repository is required for the full release history link' }
+    $path = $script:Config.products[$Product].changelog
+    return ($sections -join "`n`n") + "`n`nFull release history: https://github.com/$Repository/blob/master/$path"
+}
 function Get-Changelog {
     param([string]$Original, [object[]]$Entries, [string]$Product, [object[]]$Releases = @())
     $archive = $Original.Replace("`r`n", "`n")
@@ -134,7 +149,17 @@ function Get-Changelog {
         $version = (Get-ReleaseTag $release.tag_name).version
         if ($version.ToLowerInvariant() -in $recorded) { continue }
         $body = $release.body.Trim()
-        $sections += if ($body.StartsWith("### $version -")) { $body } else { "### $version - $(([DateTime]$release.published_at).ToString('yyyy-MM-dd'))`n$body" }
+        if ($body.StartsWith("### $version -")) {
+            # Releases published with the former ISO formatter still use the display date format.
+            $heading = [regex]::Match($body, '^### [^\n]+ - (\d{4}-\d{2}-\d{2})(?=\r?$)', 'Multiline')
+            if ($heading.Success) {
+                $date = [DateTime]::ParseExact($heading.Groups[1].Value, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+                $body = $body.Remove($heading.Index, $heading.Length).Insert($heading.Index, "### $version - $(Format-ReleaseDate $date)")
+            }
+            $sections += $body
+        } else {
+            $sections += "### $version - $(Format-ReleaseDate ([DateTimeOffset]$release.published_at).UtcDateTime)`n$body"
+        }
     }
     $sections += $history
     return (($sections | Where-Object { $_ }) -join "`n`n") + "`n"

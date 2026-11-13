@@ -3,7 +3,7 @@
 * No unreleased changes.
 <!-- END GENERATED RELEASE NOTES -->
 
-### 1.20.3 - 2026-11-13
+### 1.20.3 - 13 November 2026
 * Add: Support RowVersion and versionnumber (#366)
 * Fix: Handle money input for calculated decimal and whole number fields (#365)
 
