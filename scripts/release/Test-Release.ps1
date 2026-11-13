@@ -14,6 +14,14 @@ Assert ($concurrency -match '(?m)^  queue: max\s*$') 'Release requests must queu
 Assert ($concurrency -match '(?m)^  cancel-in-progress: false\s*$') 'Queued releases must not cancel running publication'
 Write-Output 'PASS: release workflow retains pending requests without canceling running publication'
 
+$changelogWorkflow = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/update-changelogs.yml') -Raw
+Assert ($changelogWorkflow -match '(?m)^  contents: write\s*$') 'Changelog writer needs repository contents write permission'
+Assert ($changelogWorkflow -match '(?m)^  pull-requests: read\s*$') 'Changelog writer only reads PR metadata'
+Assert ($changelogWorkflow -notmatch '(?m)^  (pull-requests|actions): write\s*$') 'Changelog writer must not create PRs or dispatch their checks'
+Assert ($changelogWorkflow -match 'branches: \[master\]' -and $changelogWorkflow -match 'workflow_dispatch:') 'Master merges and manual recovery must update notes'
+Assert ($changelogWorkflow -match 'cancel-in-progress: false') 'Changelog writers must not cancel an in-flight update'
+Write-Output 'PASS: direct-master changelog workflow permissions and triggers'
+
 # Metadata changes rerun one native, read-only PR check rather than publishing duplicates.
 $classification = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/pr-classification.yml') -Raw
 Assert ($classification -match '(?m)^  pull_request:\s*$' -and $classification -notmatch 'pull_request_target:') 'Classification must use the ordinary PR event'
@@ -58,7 +66,7 @@ try {
     [void](Invoke-Git -Arguments @('commit', '--allow-empty', '-m', 'Legacy unclassified PR'))
     $legacySha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
     '.release/' | Set-Content '.gitignore'
-    $global:TestAssociatedPrs = @(); $global:TestPrs = @(); $global:TestBotPr = $null; $global:TestPrReads = 0; $global:TestDispatches = @(); $global:TestWrites = @()
+    $global:TestAssociatedPrs = @(); $global:TestPrs = @(); $global:TestPrReads = 0
     $global:TestReleases = foreach ($product in @('core', 'metadata')) {
         $version = $config.products[$product].baselineVersion
         $path = $config.products[$product].changelog
@@ -83,28 +91,12 @@ try {
                 $path = [string]$Arguments[1]
                 if ($path -match '/releases(\?|$)') { foreach ($item in $global:TestReleases) { $item | ConvertTo-Json -Compress -Depth 10 }; return }
                 if ($path -match '/commits/([^/]+)/pulls') { foreach ($pr in @($global:TestPrs + $global:TestAssociatedPrs) | Where-Object { $_.merge_commit_sha -eq $Matches[1] -or $_.associated_commit_sha -eq $Matches[1] }) { $pr | ConvertTo-Json -Compress -Depth 10 }; return }
-                if ($path.Contains('pulls?')) {
-                    if ($global:TestBotPr -and $global:TestBotPr.state -eq 'open') { $global:TestBotPr | ConvertTo-Json -Compress -Depth 10 }; return
-                }
                 if ($path -match '/pulls/(\d+)$') {
                     $global:TestPrReads++
-                    $pr = @($global:TestPrs + @($global:TestBotPr) | Where-Object { $_ -and $_.number -eq [int]$Matches[1] })[0]
+                    $pr = @($global:TestPrs | Where-Object { $_.number -eq [int]$Matches[1] })[0]
                     $pr | ConvertTo-Json -Compress -Depth 10; return
                 }
                 throw "Unexpected test API request: $path"
-            }
-            if ($Arguments[0] -eq 'pr') {
-                $global:TestWrites += $Arguments[1]
-                if ($Arguments[1] -eq 'close') { $global:TestBotPr.state = 'closed'; return }
-                if (!$global:TestBotPr) {
-                    $global:TestBotPr = @{ number = 100; state = 'open'; title = 'Chore: Update generated product changelogs'; labels = @('product:none', 'change:chore'); user = @{ login = 'github-actions[bot]' }
-                        head = @{ ref = 'automation/update-changelogs'; repo = @{ full_name = 'owner/repo' } }; base = @{ repo = @{ full_name = 'owner/repo' } } }
-                }
-                return
-            }
-            if ($Arguments[0] -eq 'workflow') {
-                $global:TestDispatches += @{ ref = $Arguments[[array]::IndexOf($Arguments, '--ref') + 1]; input = $InputObject | ConvertFrom-Json -AsHashtable }
-                return
             }
             throw "Unexpected test CLI operation: $($Arguments -join '|') input:$InputObject"
         }
@@ -141,8 +133,10 @@ try {
     $global:TestPrs[0].title = 'Missing category after migration'
     Reject { Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' @() }
     $global:TestPrs[0].title = 'Fix: Preserve $$ and $& in templates'
+    $master = Invoke-Git -Arguments @('rev-parse', 'origin/master')
     & "$scripts/Update-Changelogs.ps1"
-    Assert (@($global:TestWrites | Where-Object { $_ -eq 'create' }).Count -eq 1) 'First deployment creates a notes PR without product releases'
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -ne $master) 'First deployment writes notes directly to master without product releases'
+    Assert ((Get-Content $config.products.core.changelog -Raw).Contains('Preserve $$')) 'First deployment commits generated notes'
     $config.historyBaseline = $oldHistoryBaseline
     $global:TestReleases = $baselineReleases
     # Released-only associated PRs must also be ignored with product tags present.
@@ -152,21 +146,21 @@ try {
     Add-Feature @('product:core', 'product:metadata') 'Change: Shared behavior'
     $master = Invoke-Git -Arguments @('rev-parse', 'origin/master')
     & "$scripts/Update-Changelogs.ps1"
-    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $master) 'The writer must not push master'
-    Assert (@($global:TestWrites | Where-Object { $_ -eq 'create' }).Count -eq 1) 'Multiple merges must update one PR'
-    Assert ($global:TestDispatches.Count -eq 2) 'Each changelog PR update explicitly validates its labels'
-    foreach ($dispatch in $global:TestDispatches) {
-        Assert ($dispatch.ref -eq $config.changelogBranch -and $dispatch.input.pr_number -eq '100') 'Native bot check must run on the changelog head branch for its PR'
+    $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
+    Assert ($updated -ne $master -and $updated -eq (Invoke-Git -Arguments @('rev-parse', 'HEAD'))) 'Generated notes are committed directly to remote master'
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'HEAD^')) -eq $master) 'Notes use the latest master as their parent'
+    $changed = (Invoke-Git -Arguments @('diff', '--name-only', $master, $updated)) -split "`n"
+    Assert ($changed.Count -eq 2 -and !@($changed | Where-Object { $_ -notin @($config.products.Values.changelog) }).Count) 'Only the two product changelogs change'
+    Assert ((Get-Content $config.products.metadata.changelog -Raw).Contains('Tool feature')) 'Metadata-only changes are included'
+    foreach ($product in @('core', 'metadata')) {
+        Assert ((Get-Content $config.products[$product].changelog -Raw).Contains('Shared behavior')) 'Shared changes appear for both products'
     }
-    $branch = $config.changelogBranch
-    [void](Invoke-Git -Arguments @('fetch', 'origin', $branch))
-    [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
-    [void](Invoke-Git -Arguments @('merge', '--no-ff', "origin/$branch", '-m', 'Merge notes PR'))
-    $global:TestBotPr.state = 'closed'
-    $global:TestPrs += @{ number = 100; merged_at = '2026-11-06'; merge_commit_sha = (Invoke-Git -Arguments @('rev-parse', 'HEAD')); title = 'Chore: Update notes'; labels = @('product:none'); base = @{ ref = 'master' } }
-    [void](Invoke-Git -Arguments @('push', 'origin', 'master'))
     & "$scripts/Update-Changelogs.ps1"
-    Assert ($global:TestWrites.Count -eq 2) 'Merging notes must not create a follow-up PR'
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'Repeated runs and bot commits do not create recursive updates'
+    Assert (@(Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' $global:TestReleases).Count -eq 3) 'Direct bot commits do not contribute PR-derived notes'
+    [void](Invoke-Git -Arguments @('checkout', '--detach', $master))
+    Reject { & "$scripts/Prepare-Release.ps1" -Tag 'core-v1.20.3' -Preview }
+
     foreach ($product in @('core', 'metadata')) {
         [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
         [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
@@ -226,9 +220,95 @@ try {
     Reject { & "$scripts/Check-Pr.ps1" -PrNumber 1 }
     $global:TestPrs[0].labels = @('product:none', 'change:chore')
     & "$scripts/Check-Pr.ps1" -PrNumber 1
-    Write-Output 'PASS: single PR aggregation, no master push, no recursive PR, product previews and checks'
+    Write-Output 'PASS: direct-master notes, idempotent bot commits, product previews and checks'
+
+    # Publication refresh moves released metadata notes into history on master.
+    [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
+    [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
+    & "$scripts/Update-Changelogs.ps1"
+    $metadataNotes = Get-Content $config.products.metadata.changelog -Raw
+    Assert ($metadataNotes.Contains('### 1.2.1 - 2026-11-06') -and $metadataNotes.Contains('* Published')) 'Successful release history is committed directly to master'
+    Assert (!$metadataNotes.Contains('Later metadata change') -and !$metadataNotes.Contains('Tool feature')) 'Released entries leave the pending section'
+    Assert ((Get-Content $config.products.core.changelog -Raw).Contains('Shared behavior')) 'Other product pending notes survive history refresh'
+    $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
+    & "$scripts/Update-Changelogs.ps1"
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'History refresh is idempotent'
+    Add-Feature @('product:none') 'Chore: Repository maintenance'
+    $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
+    & "$scripts/Update-Changelogs.ps1"
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'Maintenance-only merges do not create unnecessary notes commits'
+
+    'Do not commit unrelated edits' | Set-Content 'unrelated.txt'
+    Reject { & "$scripts/Update-Changelogs.ps1" }
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'Dirty worktrees cannot publish unrelated files'
+    Remove-Item 'unrelated.txt'
+
+    # Advance the real bare remote immediately before the writer's first push.
+    # The git wrapper injects the race; all successful Git operations remain real.
+    $global:TestGitPath = (Get-Command git).Source
+    $global:TestBeforePush = $null
+    $global:TestRejectPush = $false
+    $global:TestPushAttempts = 0
+    function global:git {
+        param([Parameter(ValueFromRemainingArguments)][object[]]$Arguments)
+        if ($Arguments[0] -eq 'push' -and 'HEAD:refs/heads/master' -in $Arguments) {
+            $global:TestPushAttempts++
+            if ($global:TestBeforePush) { & $global:TestBeforePush }
+            if ($global:TestRejectPush) { $global:LASTEXITCODE = 1; return }
+        }
+        & $global:TestGitPath @Arguments
+    }
+    $raceRepo = "$root-race"
+    [void](Invoke-Git -Arguments @('clone', $remote, $raceRepo))
+    function Add-ConcurrentFeature {
+        $location = $PWD
+        try {
+            Set-Location $raceRepo
+            [void](Invoke-Git -Arguments @('fetch', 'origin', 'master'))
+            [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
+            [void](Invoke-Git -Arguments @('config', 'user.name', 'maintainer'))
+            [void](Invoke-Git -Arguments @('config', 'user.email', 'maintainer@example.test'))
+            $number = $global:TestPrs.Count + 1
+            $title = "Fix: Concurrent merge $number"
+            $title | Set-Content "feature-$number.txt"
+            [void](Invoke-Git -Arguments @('add', '.'))
+            [void](Invoke-Git -Arguments @('commit', '-m', $title))
+            $sha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
+            $global:TestPrs += @{ number = $number; merged_at = '2026-11-13'; merge_commit_sha = $sha; title = $title; labels = @('product:core'); base = @{ ref = 'master' }; head = @{ sha = $sha } }
+            [void](Invoke-Git -Arguments @('push', 'origin', 'master'))
+        } finally { Set-Location $location }
+    }
+    Add-Feature @('product:core') 'Fix: Before concurrent merge'
+    $global:TestBeforePush = { $global:TestBeforePush = $null; Add-ConcurrentFeature }
+    & "$scripts/Update-Changelogs.ps1"
+    Assert ($global:TestPushAttempts -eq 2) 'A rejected non-fast-forward push regenerates and retries'
+    Assert ((Get-Content $config.products.core.changelog -Raw).Contains('Concurrent merge')) 'Retry includes the concurrent PR note'
+    Assert (Test-Ancestor $global:TestPrs[-1].merge_commit_sha 'origin/master') 'Concurrent source commit is preserved'
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'HEAD^')) -eq $global:TestPrs[-1].merge_commit_sha) 'Retry commit is based on the advanced master'
+
+    Add-Feature @('product:core') 'Fix: Permission rejection'
+    $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
+    $global:TestRejectPush = $true
+    $global:TestPushAttempts = 0
+    Reject { & "$scripts/Update-Changelogs.ps1" }
+    Assert ($global:TestPushAttempts -eq 1) 'Unchanged-master push failures fail without repeated permission attempts'
+    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'A rejected push does not alter remote history'
+    $global:TestRejectPush = $false
+    & "$scripts/Update-Changelogs.ps1"
+
+    Add-Feature @('product:core') 'Fix: Busy master'
+    $global:TestBeforePush = { Add-ConcurrentFeature }
+    $global:TestPushAttempts = 0
+    Reject { & "$scripts/Update-Changelogs.ps1" }
+    Assert ($global:TestPushAttempts -eq 3) 'Concurrent-merge retries are bounded'
+    $global:TestBeforePush = $null
+    & "$scripts/Update-Changelogs.ps1"
+    Assert ((Get-Content $config.products.core.changelog -Raw).Contains($global:TestPrs[-1].title.Substring(5))) 'Manual recovery collects merges after retry exhaustion'
+    Write-Output 'PASS: release history refresh, dirty-tree guard, concurrent-merge regeneration, bounded retries and permission failures'
 } finally {
     Remove-Item Function:global:gh -ErrorAction SilentlyContinue
+    Remove-Item Function:global:git -ErrorAction SilentlyContinue
+    if ($raceRepo) { Remove-Item $raceRepo -Recurse -Force -ErrorAction SilentlyContinue }
     $config.historyBaseline = $oldHistoryBaseline
     Set-Location $old; $env:GITHUB_REPOSITORY = $oldRepository; $env:GITHUB_OUTPUT = $oldOutput
     Remove-Item $root -Recurse -Force

@@ -5,8 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
-  pull-requests: write
-  actions: write
+  pull-requests: read
 concurrency:
   group: release-changelog-writer
   cancel-in-progress: false
@@ -18,7 +17,7 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-      - name: Create or update the single notes PR
+      - name: Commit product changelogs to master
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

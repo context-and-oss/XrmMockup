@@ -9,7 +9,7 @@ on:
         type: string
         required: true
       source_ref:
-        description: Reviewed source with merged changelog updates
+        description: Source on master containing automatic changelog updates
         type: string
         default: master
 permissions:

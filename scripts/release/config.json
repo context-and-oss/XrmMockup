@@ -1,6 +1,5 @@
 {
   "historyBaseline": "6e689d959b9013e2318320e9c317449d0de02c2d",
-  "changelogBranch": "automation/update-changelogs",
   "products": {
     "core": {
       "packageId": "XrmMockup365",
