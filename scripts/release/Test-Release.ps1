@@ -19,6 +19,7 @@ Assert ($changelogWorkflow -match '(?m)^  contents: write\s*$') 'Changelog write
 Assert ($changelogWorkflow -match '(?m)^  pull-requests: read\s*$') 'Changelog writer only reads PR metadata'
 Assert ($changelogWorkflow -notmatch '(?m)^  pull-requests: write\s*$') 'Changelog writer must not create PRs'
 Assert ($changelogWorkflow -match '(?m)^  actions: write\s*$') 'Changelog writer must be able to dispatch CI'
+Assert ($changelogWorkflow -match '(?m)^  statuses: write\s*$') 'Changelog writer must publish the verified CI commit status'
 $ciWorkflow = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/ci.yml') -Raw
 Assert ($ciWorkflow -match '(?m)^  workflow_dispatch:\s*$') 'Native CI must support dispatch on the generated commit'
 Assert ($ciWorkflow -match '(?m)^  ci:\s*$' -and $ciWorkflow -match '(?m)^  contents: read\s*$') 'Dispatched CI must retain its required job name and read-only permissions'
@@ -86,7 +87,8 @@ try {
     [void](Invoke-Git -Arguments @('remote', 'add', 'origin', $remote))
     [void](Invoke-Git -Arguments @('push', '-u', 'origin', 'master', '--tags'))
     # Model the required status check: bot commits cannot reach master before
-    # the matching dispatched CI succeeds, while ordinary source merges can.
+    # the matching dispatched CI succeeds AND its commit status is published.
+    # A native dispatch check alone reproduces the protected-push rejection.
     $hook = Join-Path $remote 'hooks/pre-receive'
     @'
 #!/bin/sh
@@ -104,6 +106,9 @@ done
     $global:TestFailCi = $false
     $global:TestFailDispatch = $false
     $global:TestHideCiRuns = $false
+    $global:TestFailStatus = $false
+    $global:TestInvalidRun = ''
+    $global:TestCiStatuses = @()
     $env:GITHUB_REPOSITORY = 'owner/repo'; $env:GITHUB_OUTPUT = Join-Path $root 'outputs'
     function global:gh {
         [CmdletBinding(PositionalBinding = $false)]
@@ -122,6 +127,33 @@ done
                     ) + $global:TestCiRuns } | ConvertTo-Json -Compress -Depth 10
                     return
                 }
+                if ($path -match '/actions/runs/(\d+)$') {
+                    $run = $global:TestCiRuns[-1].Clone()
+                    Assert ([string]$run.id -eq $Matches[1]) 'Re-read the exact watched run'
+                    switch ($global:TestInvalidRun) {
+                        'id' { $run.id = 999999 }
+                        'sha' { $run.head_sha = 'wrong-sha' }
+                        'branch' { $run.head_branch = 'wrong-branch' }
+                        'event' { $run.event = 'push' }
+                        'status' { $run.status = 'in_progress' }
+                        'conclusion' { $run.conclusion = 'failure' }
+                    }
+                    $run | ConvertTo-Json -Compress; return
+                }
+                if ($path -match '/statuses/([^/]+)$') {
+                    $sha = $Matches[1]
+                    $run = $global:TestCiRuns[-1]
+                    Assert ($sha -eq $run.head_sha -and $run.status -eq 'completed' -and $run.conclusion -eq 'success') 'Status requires actual successful CI on this SHA'
+                    Assert ('--method' -in $Arguments -and 'POST' -in $Arguments -and '--input' -in $Arguments -and '-' -in $Arguments) 'Publish status with a JSON POST'
+                    $status = $InputObject | ConvertFrom-Json -AsHashtable
+                    Assert ($status.state -eq 'success' -and $status.context -eq 'ci') 'Publish the required ci success context'
+                    Assert ($status.target_url -eq $run.html_url) 'Status links to the verified run'
+                    Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -ne $sha) 'Publish status before advancing master'
+                    if ($global:TestFailStatus) { $global:LASTEXITCODE = 1; return }
+                    $global:TestCiStatuses += $sha
+                    [IO.File]::WriteAllText((Join-Path $remote "ci-$sha"), 'passed')
+                    '{}'; return
+                }
                 if ($path -match '/releases(\?|$)') { foreach ($item in $global:TestReleases) { $item | ConvertTo-Json -Compress -Depth 10 }; return }
                 if ($path -match '/commits/([^/]+)/pulls') { foreach ($pr in @($global:TestPrs + $global:TestAssociatedPrs) | Where-Object { $_.merge_commit_sha -eq $Matches[1] -or $_.associated_commit_sha -eq $Matches[1] }) { $pr | ConvertTo-Json -Compress -Depth 10 }; return }
                 if ($path -match '/pulls/(\d+)$') {
@@ -139,7 +171,7 @@ done
                 $staged = Invoke-Git -Arguments @('ls-remote', 'origin', "refs/heads/$branch")
                 Assert ($staged.StartsWith($sha)) 'CI source must exist on the temporary remote branch'
                 Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -ne $sha) 'Master must not advance before CI'
-                $global:TestCiRuns += @{ id = $global:TestCiRuns.Count + 1; head_sha = $sha; head_branch = $branch }
+                $global:TestCiRuns += @{ id = $global:TestCiRuns.Count + 1; head_sha = $sha; head_branch = $branch; event = 'workflow_dispatch'; status = 'queued'; conclusion = $null; html_url = "https://github.com/owner/repo/actions/runs/$($global:TestCiRuns.Count + 1)" }
                 return
             }
             if ($Arguments[0] -eq 'run' -and $Arguments[1] -eq 'watch') {
@@ -147,7 +179,9 @@ done
                 $run = $global:TestCiRuns[-1]
                 Assert ([string]$run.id -eq [string]$Arguments[2]) 'Only the exact staged commit and branch CI is watched'
                 if ($global:TestFailCi) { $global:LASTEXITCODE = 1; return }
-                [IO.File]::WriteAllText((Join-Path $remote "ci-$($run.head_sha)"), 'passed')
+                $run.status = 'completed'; $run.conclusion = 'success'
+                # Deliberately do not authorize master here: dispatch CI alone
+                # left the real required context expected.
                 return
             }
             throw "Unexpected test CLI operation: $($Arguments -join '|') input:$InputObject"
@@ -348,13 +382,17 @@ done
     $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
     $global:TestSleepCount = 0
     function global:Start-Sleep { param([int]$Seconds); $global:TestSleepCount++ }
-    foreach ($failure in @('ci', 'dispatch', 'missing-run')) {
+    foreach ($failure in @('ci', 'dispatch', 'missing-run', 'status-write', 'id', 'sha', 'branch', 'event', 'status', 'conclusion')) {
         $global:TestFailCi = $failure -eq 'ci'
         $global:TestFailDispatch = $failure -eq 'dispatch'
         $global:TestHideCiRuns = $failure -eq 'missing-run'
+        $global:TestFailStatus = $failure -eq 'status-write'
+        $global:TestInvalidRun = $failure
+        $statusesBeforeFailure = $global:TestCiStatuses.Count
         $global:TestPushAttempts = 0
         Reject { & "$scripts/Update-Changelogs.ps1" }
-        Assert ($global:TestPushAttempts -eq 0) 'Failed CI or dispatch must not attempt a master push'
+        Assert ($global:TestCiStatuses.Count -eq $statusesBeforeFailure) 'Failed verification or status write must not publish success'
+        Assert ($global:TestPushAttempts -eq 0) 'Failed CI, verification or status publication must not attempt a master push'
         Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'CI failure preserves remote master'
         Assert (!(Invoke-Git -Arguments @('ls-remote', 'origin', 'refs/heads/automation/changelog-*'))) 'Failed attempts remove their temporary branch'
     }
@@ -363,9 +401,11 @@ done
     $global:TestFailCi = $false
     $global:TestFailDispatch = $false
     $global:TestHideCiRuns = $false
+    $global:TestFailStatus = $false
+    $global:TestInvalidRun = ''
     & "$scripts/Update-Changelogs.ps1"
     Assert (!(Invoke-Git -Arguments @('ls-remote', 'origin', 'refs/heads/automation/changelog-*'))) 'Successful attempts remove their temporary branch'
-    Write-Output 'PASS: required CI on the exact staged commit, dispatch/check failures and temporary-branch cleanup'
+    Write-Output 'PASS: real CI plus explicit required commit status, run verification/status failures and temporary-branch cleanup'
 
     Add-Feature @('product:core') 'Fix: Permission rejection'
     $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
