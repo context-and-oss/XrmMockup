@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using DG.Tools.XrmMockup.Database;
@@ -16,6 +17,10 @@ namespace DG.Tools.XrmMockup
             toReturn.Results["Responses"] = new OrganizationResponseCollection();
 
             var snapshot = core.TakeJsonSnapshot();
+            // Customization handlers replace metadata objects instead of mutating them. A shallow
+            // snapshot therefore also makes choice/status edits transactional without copying the cache.
+            var originalEntities = new Dictionary<string, Microsoft.Xrm.Sdk.Metadata.EntityMetadata>(metadata.EntityMetadata);
+            var originalOptionSets = metadata.OptionSets;
 
             try
             {
@@ -28,6 +33,12 @@ namespace DG.Tools.XrmMockup
             }
             catch (Exception)
             {
+                foreach (var entity in originalEntities.Values)
+                {
+                    metadata.EntityMetadata[entity.LogicalName] = entity;
+                    if (db.HasTable(entity.LogicalName)) db[entity.LogicalName].ReplaceMetadata(entity);
+                }
+                metadata.OptionSets = originalOptionSets;
                 core.RestoreJsonSnapshot(snapshot);
                 throw;
             }

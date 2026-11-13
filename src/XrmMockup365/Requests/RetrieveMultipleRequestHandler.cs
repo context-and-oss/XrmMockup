@@ -168,15 +168,19 @@ namespace DG.Tools.XrmMockup
                 }
             }
 
-            if (queryExpr.TopCount.HasValue || (queryExpr.PageInfo?.Count ?? 0) > 0)
+            var matchingEntities = entitiesToReturn.ToList();
+            var pageInfo = queryExpr.PageInfo;
+            var offset = !queryExpr.TopCount.HasValue && (pageInfo?.Count ?? 0) > 0
+                ? checked(Math.Max(0, pageInfo.PageNumber - 1) * pageInfo.Count) : 0;
+            var limit = queryExpr.TopCount ?? ((pageInfo?.Count ?? 0) > 0 ? pageInfo.Count : matchingEntities.Count);
+            var pageEntities = matchingEntities.Skip(offset).Take(limit).ToList();
+            var colToReturn = new EntityCollection(pageEntities)
             {
-                entitiesToReturn = entitiesToReturn.Take(queryExpr.TopCount ?? queryExpr.PageInfo.Count); // QueryExpression TopCount or Linq query Take operator
-            }
-
-            var colToReturn = new EntityCollection(entitiesToReturn.ToList());
-
-            // According to docs, should return -1 if ReturnTotalRecordCount set to false
-            colToReturn.TotalRecordCount = queryExpr.PageInfo.ReturnTotalRecordCount ? colToReturn.Entities.Count : -1;
+                EntityName = queryExpr.EntityName,
+                MoreRecords = !queryExpr.TopCount.HasValue && offset + pageEntities.Count < matchingEntities.Count,
+                // Simple (page-number) paging deliberately does not claim to supply a server cursor.
+                TotalRecordCount = pageInfo?.ReturnTotalRecordCount == true ? matchingEntities.Count : -1
+            };
 
             var resp = new RetrieveMultipleResponse();
 
