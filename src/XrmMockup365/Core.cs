@@ -128,15 +128,24 @@ namespace DG.Tools.XrmMockup
 
             TimeOffset = new TimeSpan();
             settings = initData.Settings;
-            metadata = initData.Metadata;
+            // Metadata reads share cached immutable objects; customization handlers copy affected
+            // objects on write so one mockup cannot change another instance's choices.
+            metadata = new MetadataSkeleton
+            {
+                EntityMetadata = new SortedDictionary<string, EntityMetadata>(initData.Metadata.EntityMetadata),
+                OptionSets = initData.Metadata.OptionSets?.ToArray() ?? Array.Empty<OptionSetMetadataBase>(),
+                DefaultStateStatus = initData.Metadata.DefaultStateStatus.ToDictionary(p => p.Key, p => new Dictionary<int, int>(p.Value)),
+                Currencies = initData.Metadata.Currencies, BaseOrganization = initData.Metadata.BaseOrganization,
+                RootBusinessUnit = initData.Metadata.RootBusinessUnit, Plugins = initData.Metadata.Plugins
+            };
             BaseCurrency = initData.BaseCurrency;
             baseCurrencyPrecision = initData.BaseCurrencyPrecision;
             OnlineDataService = initData.OnlineDataService;
-            db = new XrmDb(initData.Metadata.EntityMetadata, initData.OnlineDataService);
+            db = new XrmDb(metadata.EntityMetadata, initData.OnlineDataService);
             entityTypeMap = initData.EntityTypeMap;
             FileBlockStore = new FileBlockStore();
             snapshots = new Dictionary<string, Snapshot>();
-            security = new Security(this, initData.Metadata, initData.SecurityRoles, db);
+            security = new Security(this, metadata, initData.SecurityRoles, db);
             TracingServiceFactory = initData.Settings.TracingServiceFactory ?? new TracingServiceFactory();
             ServiceFactory = new MockupServiceProviderAndFactory(this);
 
@@ -148,11 +157,11 @@ namespace DG.Tools.XrmMockup
             }
 
             var pluginLogger = loggerFactory.CreateLogger(typeof(PluginManager).FullName);
-            pluginManager = new PluginManager(this, initData.Settings.BasePluginTypes, initData.Metadata.EntityMetadata, allPlugins, pluginLogger);
+            pluginManager = new PluginManager(this, initData.Settings.BasePluginTypes, metadata.EntityMetadata, allPlugins, pluginLogger);
 
             var workflowLogger = loggerFactory.CreateLogger(typeof(WorkflowManager).FullName);
             workflowManager = new WorkflowManager(this, initData.Settings.CodeActivityInstanceTypes, initData.Settings.IncludeAllWorkflows,
-                initData.Workflows, initData.Metadata.EntityMetadata, workflowLogger);
+                initData.Workflows, metadata.EntityMetadata, workflowLogger);
 
             var apiLogger = loggerFactory.CreateLogger(typeof(CustomApiManager).FullName);
             customApiManager = new CustomApiManager(this, initData.Settings.BaseCustomApiTypes, initData.Settings.StrictCustomApiParameters, apiLogger);
@@ -460,7 +469,20 @@ namespace DG.Tools.XrmMockup
             new ExecuteTransactionRequestHandler(this, db, metadata, security),
             new WinQuoteRequestHandler(this, db, metadata, security),
             new CloseQuoteRequestHandler(this, db, metadata, security),
-            new ReviseQuoteRequestHandler(this, db, metadata, security)
+            new ReviseQuoteRequestHandler(this, db, metadata, security),
+            new AddToQueueRequestHandler(this, db, metadata, security),
+            new AddMemberListRequestHandler(this, db, metadata, security),
+            new AddListMembersListRequestHandler(this, db, metadata, security),
+            new BulkDeleteRequestHandler(this, db, metadata, security),
+            new ExecuteFetchRequestHandler(this, db, metadata, security),
+            new InitializeFromRequestHandler(this, db, metadata, security),
+            new InsertOptionValueRequestHandler(this, db, metadata, security),
+            new InsertStatusValueRequestHandler(this, db, metadata, security),
+            new PickFromQueueRequestHandler(this, db, metadata, security),
+            new PublishXmlRequestHandler(this, db, metadata, security),
+            new RemoveFromQueueRequestHandler(this, db, metadata, security),
+            new RetrieveSharedPrincipalsAndAccessRequestHandler(this, db, metadata, security),
+            new NavigateToNextEntityRequestHandler(this, db, metadata, security)
         };
 
         internal void EnableProxyTypes(Assembly assembly)
