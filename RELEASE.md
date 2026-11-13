@@ -88,6 +88,12 @@ Release runs and manual previews share a separate concurrency queue for each pro
 
 The workflow checks out the exact source, builds/tests the solution, packs only the selected product, and makes **one NuGet push**. The matching `.snupkg` is packed beside the `.nupkg` and published automatically by that same command. Both files are retained as artifacts and attached to the GitHub release. Only after that push succeeds does it create the GitHub release, attach the package, and dispatch **Update product changelogs** to commit versioned history directly to `master`. No follow-up PR is needed. The published tag is not moved to include this later history commit.
 
+### Packaged changelogs and release notes
+
+Release preparation replaces the selected product's `Unreleased` heading in the build checkout with the exact tag version and UTC release date. The other product's changelog and published history are left unchanged. This versioned section is saved as `.release/notes.md` and used for both NuGet `PackageReleaseNotes` and the GitHub release body, including prerelease suffixes.
+
+The regular NuGet package includes the complete selected product changelog at its root: `RELEASE_NOTES.md` for `XrmMockup365`, or `CHANGELOG.md` for `XrmMockup.MetadataGenerator`. Before artifact upload and again before publication, validation checks that both package manifests contain the saved release notes and that the packaged changelog starts with that same release section. Missing files, stale notes, and mismatched versions fail validation. Development/local preview packages retain their development notes and unreleased changelog; they are not publication artifacts.
+
 ## Failed release
 
 If the NuGet push fails, the run stops and no GitHub release is created. Fix the cause, remove the failed tag remotely and locally, then create it again at the corrected/reconciled source:
