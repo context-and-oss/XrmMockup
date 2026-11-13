@@ -6,18 +6,20 @@ on:
 permissions:
   contents: write
   pull-requests: read
+  actions: write
 concurrency:
   group: release-changelog-writer
   cancel-in-progress: false
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
           ref: master
           fetch-depth: 0
-      - name: Commit product changelogs to master
+      - name: Validate and commit product changelogs to master
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

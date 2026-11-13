@@ -17,10 +17,14 @@ Write-Output 'PASS: release workflow retains pending requests without canceling 
 $changelogWorkflow = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/update-changelogs.yml') -Raw
 Assert ($changelogWorkflow -match '(?m)^  contents: write\s*$') 'Changelog writer needs repository contents write permission'
 Assert ($changelogWorkflow -match '(?m)^  pull-requests: read\s*$') 'Changelog writer only reads PR metadata'
-Assert ($changelogWorkflow -notmatch '(?m)^  (pull-requests|actions): write\s*$') 'Changelog writer must not create PRs or dispatch their checks'
+Assert ($changelogWorkflow -notmatch '(?m)^  pull-requests: write\s*$') 'Changelog writer must not create PRs'
+Assert ($changelogWorkflow -match '(?m)^  actions: write\s*$') 'Changelog writer must be able to dispatch CI'
+$ciWorkflow = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/ci.yml') -Raw
+Assert ($ciWorkflow -match '(?m)^  workflow_dispatch:\s*$') 'Native CI must support dispatch on the generated commit'
+Assert ($ciWorkflow -match '(?m)^  ci:\s*$' -and $ciWorkflow -match '(?m)^  contents: read\s*$') 'Dispatched CI must retain its required job name and read-only permissions'
 Assert ($changelogWorkflow -match 'branches: \[master\]' -and $changelogWorkflow -match 'workflow_dispatch:') 'Master merges and manual recovery must update notes'
 Assert ($changelogWorkflow -match 'cancel-in-progress: false') 'Changelog writers must not cancel an in-flight update'
-Write-Output 'PASS: direct-master changelog workflow permissions and triggers'
+Write-Output 'PASS: CI-gated direct-master changelog workflow permissions and triggers'
 
 # Metadata changes rerun one native, read-only PR check rather than publishing duplicates.
 $classification = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/pr-classification.yml') -Raw
@@ -81,6 +85,25 @@ try {
     [void](Invoke-Git -Arguments @('init', '--bare', $remote))
     [void](Invoke-Git -Arguments @('remote', 'add', 'origin', $remote))
     [void](Invoke-Git -Arguments @('push', '-u', 'origin', 'master', '--tags'))
+    # Model the required status check: bot commits cannot reach master before
+    # the matching dispatched CI succeeds, while ordinary source merges can.
+    $hook = Join-Path $remote 'hooks/pre-receive'
+    @'
+#!/bin/sh
+while read old new ref; do
+    if [ "$ref" = refs/heads/master ] && [ "$(git show -s --format=%an "$new")" = 'github-actions[bot]' ]; then
+        if [ ! -f "ci-$new" ]; then
+            echo 'Required status check ci is expected' >&2
+            exit 1
+        fi
+    fi
+done
+'@ | Set-Content $hook -NoNewline
+    if (!$IsWindows) { & chmod +x $hook }
+    $global:TestCiRuns = @()
+    $global:TestFailCi = $false
+    $global:TestFailDispatch = $false
+    $global:TestHideCiRuns = $false
     $env:GITHUB_REPOSITORY = 'owner/repo'; $env:GITHUB_OUTPUT = Join-Path $root 'outputs'
     function global:gh {
         [CmdletBinding(PositionalBinding = $false)]
@@ -89,6 +112,16 @@ try {
             $global:LASTEXITCODE = 0
             if ($Arguments[0] -eq 'api') {
                 $path = [string]$Arguments[1]
+                if ($path -match '/actions/workflows/ci.yml/runs\?') {
+                    if ($global:TestHideCiRuns) { '{"workflow_runs":[]}'; return }
+                    $latest = $global:TestCiRuns[-1]
+                    # Higher IDs for unrelated runs must never authorize a push.
+                    @{ workflow_runs = @(
+                        @{ id = 999999; head_sha = 'wrong-sha'; head_branch = $latest.head_branch },
+                        @{ id = 999998; head_sha = $latest.head_sha; head_branch = 'wrong-branch' }
+                    ) + $global:TestCiRuns } | ConvertTo-Json -Compress -Depth 10
+                    return
+                }
                 if ($path -match '/releases(\?|$)') { foreach ($item in $global:TestReleases) { $item | ConvertTo-Json -Compress -Depth 10 }; return }
                 if ($path -match '/commits/([^/]+)/pulls') { foreach ($pr in @($global:TestPrs + $global:TestAssociatedPrs) | Where-Object { $_.merge_commit_sha -eq $Matches[1] -or $_.associated_commit_sha -eq $Matches[1] }) { $pr | ConvertTo-Json -Compress -Depth 10 }; return }
                 if ($path -match '/pulls/(\d+)$') {
@@ -98,6 +131,25 @@ try {
                 }
                 throw "Unexpected test API request: $path"
             }
+            if ($Arguments[0] -eq 'workflow' -and $Arguments[1] -eq 'run') {
+                Assert ($Arguments[2] -eq 'ci.yml') 'Only the normal CI workflow is dispatched'
+                if ($global:TestFailDispatch) { $global:LASTEXITCODE = 1; return }
+                $branch = [string]$Arguments[[array]::IndexOf($Arguments, '--ref') + 1]
+                $sha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
+                $staged = Invoke-Git -Arguments @('ls-remote', 'origin', "refs/heads/$branch")
+                Assert ($staged.StartsWith($sha)) 'CI source must exist on the temporary remote branch'
+                Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -ne $sha) 'Master must not advance before CI'
+                $global:TestCiRuns += @{ id = $global:TestCiRuns.Count + 1; head_sha = $sha; head_branch = $branch }
+                return
+            }
+            if ($Arguments[0] -eq 'run' -and $Arguments[1] -eq 'watch') {
+                Assert ('--exit-status' -in $Arguments) 'Failed CI must fail the writer'
+                $run = $global:TestCiRuns[-1]
+                Assert ([string]$run.id -eq [string]$Arguments[2]) 'Only the exact staged commit and branch CI is watched'
+                if ($global:TestFailCi) { $global:LASTEXITCODE = 1; return }
+                [IO.File]::WriteAllText((Join-Path $remote "ci-$($run.head_sha)"), 'passed')
+                return
+            }
             throw "Unexpected test CLI operation: $($Arguments -join '|') input:$InputObject"
         }
     }
@@ -105,6 +157,8 @@ try {
         [void](Invoke-Git -Arguments @('fetch', 'origin', 'master'))
         [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
         [void](Invoke-Git -Arguments @('reset', '--hard', 'origin/master'))
+        [void](Invoke-Git -Arguments @('config', 'user.name', 'maintainer'))
+        [void](Invoke-Git -Arguments @('config', 'user.email', 'maintainer@example.test'))
         $number = $global:TestPrs.Count + 1
         $Title | Set-Content "feature-$number.txt"
         [void](Invoke-Git -Arguments @('add', '.')); [void](Invoke-Git -Arguments @('commit', '-m', $Title))
@@ -155,7 +209,9 @@ try {
     foreach ($product in @('core', 'metadata')) {
         Assert ((Get-Content $config.products[$product].changelog -Raw).Contains('Shared behavior')) 'Shared changes appear for both products'
     }
+    $ciRunsBeforeNoOp = $global:TestCiRuns.Count
     & "$scripts/Update-Changelogs.ps1"
+    Assert ($global:TestCiRuns.Count -eq $ciRunsBeforeNoOp) 'No-op updates do not dispatch CI'
     Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'Repeated runs and bot commits do not create recursive updates'
     Assert (@(Get-PendingChanges $env:GITHUB_REPOSITORY 'HEAD' $global:TestReleases).Count -eq 3) 'Direct bot commits do not contribute PR-derived notes'
     [void](Invoke-Git -Arguments @('checkout', '--detach', $master))
@@ -280,11 +336,36 @@ try {
     }
     Add-Feature @('product:core') 'Fix: Before concurrent merge'
     $global:TestBeforePush = { $global:TestBeforePush = $null; Add-ConcurrentFeature }
+    $ciRunsBeforeRace = $global:TestCiRuns.Count
     & "$scripts/Update-Changelogs.ps1"
     Assert ($global:TestPushAttempts -eq 2) 'A rejected non-fast-forward push regenerates and retries'
+    Assert ($global:TestCiRuns.Count -eq $ciRunsBeforeRace + 2) 'Each regenerated commit must pass its own CI'
     Assert ((Get-Content $config.products.core.changelog -Raw).Contains('Concurrent merge')) 'Retry includes the concurrent PR note'
     Assert (Test-Ancestor $global:TestPrs[-1].merge_commit_sha 'origin/master') 'Concurrent source commit is preserved'
     Assert ((Invoke-Git -Arguments @('rev-parse', 'HEAD^')) -eq $global:TestPrs[-1].merge_commit_sha) 'Retry commit is based on the advanced master'
+
+    Add-Feature @('product:core') 'Fix: Failed generated-commit CI'
+    $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
+    $global:TestSleepCount = 0
+    function global:Start-Sleep { param([int]$Seconds); $global:TestSleepCount++ }
+    foreach ($failure in @('ci', 'dispatch', 'missing-run')) {
+        $global:TestFailCi = $failure -eq 'ci'
+        $global:TestFailDispatch = $failure -eq 'dispatch'
+        $global:TestHideCiRuns = $failure -eq 'missing-run'
+        $global:TestPushAttempts = 0
+        Reject { & "$scripts/Update-Changelogs.ps1" }
+        Assert ($global:TestPushAttempts -eq 0) 'Failed CI or dispatch must not attempt a master push'
+        Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $updated) 'CI failure preserves remote master'
+        Assert (!(Invoke-Git -Arguments @('ls-remote', 'origin', 'refs/heads/automation/changelog-*'))) 'Failed attempts remove their temporary branch'
+    }
+    Assert ($global:TestSleepCount -eq 60) 'Missing CI runs have a bounded discovery wait'
+    Remove-Item Function:global:Start-Sleep
+    $global:TestFailCi = $false
+    $global:TestFailDispatch = $false
+    $global:TestHideCiRuns = $false
+    & "$scripts/Update-Changelogs.ps1"
+    Assert (!(Invoke-Git -Arguments @('ls-remote', 'origin', 'refs/heads/automation/changelog-*'))) 'Successful attempts remove their temporary branch'
+    Write-Output 'PASS: required CI on the exact staged commit, dispatch/check failures and temporary-branch cleanup'
 
     Add-Feature @('product:core') 'Fix: Permission rejection'
     $updated = Invoke-Git -Arguments @('rev-parse', 'origin/master')
@@ -308,6 +389,7 @@ try {
 } finally {
     Remove-Item Function:global:gh -ErrorAction SilentlyContinue
     Remove-Item Function:global:git -ErrorAction SilentlyContinue
+    Remove-Item Function:global:Start-Sleep -ErrorAction SilentlyContinue
     if ($raceRepo) { Remove-Item $raceRepo -Recurse -Force -ErrorAction SilentlyContinue }
     $config.historyBaseline = $oldHistoryBaseline
     Set-Location $old; $env:GITHUB_REPOSITORY = $oldRepository; $env:GITHUB_OUTPUT = $oldOutput
