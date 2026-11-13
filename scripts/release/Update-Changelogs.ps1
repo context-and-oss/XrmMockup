@@ -38,6 +38,6 @@ if ($open.Count) {
 }
 [void](Invoke-Gh -Arguments $arguments)
 $pr = @(Get-GhList "/repos/$env:GITHUB_REPOSITORY/pulls?state=open&base=master&head=$([uri]::EscapeDataString($env:GITHUB_REPOSITORY.Split('/')[0] + ':' + $branch))")[0]
-@{ pr_number = "$($pr.number)" } | ConvertTo-Json -Compress | & gh workflow run pr-classification.yml --repo $env:GITHUB_REPOSITORY --ref master --json
+@{ pr_number = "$($pr.number)" } | ConvertTo-Json -Compress | & gh workflow run pr-classification.yml --repo $env:GITHUB_REPOSITORY --ref $branch --json
 if ($LASTEXITCODE -ne 0) { throw 'Cannot dispatch PR classification' }
 Write-Output "Updated changelog PR #$($pr.number); master was not pushed"

@@ -1,6 +1,6 @@
 # Release sequence
 
-Updated: 6 November 2026. This describes the simplified implementation.
+Updated: 13 November 2026. This describes the simplified implementation.
 
 ```mermaid
 sequenceDiagram
@@ -24,7 +24,7 @@ sequenceDiagram
     Notes->>GitHub: Create/update one changelog PR (product:none, change:chore)
     Notes->>Checks: Dispatch classification for the current PR head
     GitHub->>Checks: Native PR CI, maintainer approval when requested
-    Note over Checks,GitHub: Verify required CI check binding during initial setup
+    Note over Checks,GitHub: Verify both required checks bind to the bot PR during setup
     Note over Notes,GitHub: Further merges refresh the same open PR
     Maintainer->>GitHub: Review and merge changelog PR
     GitHub->>Notes: Trigger again, its own merge contributes no note
@@ -63,7 +63,7 @@ Pending notes and published history normally require two changelog PR merges, bu
 ## Simplifications applied
 
 - PowerShell handles policy and text/JSON transformations; `gh` and `dotnet` perform operations directly. No Node runtime or custom GitHub HTTP client.
-- One classification workflow fetches PR metadata once and reports both existing required check names.
+- One read-only `pull_request` classification workflow fetches PR metadata once and reports a single native **PR release labels** check. Explicit bot-PR dispatch runs on its head branch.
 - Product/category definitions live in one JSON configuration file.
 - Label provisioning and GitHub publication are short workflow steps, not separate wrapper scripts.
 - Tag pushes are the only publication trigger. Manual dispatch only builds previews.

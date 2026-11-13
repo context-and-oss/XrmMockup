@@ -14,6 +14,18 @@ Assert ($concurrency -match '(?m)^  queue: max\s*$') 'Release requests must queu
 Assert ($concurrency -match '(?m)^  cancel-in-progress: false\s*$') 'Queued releases must not cancel running publication'
 Write-Output 'PASS: release workflow retains pending requests without canceling running publication'
 
+# Metadata changes rerun one native, read-only PR check rather than publishing duplicates.
+$classification = Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/pr-classification.yml') -Raw
+Assert ($classification -match '(?m)^  pull_request:\s*$' -and $classification -notmatch 'pull_request_target:') 'Classification must use the ordinary PR event'
+foreach ($event in @('opened', 'reopened', 'synchronize', 'labeled', 'unlabeled', 'edited', 'ready_for_review')) {
+    Assert ($classification -match "\b$event\b") "Classification must rerun on $event"
+}
+Assert ($classification -match '(?m)^    name: PR release labels\s*$') 'The single native check name must match repository setup'
+Assert ($classification -notmatch '(?m)^  \S+: write\s*$') 'Classification must not request write permissions'
+Assert ($classification -notmatch '(?m)^          ref:') 'PR validation must use the normal event checkout'
+Assert ($classification.Contains("github.event_name == 'workflow_dispatch' && github.sha")) 'Manual dispatch must verify its check commit against the PR head'
+Write-Output 'PASS: single read-only native classification workflow and metadata triggers'
+
 $config = Get-ReleaseConfig
 Assert ((Compare-Version '1.20.3-RC.1' '1.20.3-rc.1') -eq 0) 'NuGet casing identity'
 Assert ((Compare-Version '1.20.3-rc.10' '1.20.3-rc.2') -gt 0) 'Numeric prerelease order'
@@ -46,7 +58,7 @@ try {
     [void](Invoke-Git -Arguments @('commit', '--allow-empty', '-m', 'Legacy unclassified PR'))
     $legacySha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
     '.release/' | Set-Content '.gitignore'
-    $global:TestAssociatedPrs = @(); $global:TestPrs = @(); $global:TestBotPr = $null; $global:TestChecks = @(); $global:TestWrites = @()
+    $global:TestAssociatedPrs = @(); $global:TestPrs = @(); $global:TestBotPr = $null; $global:TestPrReads = 0; $global:TestDispatches = @(); $global:TestWrites = @()
     $global:TestReleases = foreach ($product in @('core', 'metadata')) {
         $version = $config.products[$product].baselineVersion
         $path = $config.products[$product].changelog
@@ -74,8 +86,8 @@ try {
                 if ($path.Contains('pulls?')) {
                     if ($global:TestBotPr -and $global:TestBotPr.state -eq 'open') { $global:TestBotPr | ConvertTo-Json -Compress -Depth 10 }; return
                 }
-                if ($path.EndsWith('/check-runs')) { $global:TestChecks += $InputObject | ConvertFrom-Json -AsHashtable; return }
                 if ($path -match '/pulls/(\d+)$') {
+                    $global:TestPrReads++
                     $pr = @($global:TestPrs + @($global:TestBotPr) | Where-Object { $_ -and $_.number -eq [int]$Matches[1] })[0]
                     $pr | ConvertTo-Json -Compress -Depth 10; return
                 }
@@ -90,7 +102,10 @@ try {
                 }
                 return
             }
-            if ($Arguments[0] -eq 'workflow') { return }
+            if ($Arguments[0] -eq 'workflow') {
+                $global:TestDispatches += @{ ref = $Arguments[[array]::IndexOf($Arguments, '--ref') + 1]; input = $InputObject | ConvertFrom-Json -AsHashtable }
+                return
+            }
             throw "Unexpected test CLI operation: $($Arguments -join '|') input:$InputObject"
         }
     }
@@ -139,6 +154,10 @@ try {
     & "$scripts/Update-Changelogs.ps1"
     Assert ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $master) 'The writer must not push master'
     Assert (@($global:TestWrites | Where-Object { $_ -eq 'create' }).Count -eq 1) 'Multiple merges must update one PR'
+    Assert ($global:TestDispatches.Count -eq 2) 'Each changelog PR update explicitly validates its labels'
+    foreach ($dispatch in $global:TestDispatches) {
+        Assert ($dispatch.ref -eq $config.changelogBranch -and $dispatch.input.pr_number -eq '100') 'Native bot check must run on the changelog head branch for its PR'
+    }
     $branch = $config.changelogBranch
     [void](Invoke-Git -Arguments @('fetch', 'origin', $branch))
     [void](Invoke-Git -Arguments @('checkout', '--force', '-B', 'master', 'origin/master'))
@@ -191,12 +210,22 @@ try {
     & "$scripts/Prepare-Release.ps1" -Tag 'core-v1.20.3'
     Assert ((Get-Content $env:GITHUB_OUTPUT -Raw).Contains('publish=true')) 'Tag preparation enables publication'
     Write-Output 'PASS: selected-product boundaries, released-note filtering, tag preparation and rejection of stale/unmerged/old-version sources'
+    $reads = $global:TestPrReads
     & "$scripts/Check-Pr.ps1" -PrNumber 1
-    Assert ($global:TestChecks.Count -eq 2) 'Both required checks are reported'
-    Assert (@($global:TestChecks | Where-Object { $_.conclusion -ne 'success' }).Count -eq 0) 'Valid PR checks succeed'
+    Assert ($global:TestPrReads -eq $reads + 1) 'Validation fetches current metadata once and makes no check-run writes'
+    & "$scripts/Check-Pr.ps1" -PrNumber 1 -ExpectedHeadSha $global:TestPrs[0].head.sha
+    Reject { & "$scripts/Check-Pr.ps1" -PrNumber 1 -ExpectedHeadSha 'wrong-commit' }
     $global:TestPrs[0].labels = @()
     Reject { & "$scripts/Check-Pr.ps1" -PrNumber 1 }
-    Assert ($global:TestChecks[2].conclusion -eq 'failure' -and $global:TestChecks[3].conclusion -eq 'success') 'Invalid product labeling fails without hiding the category result'
+    $global:TestPrs[0].labels = @('product:none', 'product:core')
+    Reject { & "$scripts/Check-Pr.ps1" -PrNumber 1 }
+    $global:TestPrs[0].labels = @('product:core', 'change:feature')
+    Reject { & "$scripts/Check-Pr.ps1" -PrNumber 1 }
+    $global:TestPrs[0].labels = @('product:core')
+    $global:TestPrs[0].title = 'No category'
+    Reject { & "$scripts/Check-Pr.ps1" -PrNumber 1 }
+    $global:TestPrs[0].labels = @('product:none', 'change:chore')
+    & "$scripts/Check-Pr.ps1" -PrNumber 1
     Write-Output 'PASS: single PR aggregation, no master push, no recursive PR, product previews and checks'
 } finally {
     Remove-Item Function:global:gh -ErrorAction SilentlyContinue
@@ -204,6 +233,57 @@ try {
     Set-Location $old; $env:GITHUB_REPOSITORY = $oldRepository; $env:GITHUB_OUTPUT = $oldOutput
     Remove-Item $root -Recurse -Force
     Remove-Item $remote -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Test the PR script's process exit status, including its native PR event input.
+$root = Join-Path ([IO.Path]::GetTempPath()) ('pr-check-test-' + [guid]::NewGuid())
+$pwsh = (Get-Process -Id $PID).Path
+try {
+    New-Item $root -ItemType Directory | Out-Null
+    $runner = Join-Path $root 'run.ps1'
+    $fixture = Join-Path $root 'pr.json'
+    @'
+param([string]$Script, [string]$Fixture)
+$ErrorActionPreference = 'Stop'
+$env:GITHUB_REPOSITORY = 'owner/repo'
+$env:GITHUB_EVENT_PATH = $Fixture
+function global:gh {
+    param([Parameter(ValueFromRemainingArguments)][object[]]$Arguments)
+    if ($Arguments.Count -ne 2 -or $Arguments[0] -ne 'api' -or $Arguments[1] -ne '/repos/owner/repo/pulls/1') { throw 'Unexpected API operation' }
+    $global:LASTEXITCODE = 0
+    (Get-Content $Fixture -Raw | ConvertFrom-Json).pull_request | ConvertTo-Json -Depth 10
+}
+& $Script
+'@ | Set-Content $runner
+    $cases = @(
+        @{ title = 'Fix: Valid title'; labels = @('product:core'); valid = $true },
+        @{ title = 'Maintenance'; labels = @(@{ name = 'product:none' }, @{ name = 'change:chore' }); valid = $true },
+        @{ title = 'Fix: Missing product'; labels = @(); valid = $false },
+        @{ title = 'Fix: Exclusive product'; labels = @('product:none', 'product:core'); valid = $false },
+        @{ title = 'Missing category'; labels = @('product:core'); valid = $false },
+        @{ title = 'Add: Conflict'; labels = @('product:core', 'change:fix'); valid = $false },
+        @{ title = 'Multiple categories'; labels = @('product:core', 'change:fix', 'change:chore'); valid = $false },
+        @{ title = 'No classification'; labels = @(); valid = $false }
+    )
+    foreach ($case in $cases) {
+        @{ pull_request = @{ number = 1; title = $case.title; labels = $case.labels } } | ConvertTo-Json -Depth 10 | Set-Content $fixture
+        $output = & $pwsh -NoProfile -File $runner (Join-Path $PSScriptRoot 'Check-Pr.ps1') $fixture 2>&1
+        $exit = $LASTEXITCODE
+        Assert (($exit -eq 0) -eq $case.valid) "Unexpected PR validation exit $exit for $($case.title): $output"
+        if ($case.title -eq 'No classification') {
+            Assert (($output -join "`n") -match 'Product labels:' -and ($output -join "`n") -match 'Change category:') 'The single failing job reports both classification errors'
+        }
+    }
+    # No PR number and a metadata API failure must also fail closed.
+    @{ pull_request = @{ number = -1 } } | ConvertTo-Json -Depth 10 | Set-Content $fixture
+    $output = & $pwsh -NoProfile -File $runner (Join-Path $PSScriptRoot 'Check-Pr.ps1') $fixture 2>&1
+    Assert ($LASTEXITCODE -ne 0) 'Invalid PR numbers fail the native check'
+    @{ pull_request = @{ number = 2 } } | ConvertTo-Json -Depth 10 | Set-Content $fixture
+    $output = & $pwsh -NoProfile -File $runner (Join-Path $PSScriptRoot 'Check-Pr.ps1') $fixture 2>&1
+    Assert ($LASTEXITCODE -ne 0) 'Metadata API errors fail the native check'
+    Write-Output 'PASS: native PR check exits correctly for valid, missing, conflicting and invalid metadata; no check-run writes'
+} finally {
+    Remove-Item $root -Recurse -Force
 }
 
 # Exercise the actual validator in a separate process: a printed exception alone
