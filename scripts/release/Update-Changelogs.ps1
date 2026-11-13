@@ -42,6 +42,25 @@ foreach ($attempt in 1..$maxAttempts) {
         }
         if (!$run.Count) { throw "CI dispatch did not start for changelog commit $commit; master was not updated" }
         [void](Invoke-Gh -Arguments @('run', 'watch', [string]$run[0].id, '--repo', $env:GITHUB_REPOSITORY, '--exit-status'))
+        # Re-read the watched run rather than treating a successful CLI exit as
+        # proof of its identity/conclusion. Never publish a status for another SHA.
+        $validatedRun = Get-GhJson "/repos/$env:GITHUB_REPOSITORY/actions/runs/$($run[0].id)"
+        if ($validatedRun.id -ne $run[0].id -or $validatedRun.head_sha -ne $commit -or
+            $validatedRun.head_branch -ne $branch -or $validatedRun.event -ne 'workflow_dispatch' -or
+            $validatedRun.status -ne 'completed' -or $validatedRun.conclusion -ne 'success') {
+            throw "CI did not confirm success for changelog commit $commit; master was not updated"
+        }
+        # A successful workflow_dispatch check can still leave the protected
+        # direct push reporting 'ci is expected'. Bridge the REAL build result
+        # to the branch-independent commit-status context required by master.
+        # This is not a replacement for CI and requires no branch-rule bypass.
+        $status = @{
+            state = 'success'
+            context = 'ci'
+            description = 'Generated changelogs passed Check PR CI'
+            target_url = $validatedRun.html_url
+        } | ConvertTo-Json -Compress
+        [void](Invoke-Gh -Arguments @('api', "/repos/$env:GITHUB_REPOSITORY/statuses/$commit", '--method', 'POST', '--input', '-') -InputText $status)
         # Handle only a moving master as retryable; permission/protection failures
         # with an unchanged remote should surface immediately.
         & git push origin HEAD:refs/heads/master
@@ -56,7 +75,7 @@ foreach ($attempt in 1..$maxAttempts) {
     }
     [void](Invoke-Git -Arguments @('fetch', 'origin', '+refs/heads/master:refs/remotes/origin/master'))
     if ((Invoke-Git -Arguments @('rev-parse', 'origin/master')) -eq $source) {
-        throw 'Cannot push CI-validated changelogs to master; check contents: write and repository branch rules'
+        throw 'Cannot push CI-validated changelogs to master after publishing the ci status; check repository branch rules and required-check source restrictions'
     }
     if ($attempt -lt $maxAttempts) { Write-Output 'Master advanced during the update; regenerating changelogs' }
 }
