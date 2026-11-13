@@ -39,7 +39,6 @@
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/tests/">
-    <File Path="Tools/appsettings.json" />
     <Project Path="tests/TestEnvProvisioner/TestEnvProvisioner.csproj" />
     <Project Path="tests/TestPluginAssembly365/TestPluginAssembly365.csproj" />
     <Project Path="tests/XrmMockup365Test/XrmMockup365Test.csproj" />
@@ -50,5 +49,4 @@
   </Folder>
   <Project Path="src/MetadataSkeleton/MetadataSkeleton.shproj" />
   <Project Path="src/XrmMockup365/XrmMockup365.csproj" />
-  <Project Path="Tools/Tools.csproj" Id="d375a019-3229-4d24-955b-06248d1d12f5" />
 </Solution>
