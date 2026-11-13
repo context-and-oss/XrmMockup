@@ -199,14 +199,6 @@ docs/content/release-notes.md
 docs/tools/FSharp.Formatting.svclog
 
 *.vs		
-# DAXIF		
-/**/Daxif/*.exe		
-/**/Daxif/*.dll		
-/**/Daxif/*.xml		
-/**/Daxif/*/		
-/XrmMockup/tools/XrmContext/*.exe.config		
-/XrmMockup/tools/Signature/delegate.snk
-/tools/XrmContext/EnvInfo.config
 /src/MetadataGen/XrmMockupTest.csproj
 
 # Claude files
