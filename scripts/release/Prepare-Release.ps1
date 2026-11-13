@@ -12,7 +12,7 @@ if ((Compare-Version $release.version $latest) -le 0) { throw 'Choose a version 
 $entries = @(Get-PendingChanges $env:GITHUB_REPOSITORY $source $releases $release.product)
 $product = $config.products[$release.product]
 $original = (Get-Content $product.changelog -Raw).Replace("`r`n", "`n")
-if ((Get-Changelog $original $entries $release.product $previous) -cne $original) { throw 'Merge the changelog PR covering this source before tagging' }
+if ((Get-Changelog $original $entries $release.product $previous) -cne $original) { throw 'Wait for Update product changelogs to commit notes covering this source to master before tagging' }
 $notes = Get-NoteText $entries $release.product
 if (!$notes) { throw 'No pending changes for the selected product' }
 $section = "### $($release.version) - $([DateTime]::UtcNow.ToString('yyyy-MM-dd'))`n$notes"

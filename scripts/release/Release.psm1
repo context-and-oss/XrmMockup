@@ -33,16 +33,10 @@ function Test-Ancestor {
     if ($LASTEXITCODE -gt 1) { throw 'Cannot verify Git ancestry' }
     return $LASTEXITCODE -eq 0
 }
-function Test-ChangelogPr {
-    param($Pr)
-    return $Pr.user.login -eq 'github-actions[bot]' -and $Pr.head.ref -eq $script:Config.changelogBranch -and
-        $Pr.head.repo.full_name -eq $Pr.base.repo.full_name
-}
 function Get-PrProducts {
     param($Pr)
     $labels = @($Pr.labels | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.name } })
     $selected = @($script:Config.products.Keys | Where-Object { "product:$_" -in $labels })
-    if ((Test-ChangelogPr $Pr) -and ('product:none' -notin $labels -or $selected.Count)) { throw 'The changelog PR must use product:none exclusively' }
     if ('product:none' -in $labels) {
         if ($selected.Count) { throw 'product:none is exclusive' }
         return
@@ -59,7 +53,6 @@ function Get-PrNote {
     $match = [regex]::Match($title, '^(Add|Fix|Change|Breaking|Chore):\s*(.+)$', 'IgnoreCase')
     $prefix = if ($categories.Count) { $script:Config.categories[$categories[0]] } elseif ($match.Success) { $match.Groups[1].Value } else { throw 'A category label or title prefix is required' }
     if ($match.Success -and $match.Groups[1].Value -ine $prefix) { throw 'Category label and title prefix conflict' }
-    if ((Test-ChangelogPr $Pr) -and $prefix -ine 'Chore') { throw 'The changelog PR must use Chore' }
     $description = if ($match.Success) { $match.Groups[2].Value.Trim() } else { $title }
     if (!$description -or $title -match '[\r\n]' -or $title -match '^(Add|Fix|Change|Breaking|Chore):\s*$') { throw 'Use a descriptive single-line title' }
     return @{ category = $script:Config.categories.Values | Where-Object { $_ -ieq $prefix } | Select-Object -First 1; description = $description }
@@ -141,7 +134,7 @@ function Get-Changelog {
         $version = (Get-ReleaseTag $release.tag_name).version
         if ($version.ToLowerInvariant() -in $recorded) { continue }
         $body = $release.body.Trim()
-        $sections += if ($body.StartsWith("### $version -")) { $body } else { "### $version - $($release.published_at.Substring(0, 10))`n$body" }
+        $sections += if ($body.StartsWith("### $version -")) { $body } else { "### $version - $(([DateTime]$release.published_at).ToString('yyyy-MM-dd'))`n$body" }
     }
     $sections += $history
     return (($sections | Where-Object { $_ }) -join "`n`n") + "`n"

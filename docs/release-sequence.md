@@ -21,13 +21,12 @@ sequenceDiagram
     Maintainer->>GitHub: Review and merge feature PR to master
     GitHub->>Notes: Trigger on master push
     Notes->>GitHub: Read merged PRs and successful product releases
-    Notes->>GitHub: Create/update one changelog PR (product:none, change:chore)
-    Notes->>Checks: Dispatch classification for the current PR head
-    GitHub->>Checks: Native PR CI, maintainer approval when requested
-    Note over Checks,GitHub: Verify both required checks bind to the bot PR during setup
-    Note over Notes,GitHub: Further merges refresh the same open PR
-    Maintainer->>GitHub: Review and merge changelog PR
-    GitHub->>Notes: Trigger again, its own merge contributes no note
+    Notes->>GitHub: Commit both generated changelogs directly to current master
+    opt Another merge advances master before the push
+        Notes->>GitHub: Fetch new master, regenerate and retry (up to three attempts)
+    end
+    Note over Notes,GitHub: GITHUB_TOKEN push does not recursively trigger workflows
+    Maintainer->>GitHub: Fetch master containing the notes update before tagging
 
     alt Manual preview
         Maintainer->>Build: Dispatch candidate tag and source_ref (preview-only)
@@ -52,29 +51,29 @@ sequenceDiagram
         else Push succeeds
             Publish->>GitHub: Create release with prepared notes and both assets
             Publish->>Notes: Dispatch history refresh
-            Notes->>GitHub: Update combined changelog PR with versioned history
-            Maintainer->>GitHub: Review and merge history PR
+            Notes->>GitHub: Commit versioned history directly to master
         end
     end
 ```
 
-Pending notes and published history normally require two changelog PR merges, but later feature merges can share the history PR. There is only one open changelog PR at a time.
+Pending notes and published history are automatic bot commits on master. No changelog PR, PR-creation permission, or follow-up approval is needed. Direct writes must be permitted by repository rules.
 
 ## Simplifications applied
 
 - PowerShell handles policy and text/JSON transformations; `gh` and `dotnet` perform operations directly. No Node runtime or custom GitHub HTTP client.
-- One read-only `pull_request` classification workflow fetches PR metadata once and reports a single native **PR release labels** check. Explicit bot-PR dispatch runs on its head branch.
+- One read-only `pull_request` classification workflow fetches PR metadata once and reports a single native **PR release labels** check. Manual validation dispatch verifies the selected PR head commit.
 - Product/category definitions live in one JSON configuration file.
+- One serialized changelog writer commits only the two note files to master, with bounded regeneration retries for concurrent merges and no force pushes.
 - Label provisioning and GitHub publication are short workflow steps, not separate wrapper scripts.
 - Tag pushes are the only publication trigger. Manual dispatch only builds previews.
 - One package push also uploads matching symbols. Partial success is recovered manually from artifacts.
 - No release ledger, merge queues, emergency audit mechanism, checksums or draft-retry framework.
 - Tests assert observable behavior using local Git and mocked GitHub responses, not exact command argument order or exception wording. They run only for relevant file changes or manual dispatch.
 
-## Further simplifications worth considering
+## Security boundaries retained
 
-1. **Keep the current review gate unless it becomes a burden.** Generating notes only at release time would remove the pre-release changelog PR, but files would no longer stay current after merges. That changes the agreed functionality.
-2. **Keep the build/publish separation.** Combining them shortens YAML but exposes write/OIDC credentials to source builds; the current security boundary is worth the extra job.
-3. **Start with ordinary CI on bot PRs.** A special Markdown-only CI shortcut could save builds, but adds another policy and reporting path. Add it only if actual CI cost warrants it.
+- Keep the build/publish separation: source builds have read-only credentials; only the trusted publish job has write/OIDC credentials.
+- Keep source PR review, label validation and normal CI. The bot's derived Markdown-only commits do not run CI recursively; release builds still test the exact tagged source.
+- Keep the fresh-notes gate before publication. Maintainers tag a source containing the automatic notes commit, not an earlier feature merge with stale notes.
 
 See [maintainer instructions](../RELEASE.md) and [the release-flow specification](release-flow.md).

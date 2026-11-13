@@ -8,7 +8,7 @@ See [the current sequence diagram and simplification analysis](release-sequence.
 
 - PR labels choose core, metadata, both, or exclusive `product:none`.
 - A category label or matching `Add:`, `Fix:`, `Change:`, `Breaking:`, or `Chore:` title prefix is mandatory.
-- One combined changelog PR is updated after master merges and successful releases. Maintainers review/merge it before tagging.
+- Both product changelogs are committed directly to master after merges and successful releases. Wait for the notes commit before tagging; no changelog PR is created.
 - `core-v<VERSION>` and `metadata-v<VERSION>` independently publish their one selected NuGet package.
 - Each release makes one `dotnet nuget push` (including its matching `.snupkg`), without skipping duplicates. Failure stops the run; maintainers can delete the failed tag and restart if NuGet has not accepted that version.
 - No merge-queue support, emergency audit mechanism, persistent release ledger/checkpoints, package checksums, receipts, or automatic partial-publication recovery.
@@ -17,18 +17,20 @@ See [the current sequence diagram and simplification analysis](release-sequence.
 
 `pr-classification.yml` runs on `pull_request` metadata/head changes targeting master and supports explicit dispatch by PR number on the PR head branch. It fetches current PR metadata once and validates both product and category rules in one native **PR release labels** job, with read-only contents/PR permissions and no custom check-run publishing. Missing or invalid classification fails that job. A dispatch verifies that the selected commit matches the PR head, so its native check is attached to the correct commit. PR runs check out the normal PR merge ref; review workflow/validator changes as part of normal code review. Fork runs may require maintainer approval.
 
-The bot-owned changelog PR must have `product:none` and `change:chore`. Normal maintenance PRs use the same classification rules. The writer explicitly dispatches classification by PR number on the changelog head branch. CI uses its native pull-request event rather than workflow dispatch; maintainers must approve its run when requested and verify both required checks are bound to the bot PR during initial setup.
+Normal maintenance PRs use `product:none` and a valid category. The changelog writer does not create PRs or dispatch classification checks.
 
 ## Notes generation
 
-`update-changelogs.yml` runs on master pushes or manual dispatch, using GITHUB_TOKEN with contents/PR/actions write. It writes only the reserved branch `automation/update-changelogs`, never master.
+`update-changelogs.yml` runs on master pushes or manual dispatch, using `GITHUB_TOKEN` with `contents: write` and `pull-requests: read`. It commits only the two configured changelog files directly to master. Repository rules must permit this direct write; Actions PR creation/approval permission is not required.
 
-1. Fetch master/tags and list published GitHub releases.
-2. Choose the latest successful same-product release as that product's notes boundary; before any new-format release, use the fixed migration cutoff `6e689d959b9013e2318320e9c317449d0de02c2d` (the PR #361 rollout merge). This exclusive boundary excludes the unclassified rollout and older PRs without rewriting legacy history.
-3. Find merged PRs in the relevant commit ranges through gh. Ignore open PRs, changes already released for that product, and `product:none` notes. Check that a PR merge commit is pending for at least one selected product before validating product labels, then determine pending products before validating category/title, so later edits to released-only PRs do not block unrelated pending changes; shared PRs still validate for any unreleased product. Unassociated direct commits have no automatic PR note and are not special-cased.
+1. Require a clean working tree, fetch current remote master/tags, and start the generated commit from that source. Workflow concurrency serializes writers without canceling an in-flight update.
+2. List published GitHub releases. Choose the latest successful same-product release as that product's notes boundary; before any new-format release, use the fixed migration cutoff `6e689d959b9013e2318320e9c317449d0de02c2d` (the PR #361 rollout merge). This exclusive boundary excludes the unclassified rollout and older PRs without rewriting legacy history.
+3. Find merged PRs in the relevant commit ranges through gh. Ignore open PRs, changes already released for that product, and `product:none` notes. Check that a PR merge commit is pending for at least one selected product before validating product labels, then determine pending products before validating category/title, so later edits to released-only PRs do not block unrelated pending changes; shared PRs still validate for any unreleased product. Unassociated direct commits, including bot notes commits, have no automatic PR note.
 4. Regenerate each Unreleased section, preserving recorded versioned history. Add new published sections from GitHub release bodies once. PR metadata may update pending notes; published sections do not change.
-5. Update one open PR using the fixed head/base. Further merges refresh that PR; identical content makes no new commit. Leases protect the reserved branch, and unrelated branch-file changes fail rather than being overwritten.
-6. Apply the maintenance labels, dispatch classification, and leave approval/merge to maintainers. Merging the bot PR does not add a note and therefore does not generate another PR for itself.
+5. Stage only the configured changelog files, validate the staged paths, and commit as `github-actions[bot]`. Identical content makes no new commit. Push with a normal fast-forward-only push; never force-push.
+6. If a push fails and remote master changed, repeat generation from the new source, including re-reading releases and PR metadata. Retry at most three times. If master is unchanged, fail immediately with a permission/branch-rules error. Retry exhaustion also fails visibly and can be recovered by manual dispatch.
+
+Bot pushes using `GITHUB_TOKEN` do not trigger further push workflows, avoiding recursion and unnecessary source CI. Source PR/master-merge CI remains the source-validation signal; the exact tagged source is also built/tested during release. Manual dispatch after label/title corrections or failed updates reconciles pending notes. Before tagging, wait for an update covering the selected source and fetch that notes commit; an earlier feature merge commit remains stale.
 
 There is no mutable release-state file. Existing historical changelog sections remain the archive. Pending notes are derived, not a second manually maintained version source.
 
@@ -53,7 +55,7 @@ The publish job is skipped for previews. It checks out only trusted default-bran
 1. Log in through the existing NuGet Trusted Publishing action.
 2. Push the one nupkg with its matching snupkg in the same directory. The same command publishes the regular package followed by its symbols. A nonzero exit stops the job. There is no separate automated symbols command and no duplicate skipping.
 3. Only on success, use gh to create the GitHub release for the existing tag, attach that package and its symbols and use the prepared versioned notes. Metadata releases do not take the repository's global Latest designation; prereleases are marked.
-4. Dispatch the writer to update the same combined changelog PR with successful release history.
+4. Dispatch the writer to commit successful release history directly to master.
 
 GitHub and NuGet are not atomic. A failure before NuGet acceptance can be restarted with a deleted/recreated tag; a symbol failure may occur after the regular package is accepted and needs manual completion using the saved symbol package; after acceptance, a maintainer completes GitHub/history using saved artifacts or releases a new version. The automation does not rebuild, compare, or resume old drafts.
 
@@ -61,9 +63,9 @@ GitHub and NuGet are not atomic. A failure before NuGet acceptance can be restar
 
 `release-automation.yml` runs the automation suite only when `scripts/release/**`, workflow definitions, or the package project/shared build configuration changes. It also supports manual dispatch. It is path-filtered and must not be required globally. The ordinary `ci.yml` .NET job and single **PR release labels** check remain unconditional for PRs; bot changelog-only updates do not run the automation unit suite.
 
-Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It checks the release workflow's queue configuration and covers single-check classification failures and dispatch commit binding, literal notes/history, several merges producing one PR without pushing master, bot-PR exclusion, first-deployment migration with no product releases and unclassified legacy PRs, strict post-migration classification, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
+Run `pwsh -NoProfile -File scripts/release/Test-Release.ps1` without credentials or remote access. The dependency-free suite uses real temporary local Git repositories, a mocked gh command, and synthetic NuGet ZIP archives. It checks the release workflow's queue configuration and covers single-check classification failures and dispatch commit binding, literal notes/history, several merges producing direct master commits, no-op/bot-commit idempotence, changelog-only writes, dirty-worktree rejection, published-history refresh, concurrent-merge regeneration, bounded retries and immediate unchanged-master push failure, first-deployment migration with no product releases and unclassified legacy PRs, strict post-migration classification, independent product previews and boundaries, released-note filtering, tag preparation, stale/unmerged/old-version rejection, and package/symbol validation. Invalid archives are tested in separate PowerShell processes to verify nonzero exit codes, not exception wording.
 
-These tests do not prove live GitHub queue scheduling, permissions, required-check binding, runner builds or NuGet/OIDC/symbol publication. Verify those in GitHub during rollout. No exact CLI argument, TLS/library, checksum, recovery-framework or merge-queue tests are retained.
+These tests do not prove live GitHub queue scheduling, permissions, required-check binding, runner builds or NuGet/OIDC/symbol publication. Verify those in GitHub during rollout. No exact CLI argument, TLS/library, checksum, publication-recovery-framework or merge-queue tests are retained.
 
 ## References
 
@@ -72,3 +74,5 @@ These tests do not prove live GitHub queue scheduling, permissions, required-che
 - Release creation: `https://cli.github.com/manual/gh_release_create`
 - NuGet push options: `https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-nuget-push`
 - NuGet Trusted Publishing: `https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing`
+
+- Workflow triggering and `GITHUB_TOKEN` recursion prevention: `https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow`
