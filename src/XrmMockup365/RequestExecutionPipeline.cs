@@ -60,6 +60,7 @@ namespace DG.Tools.XrmMockup
                 UserId = userRef.Id,
                 InitiatingUserId = userRef.Id,
                 MessageName = RequestNameToMessageName(request.RequestName),
+                OperationCreatedOn = DateTime.UtcNow.Add(core.TimeOffset),
                 Depth = 1,
                 ExtensionDepth = 1,
                 OrganizationName = core.OrganizationName,

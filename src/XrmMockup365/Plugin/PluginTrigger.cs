@@ -76,6 +76,8 @@ namespace DG.Tools.XrmMockup
             {
                 // Create the plugin context
                 var thisPluginContext = CreatePluginContext(pluginContext, guid, logicalName, preImage, postImage);
+                // Capture the async job's creation time when staging, rather than when it executes.
+                thisPluginContext.OperationCreatedOn = DateTime.UtcNow.Add(core.TimeOffset);
                 var provider = core.CreateServiceProviderAndFactory(thisPluginContext);
                 // Preserve async exception semantics (no TargetInvocationException unwrapping), but
                 // still time the execution and capture its trace messages into the grouped trace log.
