@@ -1,6 +1,6 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.20.3 - 13 November 2026
