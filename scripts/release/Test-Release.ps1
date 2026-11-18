@@ -40,19 +40,24 @@ Assert ($classification.Contains("github.event_name == 'workflow_dispatch' && gi
 Write-Output 'PASS: single read-only native classification workflow and metadata triggers'
 
 $config = Get-ReleaseConfig
-foreach ($product in @('core', 'metadata')) {
+foreach ($product in ($config.products.Keys | Sort-Object)) {
+    Assert ($workflow.Contains("'$product-v*'")) 'Every configured product has a release tag trigger'
     [xml]$project = Get-Content (Join-Path $PSScriptRoot "../../$($config.products[$product].project)") -Raw
     $changelogName = Split-Path $config.products[$product].changelog -Leaf
     $packedChangelog = @($project.SelectNodes('/Project/ItemGroup/None[@Pack="true"]') | Where-Object {
         $path = if ($_.Include) { $_.Include } else { $_.Update }
         (($path -replace '\\', '/') -split '/')[-1] -ceq $changelogName
     })
-    Assert ($packedChangelog.Count -eq 1 -and $packedChangelog[0].PackagePath -in @('', '\')) 'Both products must pack their changelog at the package root'
+    Assert ($packedChangelog.Count -eq 1 -and $packedChangelog[0].PackagePath -in @('', '\')) 'All products must pack their changelog at the package root'
 }
-Write-Output 'PASS: both product projects include their changelog in the NuGet package'
+Write-Output 'PASS: all product projects include their changelog in the NuGet package'
 Assert ((Compare-Version '1.20.3-RC.1' '1.20.3-rc.1') -eq 0) 'NuGet casing identity'
 Assert ((Compare-Version '1.20.3-rc.10' '1.20.3-rc.2') -gt 0) 'Numeric prerelease order'
 Assert ((Get-ReleaseTag 'metadata-v1.2.1').product -eq 'metadata') 'Product tag'
+Assert ((Get-ReleaseTag 'permissions-v1.0.0-rc.2').product -eq 'permissions') 'Permission analyzer product tag'
+Assert (@(Get-PrProducts @{ labels = @('product:permissions') }).Count -eq 1) 'Permission analyzer product label'
+Reject { Get-PrProducts @{ labels = @('product:none', 'product:permissions') } }
+Reject { Get-ReleaseTag 'unknown-v1.0.0' }
 Reject { Get-ReleaseTag 'v1.20.3' }; Reject { Get-ReleaseTag 'core-v01.2.3' }
 Reject { Get-PrProducts @{ labels = @('product:none', 'product:core') } }
 Reject { Get-PrNote @{ title = 'No category'; labels = @('product:core') } }
@@ -76,7 +81,7 @@ try {
     $published[0].body = "### 1.20.3 - 2026-11-04`n* Published"
     Assert ((Get-Changelog $original @() 'core' $published).Contains('### 1.20.3 - 4 November 2026')) 'ISO release bodies are formatted on import'
 } finally { [Globalization.CultureInfo]::CurrentCulture = $oldCulture }
-foreach ($product in @('core', 'metadata')) {
+foreach ($product in ($config.products.Keys | Sort-Object)) {
     foreach ($count in @(1, 9, 10, 11, 12)) {
         $sections = @(for ($i = $count; $i -gt 0; $i--) {
             $version = if ($i -eq $count) { "2.$i.0-rc.1" } else { "v2.$i.0" }
@@ -91,7 +96,7 @@ foreach ($product in @('core', 'metadata')) {
     }
 }
 Reject { Get-PackageReleaseNotes "### Unreleased`n* Pending" 'core' 'owner/repo' }
-Write-Output 'PASS: English display dates, UTC imported dates and ten-release package notes for both products'
+Write-Output 'PASS: English display dates, UTC imported dates and ten-release package notes for all products'
 
 # A real Git fixture plus a small in-memory gh double exercise aggregation and
 # preparation without duplicating gh's HTTP transport or a service implementation.
@@ -109,7 +114,7 @@ try {
     $legacySha = Invoke-Git -Arguments @('rev-parse', 'HEAD')
     '.release/' | Set-Content '.gitignore'
     $global:TestAssociatedPrs = @(); $global:TestPrs = @(); $global:TestPrReads = 0
-    $global:TestReleases = foreach ($product in @('core', 'metadata')) {
+    $global:TestReleases = foreach ($product in ($config.products.Keys | Sort-Object)) {
         $version = $config.products[$product].baselineVersion
         $path = $config.products[$product].changelog
         if (Split-Path $path) { New-Item (Split-Path $path) -ItemType Directory -Force | Out-Null }
@@ -521,6 +526,7 @@ function global:gh {
         @{ title = 'Fix: Valid title'; labels = @('product:core'); valid = $true },
         @{ title = 'Maintenance'; labels = @(@{ name = 'product:none' }, @{ name = 'change:chore' }); valid = $true },
         @{ title = 'Fix: Missing product'; labels = @(); valid = $false },
+        @{ title = 'Add: Permission analyzer'; labels = @('product:permissions'); valid = $true },
         @{ title = 'Fix: Exclusive product'; labels = @('product:none', 'product:core'); valid = $false },
         @{ title = 'Missing category'; labels = @('product:core'); valid = $false },
         @{ title = 'Add: Conflict'; labels = @('product:core', 'change:fix'); valid = $false },
@@ -583,7 +589,7 @@ function Assert-PackageValidation([bool]$Valid) {
 try {
     New-Item (Join-Path $root '.release/packages') -ItemType Directory -Force | Out-Null
     Set-Location $root; $env:RELEASE_TAG = $null; $env:GITHUB_REPOSITORY = 'owner/repo'
-    foreach ($product in @('core', 'metadata')) {
+    foreach ($product in ($config.products.Keys | Sort-Object)) {
         Remove-Item '.release/packages/*' -Force -ErrorAction SilentlyContinue
         $id = $config.products[$product].packageId; $version = '2.0.0-rc.1'
         $script:TestReleaseNotes = "### $version - 13 November 2026`n" + '* Fix: Preserve $$ and $& <templates> (#1)'
@@ -631,7 +637,7 @@ try {
         Remove-Item '.release/packages/other.nupkg'
         Remove-Item $symbols; Assert-PackageValidation $false
     }
-    Write-Output 'PASS: both product package/symbol pairs include matching release notes and versioned changelogs; stale notes, missing changelogs, wrong metadata and invalid pairs fail'
+    Write-Output 'PASS: all product package/symbol pairs include matching release notes and versioned changelogs; stale notes, missing changelogs, wrong metadata and invalid pairs fail'
 } finally {
     Set-Location $old; $env:RELEASE_TAG = $oldTag; $env:GITHUB_REPOSITORY = $oldPackageRepository
     Remove-Item $root -Recurse -Force

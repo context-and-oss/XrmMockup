@@ -38,6 +38,8 @@ namespace DG.Tools.XrmMockup {
 
         private ConcurrentQueue<WorkflowExecutionContext> pendingAsyncWorkflows;
 
+        internal IEnumerable<Entity> PermissionCheckWorkflows => synchronousWorkflows.Concat(asynchronousWorkflows);
+
         internal int SynchronousWorkflowCount => synchronousWorkflows.Count;
         internal int AsynchronousWorkflowCount => asynchronousWorkflows.Count;
         internal int ActionsCount => actions.Count;

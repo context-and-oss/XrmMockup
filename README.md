@@ -32,3 +32,9 @@ for plugins compiled against .NET Framework 4.6.2.
 ## Releasing
 
 Maintainers: see [RELEASE.md](RELEASE.md) for PR labels, repository setup, and independent product releases.
+
+## Static permission analysis
+
+XrmMockup tests can explicitly check plugin or entity-operation privilege coverage using
+`PermissionAnalysis` and `crm.CheckPermissions`. Workspace loading is opt-in; checks do not
+execute scenarios or prove record-level access. See [the SDK guide](docs/permission-analysis-sdk.md).

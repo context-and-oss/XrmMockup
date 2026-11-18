@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Add: `PrivilegeCatalog.xml` with every privilege (name, access right and tables) and every custom API with its execute privilege, for the permission analyzer
+* Add: Security role files list the role's privileges that aren't tied to a table, such as `prvActOnBehalfOfAnotherUser`, under `GlobalPrivileges`. XrmMockup ignores them, and role files generated before still load
 <!-- END GENERATED RELEASE NOTES -->
 
 ### v1.2.0 - 11 September 2026

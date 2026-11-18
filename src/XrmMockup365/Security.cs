@@ -432,6 +432,38 @@ namespace DG.Tools.XrmMockup
             return securityRoles;
         }
 
+        // Permission analysis reads local rows only: no requests, online retrieval, related-entity
+        // expansion or privilege-cache mutation (GetSecurityRoles(caller) can expand related entities).
+        internal bool HasLocalUser(Guid userId) => PermissionCheckRows("systemuser").Any(u => u.Id == userId);
+
+        private IEnumerable<DbRow> PermissionCheckRows(string table) => db.HasTable(table)
+            ? db[table].ToList() : Enumerable.Empty<DbRow>();
+
+        internal IReadOnlyList<SecurityRole> GetPermissionCheckRoles(Guid userId)
+        {
+            var result = new HashSet<SecurityRole>(PermissionCheckPrincipalRoles("systemuser", userId, "systemuserroles_association"));
+            var teams = PermissionCheckRows("teammembership").Where(m => m.GetColumn<Guid>("systemuserid") == userId)
+                .Select(m => m.GetColumn<Guid>("teamid")).Distinct();
+            foreach (var team in teams) result.UnionWith(PermissionCheckPrincipalRoles("team", team, "teamroles_association"));
+            return result.ToList();
+        }
+
+        private IEnumerable<SecurityRole> PermissionCheckPrincipalRoles(string principal, Guid id, string schema)
+        {
+            if (!Metadata.EntityMetadata.TryGetValue(principal, out var entity)) yield break;
+            var relation = (entity.ManyToManyRelationships ?? new ManyToManyRelationshipMetadata[0]).FirstOrDefault(r => r.SchemaName == schema);
+            if (relation == null) yield break;
+            var principalAttribute = relation.Entity1LogicalName == principal ? relation.Entity1IntersectAttribute : relation.Entity2IntersectAttribute;
+            var roleAttribute = relation.Entity1LogicalName == "role" ? relation.Entity1IntersectAttribute : relation.Entity2IntersectAttribute;
+            foreach (var row in PermissionCheckRows(relation.IntersectEntityName).Where(r => r.GetColumn<Guid>(principalAttribute) == id))
+            {
+                var assignedRole = row.GetColumn<Guid>(roleAttribute);
+                if (!SecurityRoleMapping.TryGetValue(assignedRole, out var roleId) || !SecurityRoles.TryGetValue(roleId, out var role))
+                    throw new ArgumentException($"Unknown assigned security role ID: {assignedRole}.");
+                yield return role;
+            }
+        }
+
         private bool IsMemberOfTeam(EntityReference team, EntityReference user)
         {
             return Core.GetDbTable(LogicalNames.TeamMembership)

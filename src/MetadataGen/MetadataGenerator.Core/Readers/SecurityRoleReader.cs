@@ -43,22 +43,22 @@ internal sealed class SecurityRoleReader(
             }
 
             // Query all required data
-            var privileges = QueryPaging(new QueryExpression(Privilege)
+            var privileges = _service.RetrieveAll(new QueryExpression(Privilege)
             {
-                ColumnSet = new ColumnSet("privilegeid", "accessright", "canbeglobal", "canbedeep", "canbelocal", "canbebasic")
+                ColumnSet = new ColumnSet("privilegeid", "name", "accessright", "canbeglobal", "canbedeep", "canbelocal", "canbebasic")
             });
 
-            var privilegeOTCs = QueryPaging(new QueryExpression(PrivilegeOtc)
+            var privilegeOTCs = _service.RetrieveAll(new QueryExpression(PrivilegeOtc)
             {
                 ColumnSet = new ColumnSet("privilegeid", "objecttypecode")
             });
 
-            var rolePrivileges = QueryPaging(new QueryExpression(RolePrivileges)
+            var rolePrivileges = _service.RetrieveAll(new QueryExpression(RolePrivileges)
             {
                 ColumnSet = new ColumnSet("privilegeid", "roleid", "privilegedepthmask")
             });
 
-            var roleList = QueryPaging(GetRoleQuery(roleIdsToInclude));
+            var roleList = _service.RetrieveAll(GetRoleQuery(roleIdsToInclude));
 
             // Join: roleprivileges inner join roles
             // Use GetAttributeValue for defensive access in case parentrootroleid is missing
@@ -96,11 +96,12 @@ internal sealed class SecurityRoleReader(
             foreach (var e in validSecurityRoles)
             {
                 var entityName = (string)e.pp.privilegeOTC!["objecttypecode"];
-
-                if (entityName == "none") continue;
+                var global = entityName == PrivilegeReader.NoTable;
+                var privilegeName = e.pp.privilege!.GetAttributeValue<string>("name");
+                if (global && string.IsNullOrEmpty(privilegeName)) continue;
 
                 var rp = ToRolePrivilege(e.pp.privilege!, e.rpr!.roleprivilege);
-                if (rp.AccessRight == AccessRights.None) continue;
+                if (!global && rp.AccessRight == AccessRights.None) continue;
 
                 var roleId = (Guid)e.rpr.roleprivilege["roleid"];
                 if (!roles.TryGetValue(roleId, out var roleValue))
@@ -127,7 +128,8 @@ internal sealed class SecurityRoleReader(
                     {
                         Name = name,
                         RoleId = roleId,
-                        Privileges = []
+                        Privileges = [],
+                        GlobalPrivileges = []
                     };
                     roles[roleId] = roleValue;
 
@@ -135,6 +137,13 @@ internal sealed class SecurityRoleReader(
                     {
                         roles[roleId].RoleTemplateId = ((EntityReference)e.rpr.role["roletemplateid"]).Id;
                     }
+                }
+
+                // Privileges that aren't tied to a table are kept apart, so XrmMockup's table checks don't see them
+                if (global)
+                {
+                    roleValue.GlobalPrivileges.TryAdd(privilegeName, rp);
+                    continue;
                 }
 
                 if (!roleValue.Privileges.TryGetValue(entityName, out var value))
@@ -152,24 +161,6 @@ internal sealed class SecurityRoleReader(
             }
             return roles;
         }, ct);
-    }
-
-    private List<Entity> QueryPaging(QueryExpression query)
-    {
-        query.PageInfo.PageNumber = 1;
-        var entities = new List<Entity>();
-        var resp = _service.RetrieveMultiple(query);
-        entities.AddRange(resp.Entities);
-
-        while (resp.MoreRecords)
-        {
-            query.PageInfo.PageNumber++;
-            query.PageInfo.PagingCookie = resp.PagingCookie;
-            resp = _service.RetrieveMultiple(query);
-            entities.AddRange(resp.Entities);
-        }
-
-        return entities;
     }
 
     private static DG.Tools.XrmMockup.RolePrivilege ToRolePrivilege(Entity privilege, Entity rolePrivilege)

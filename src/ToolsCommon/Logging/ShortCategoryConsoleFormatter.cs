@@ -3,18 +3,19 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 
-namespace XrmMockup.MetadataGenerator.Tool.Logging;
+namespace XrmMockup.Tools.Common.Logging;
 
 /// <summary>
-/// A console formatter that shows only the short class name instead of the full namespace.
+/// A console formatter that shows only the short class name instead of the full namespace. Register it with
+/// <see cref="ShortCategoryConsoleExtensions.AddShortCategoryConsole"/>.
 /// </summary>
 public sealed class ShortCategoryConsoleFormatter : ConsoleFormatter
 {
     public const string FormatterName = "shortCategory";
 
-    private readonly IOptionsMonitor<SimpleConsoleFormatterOptions> _options;
+    private readonly IOptionsMonitor<ShortCategoryConsoleFormatterOptions> _options;
 
-    public ShortCategoryConsoleFormatter(IOptionsMonitor<SimpleConsoleFormatterOptions> options)
+    public ShortCategoryConsoleFormatter(IOptionsMonitor<ShortCategoryConsoleFormatterOptions> options)
         : base(FormatterName)
     {
         _options = options;
@@ -44,8 +45,9 @@ public sealed class ShortCategoryConsoleFormatter : ConsoleFormatter
 
         // Write log level with color using ANSI codes
         var logLevelString = GetLogLevelString(logEntry.LogLevel);
+        var redirected = options.StandardError ? Console.IsErrorRedirected : Console.IsOutputRedirected;
         var useColor = options.ColorBehavior == LoggerColorBehavior.Enabled ||
-            (options.ColorBehavior == LoggerColorBehavior.Default && !Console.IsOutputRedirected);
+            (options.ColorBehavior == LoggerColorBehavior.Default && !redirected);
 
         if (useColor)
         {

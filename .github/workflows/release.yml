@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ['core-v*', 'metadata-v*']
+    tags: ['core-v*', 'metadata-v*', 'permissions-v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +15,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-product-${{ startsWith(inputs.tag || github.ref_name, 'metadata-v') && 'metadata' || 'core' }}
+  group: release-product-${{ startsWith(inputs.tag || github.ref_name, 'permissions-v') && 'permissions' || (startsWith(inputs.tag || github.ref_name, 'metadata-v') && 'metadata' || 'core') }}
   cancel-in-progress: false
   queue: max
 jobs:

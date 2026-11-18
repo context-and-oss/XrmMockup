@@ -6,10 +6,10 @@ See [the current sequence diagram and simplification analysis](release-sequence.
 
 ## Contract
 
-- PR labels choose core, metadata, both, or exclusive `product:none`.
+- PR labels choose one or more of core, metadata and permissions, or exclusive `product:none`.
 - A category label or matching `Add:`, `Fix:`, `Change:`, `Breaking:`, or `Chore:` title prefix is mandatory.
-- Both product changelogs are committed directly to master after merges and successful releases. Wait for the notes commit before tagging; no changelog PR is created.
-- `core-v<VERSION>` and `metadata-v<VERSION>` independently publish their one selected NuGet package.
+- All configured product changelogs are committed directly to master after merges and successful releases. Wait for the notes commit before tagging; no changelog PR is created.
+- `core-v<VERSION>`, `metadata-v<VERSION>` and `permissions-v<VERSION>` independently publish their one selected NuGet package.
 - Each release makes one `dotnet nuget push` (including its matching `.snupkg`), without skipping duplicates. Failure stops the run; maintainers can delete the failed tag and restart if NuGet has not accepted that version.
 - No merge-queue support, emergency audit mechanism, persistent release ledger/checkpoints, package checksums, receipts, or automatic partial-publication recovery.
 
@@ -21,7 +21,7 @@ Normal maintenance PRs use `product:none` and a valid category. The changelog wr
 
 ## Notes generation
 
-`update-changelogs.yml` runs on master pushes or manual dispatch, using `GITHUB_TOKEN` with `contents: write`, `actions: write` and `pull-requests: read`. It commits only the two configured changelog files directly to master. The required native `ci` job must pass on the generated commit before the direct write; other repository rules must still permit it; Actions PR creation/approval permission is not required.
+`update-changelogs.yml` runs on master pushes or manual dispatch, using `GITHUB_TOKEN` with `contents: write`, `actions: write` and `pull-requests: read`. It commits only the configured product changelog files directly to master. The required native `ci` job must pass on the generated commit before the direct write; other repository rules must still permit it; Actions PR creation/approval permission is not required.
 
 1. Require a clean working tree, fetch current remote master/tags, and start the generated commit from that source. Workflow concurrency serializes writers without canceling an in-flight update.
 2. List published GitHub releases. Choose the latest successful same-product release as that product's notes boundary; before any new-format release, use the fixed migration cutoff `6e689d959b9013e2318320e9c317449d0de02c2d` (the PR #361 rollout merge). This exclusive boundary excludes the unclassified rollout and older PRs without rewriting legacy history.
@@ -40,7 +40,7 @@ Workflow-level concurrency serializes each product independently. Tag releases a
 
 ### Read-only build
 
-The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. Preparation scopes release boundaries and range ancestry to the selected product; a later release of the other product does not invalidate an earlier reviewed source. The changelog writer still collects both products on current master. An unmerged source cannot replace privileged preparation code. Manual dispatch takes a candidate tag and source ref and is always preview-only. Only a tag push enables publication.
+The Windows build job checks out trusted scripts and the requested source separately. Trusted preparation code validates the entire product tag/version, master ancestry, version progression, and that the selected changelog matches the merged-PR notes at that source. Preparation scopes release boundaries and range ancestry to the selected product; a later release of the other product does not invalidate an earlier reviewed source. The changelog writer still collects all configured products on current master. An unmerged source cannot replace privileged preparation code. Manual dispatch takes a candidate tag and source ref and is always preview-only. Only a tag push enables publication.
 
 Prerelease identifiers are compared case-insensitively to match NuGet version identity. Release sections are inserted literally, preserving dollar-sign sequences from PR titles in both saved notes and the packaged changelog.
 

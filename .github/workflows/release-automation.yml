@@ -6,6 +6,8 @@ on:
       - '.github/workflows/**'
       - 'Directory.Build.props'
       - 'src/MetadataGen/Directory.Build.props'
+      - 'src/PermissionAnalyzer/Directory.Build.props'
+      - 'src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj'
       - 'src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj'
       - 'src/XrmMockup365/XrmMockup365.csproj'
   push:

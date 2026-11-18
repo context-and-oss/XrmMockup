@@ -32,7 +32,7 @@ namespace DG.Tools.XrmMockup
     /// <summary>
     /// Class for handling all requests to the database
     /// </summary>
-    internal class Core : IXrmMockupExtension, ICoreOperations
+    internal partial class Core : IXrmMockupExtension, ICoreOperations
     {
         public TimeSpan TimeOffset { get; private set; }
         public MockupServiceProviderAndFactory ServiceFactory { get; private set; }

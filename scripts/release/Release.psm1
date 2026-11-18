@@ -41,7 +41,7 @@ function Get-PrProducts {
         if ($selected.Count) { throw 'product:none is exclusive' }
         return
     }
-    if (!$selected.Count) { throw 'Choose product:core, product:metadata, both, or product:none' }
+    if (!$selected.Count) { throw ('Choose one or more of ' + (($script:Config.products.Keys | Sort-Object | ForEach-Object { "product:$_" }) -join ', ') + ', or product:none') }
     return $selected
 }
 function Get-PrNote {
@@ -59,7 +59,7 @@ function Get-PrNote {
 }
 function Get-ReleaseTag {
     param([string]$Tag)
-    if ($Tag -cnotmatch '^(core|metadata)-v(.+)$') { throw 'Use core-vVERSION or metadata-vVERSION' }
+    if ($Tag -cnotmatch '^([a-z]+)-v(.+)$' -or !$script:Config.products.ContainsKey($Matches[1])) { throw 'Use a configured product tag: core-vVERSION, metadata-vVERSION or permissions-vVERSION' }
     $product = $Matches[1]; $version = $Matches[2]
     if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?$' -or $version -match '-v\d+\.\d+\.\d+') { throw 'Invalid release version' }
     [void][semver]$version

@@ -35,7 +35,7 @@ sequenceDiagram
     alt Manual preview
         Maintainer->>Build: Dispatch candidate tag and source_ref (preview-only)
     else Product release
-        Maintainer->>GitHub: Push core-vVERSION or metadata-vVERSION
+        Maintainer->>GitHub: Push core-vVERSION, metadata-vVERSION or permissions-vVERSION
         GitHub->>Build: Trigger release
     end
     Build->>GitHub: Checkout trusted scripts and exact source separately
@@ -67,7 +67,7 @@ Pending notes and published history are automatic bot commits on master. No chan
 - PowerShell handles policy and text/JSON transformations; `gh` and `dotnet` perform operations directly. No Node runtime or custom GitHub HTTP client.
 - One read-only `pull_request` classification workflow fetches PR metadata once and reports a single native **PR release labels** check. Manual validation dispatch verifies the selected PR head commit.
 - Product/category definitions live in one JSON configuration file.
-- One serialized changelog writer stages only the two note files on temporary branches, dispatches CI on each exact commit, then fast-forwards master, with bounded regeneration retries for concurrent merges and no force pushes.
+- One serialized changelog writer stages only the configured product note files on temporary branches, dispatches CI on each exact commit, then fast-forwards master, with bounded regeneration retries for concurrent merges and no force pushes.
 - Label provisioning and GitHub publication are short workflow steps, not separate wrapper scripts.
 - Tag pushes are the only publication trigger. Manual dispatch only builds previews.
 - One package push also uploads matching symbols. Partial success is recovered manually from artifacts.

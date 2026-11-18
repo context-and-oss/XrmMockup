@@ -18,6 +18,20 @@ plugins, workflows, custom APIs, and security can be tested without a live envir
   - `Workflow/`, including `WorkflowNode/`: workflow parsing and execution.
   - `XrmMockupSettings.cs`: authoritative settings types and defaults; inspect it
     before changing configuration or writing examples.
+- `src/PermissionAnalyzer/`: static Dataverse privilege analysis shared by the SDK and
+  standalone `xrmmockup-permissions` tool.
+  - `PermissionAnalyzer.Abstractions/`: SDK-free models, scopes, results, and role coverage
+    (`netstandard2.0`).
+  - `PermissionAnalyzer.Core/`: Roslyn operation extraction, call graphs, cascades, and
+    manifest building (`netstandard2.0`).
+  - `PermissionAnalyzer.Workspace/`: opt-in .NET 10 source loading, configuration, and
+    metadata readers using private wire contracts.
+  - `PermissionAnalyzer.Tool/`: CLI frontend, packaged as `XrmMockup.PermissionAnalyzer`.
+  - `PermissionAnalyzer.Tests/`: snippets compiled in memory against the real SDK and
+    analyzer/loader regression tests.
+- `src/ToolsCommon/`: shared CLI infrastructure, including console log formatting.
+  This and the permission libraries are internal/non-packable projects; owning product
+  packages ship their assemblies, not additional independently released NuGet packages.
 - `src/MetadataSkeleton/`: serialized metadata model shared by the engine and generators.
 - `src/MetadataGen/`:
   - `MetadataGenerator365/`: legacy .NET Framework generator, still bundled in the core package.
@@ -51,13 +65,19 @@ dotnet test tests/XrmMockup365Test/XrmMockup365Test.csproj --framework net10.0 -
 
 # Metadata generator tests
 dotnet test src/MetadataGen/MetadataGenerator.Tool.Tests/MetadataGenerator.Tool.Tests.csproj
+
+# Permission analyzer tests
+dotnet test src/PermissionAnalyzer/PermissionAnalyzer.Tests/PermissionAnalyzer.Tests.csproj
+
+# Permission SDK and legacy-plugin compatibility regressions
+dotnet test tests/XrmMockup365Test/XrmMockup365Test.csproj --framework net10.0 --filter "FullyQualifiedName~TestPermissionAnalysis|FullyQualifiedName~TestPluginFrameworkCompatibility"
 ```
 
 A focused `net10.0` run does not replace full Windows/multi-target validation.
 For code changes, run the affected tests first and the full suite when available;
 report any SDK, platform, restore, or test limitations rather than claiming validation passed.
 
-Local package preview (PowerShell; builds and packs both products without publishing):
+Local package preview (PowerShell; builds and packs all three products without publishing):
 
 ```powershell
 ./scripts/Pack-Local.ps1
@@ -65,7 +85,10 @@ Local package preview (PowerShell; builds and packs both products without publis
 
 For release automation changes, also run `./scripts/release/Test-Release.ps1` in
 PowerShell. See `RELEASE.md` for PR product/category classification and release
-procedures. Do not hand-edit generated pending changelog sections or substitute
+procedures. Product tags (`core-v*`, `metadata-v*`, `permissions-v*`) select one
+package/symbol pair. `scripts/release/Prepare-Release.ps1` supplies its version and
+notes through `.release/version.props`; ordinary builds use development versions.
+Do not hand-edit generated pending changelog sections or substitute
 ad hoc version changes for the product-scoped release process.
 
 ## Test conventions
@@ -82,6 +105,27 @@ ad hoc version changes for the product-scoped release process.
   specifically requires it or no generated type exists.
 - Add regression coverage in the affected suite. Metadata reader tests normally use
   `Fixtures/ReaderTestBase.cs` and `Fixtures/XrmMockupFactory.cs` in the tool test project.
+
+## Static permission analysis
+
+Checks are explicit static privilege analysis, not scenario execution or proof of
+record-level access. Do not add automatic checks during CRUD execution, invoke the CLI
+from the SDK, or mutate mockup state when checking permissions. Preserve current
+user/team role resolution, separate impersonated identities, and strict failures for
+missing privileges or incomplete analysis.
+
+The .NET 10 SDK test project enables `XrmMockupEnablePermissionAnalysis` to copy the
+shared library payload; it is loaded on demand in an isolated load context. The
+lightweight contracts/check APIs remain available on .NET Framework, but source
+loading requires .NET 10. Do not bundle either dotnet tool into Core or introduce
+independently released permission-library packages.
+
+Analyzer output must remain deterministic: use ordinal comparers, sort collections,
+and write `\n` line endings. See `docs/design/permission-analyzer.md` for the engine
+design and `docs/permission-analysis-sdk.md` for SDK setup and boundaries. CLI
+configuration uses `XrmMockup:Permissions`; consult
+`src/PermissionAnalyzer/PermissionAnalyzer.Tool/README.md` rather than duplicating
+its options here.
 
 ## Metadata and live-environment boundaries
 
