@@ -1,6 +1,7 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
 * Add: Add missing request handlers (#374)
+* Add: Support .NET 4.8 plugins (#378)
 * Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
 <!-- END GENERATED RELEASE NOTES -->
 
