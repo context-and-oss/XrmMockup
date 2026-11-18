@@ -59,7 +59,8 @@ namespace WorkflowExecuter
                 attr = new Money(amount);
             }
 
-            if (TargetType == "EntityReference")
+            // Null is a valid empty lookup; only non-null values need conversion.
+            if (TargetType == "EntityReference" && attr != null)
             {
                 if (attr is Guid guid)
                 {
