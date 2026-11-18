@@ -773,3 +773,9 @@ is in, so code scanning finds the files; outside a repository they are relative 
 Output is deterministic: entry points, methods, tables and source locations are sorted ordinally, paths are
 relative to the analyzed solution with forward slashes, and line endings are always `\n`. Running
 the tool twice on the same code gives byte-identical output, so it can be committed and diffed in CI.
+
+For a multi-targeted project, the report combines the requirements of all loaded target frameworks.
+A shared call site can resolve to different tables or service identities in each framework, including
+through helper arguments, return values, generic types and constructor fields; those alternatives
+are retained. Duplicate findings are merged, independent of compilation order. The report does not
+attribute requirements to individual target frameworks.

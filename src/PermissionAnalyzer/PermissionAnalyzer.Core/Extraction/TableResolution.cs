@@ -433,10 +433,10 @@ internal sealed record ReturnedTables(CallFact Call, TableShape Shape, string Re
     {
         if (other is null) return 1;
         var result = Call.Source.CompareTo(other.Call.Source);
-        if (result == 0) result = string.CompareOrdinal(Call.Target, other.Call.Target);
+        if (result == 0) result = string.CompareOrdinal(SummaryKeys.Call(Call), SummaryKeys.Call(other.Call));
         if (result == 0) result = Shape.CompareTo(other.Shape);
         return result != 0 ? result : string.CompareOrdinal(Reason, other.Reason);
     }
 
-    public override string ToString() => $"{Call.Target}@{Call.Source}:{Shape}";
+    public override string ToString() => $"{SummaryKeys.Call(Call)}:{Shape}:{Reason}";
 }

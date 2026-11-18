@@ -98,7 +98,13 @@ src/PermissionAnalyzer/
 - The Tool loads the consumer solution with `Microsoft.CodeAnalysis.Workspaces.MSBuild`
   (`MSBuildWorkspace`) and passes compilations to Core. Since Roslyn 4.x the workspace builds
   in an out-of-process build host, so `Microsoft.Build.Locator` isn't needed. A multi-targeted
-  project loads once per target framework; the duplicate findings merge into one.
+  project loads once per target framework; the duplicate findings merge into one. The report is a
+  conservative union across loaded frameworks, not a per-framework report. At a shared source
+  location, accesses and helper calls are deduplicated by their resolved facts, not just their
+  message or method: table arguments, service identities, generic arguments and the receiver's
+  creation all matter. Returned tables are unioned per shape, returned services are kept from
+  every compilation, and each constructor field keeps the union of its final service values.
+  Identical compilations add nothing; reversing their order does not change the output.
 - Role and metadata files are read in the Tool with the shared `MetadataSkeleton.projitems`
   (same `DataContractSerializer` format XrmMockup and the metadata generator use), so there is
   no second definition of the model. The skeleton depends on the Dataverse SDK, so the Tool

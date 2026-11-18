@@ -156,20 +156,36 @@ internal sealed class NodeSummary(string id, string member, string display, stri
 
     /// <summary>
     /// Adds the facts of the same node from another compilation, such as another target framework. Facts at the
-    /// same source location are the same fact, unless an access resolved differently, such as through a constant
-    /// that each target framework defines its own way: then both are kept.
+    /// same source location may resolve differently, including call arguments, returned values and services
+    /// stored in fields. Keep every distinct resolved fact, without duplicating identical compilations.
     /// </summary>
     public void Merge(NodeSummary other)
     {
-        MergeBySource(Accesses, other.Accesses, a => (a.Source, a.Operation + "\n" + a.ReasonPrefix + "\n" + string.Join(",", a.Privileges) + "\n" + a.Tables + "\n" + string.Join(",", a.Service)));
-        MergeBySource(Calls, other.Calls, c => (c.Source, c.Target));
+        MergeBySource(Accesses, other.Accesses, a => (a.Source, SummaryKeys.Access(a)));
+        MergeBySource(Calls, other.Calls, c => (c.Source, SummaryKeys.Call(c)));
         Lambdas.UnionWith(other.Lambdas);
-        if (Returns.Count == 0) Returns.AddRange(other.Returns);
-        if (ReturnTables.Count == 0)
+        var returnedServices = new HashSet<string>(Returns.Select(SummaryKeys.Services), StringComparer.Ordinal);
+        Returns.AddRange(other.Returns.Where(r => returnedServices.Add(SummaryKeys.Services(r))));
+        foreach (var returned in other.ReturnTables)
         {
-            foreach (var returned in other.ReturnTables) ReturnTables.Add(returned.Key, returned.Value);
+            ReturnTables[returned.Key] = ReturnTables.TryGetValue(returned.Key, out var known)
+                ? known.Union(returned.Value) : returned.Value;
         }
-        if (FieldWrites.Count == 0) FieldWrites.AddRange(other.FieldWrites);
+        // Constructor evaluation uses the last write to each field. Merge those effective values rather than
+        // appending another write, which would make whichever compilation arrived last overwrite the others.
+        foreach (var writes in other.FieldWrites.GroupBy(w => w.Field, StringComparer.Ordinal))
+        {
+            var incoming = writes.Last();
+            var index = FieldWrites.FindLastIndex(w => w.Field == incoming.Field);
+            if (index < 0) FieldWrites.Add(incoming);
+            else
+            {
+                var services = FieldWrites[index].Value.Concat(incoming.Value)
+                    .GroupBy(SummaryKeys.Service, StringComparer.Ordinal)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => g.First()).ToList();
+                FieldWrites[index] = new FieldWrite(incoming.Field, services);
+            }
+        }
     }
 
     private static void MergeBySource<T>(List<T> target, List<T> source, Func<T, (SourceLocation, string)> key)

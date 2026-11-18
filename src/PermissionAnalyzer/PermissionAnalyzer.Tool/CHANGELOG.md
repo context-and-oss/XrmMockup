@@ -15,3 +15,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add: Roles per identity from `--role`, `--caller-role` and the `Principals` and `Users` settings, with `Suppress` and `Rules` for custom messages, under `XrmMockup:Permissions` in `appsettings.json`
 * Add: Text, JSON, Markdown and SARIF output (`--format`), with `--detail` levels and `--table`, `--privilege`, `--runs-as` and `--basis` filters. The default shows only the privileges to change per role
 * Add: Operations whose table can't be determined are reported as unresolved, with the reason
+* Fix: Preserve framework-specific helper arguments, return values and constructor service fields when merging a multi-targeted project, including their plugin cascades
