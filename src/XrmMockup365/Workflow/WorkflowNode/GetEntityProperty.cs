@@ -83,7 +83,8 @@ namespace WorkflowExecuter
             }
 
             var attr = entity.Attributes[Attribute];
-            if (TargetType == "EntityReference")
+            // Null is a valid empty lookup; only non-null values need conversion.
+            if (TargetType == "EntityReference" && attr != null)
             {
                 if (attr is Guid guid)
                 {
