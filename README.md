@@ -15,6 +15,12 @@ the plugins and workflows automatically being run inside your test cases if nece
 
 Find more in-depth information and examples in the [wiki](https://github.com/delegateas/XrmMockup/wiki).
 
+## Supported frameworks
+
+XrmMockup365 targets .NET Framework 4.6.2, .NET Framework 4.8, and .NET 10.
+The test suite runs on .NET Framework 4.8 and .NET 10, including regression coverage
+for plugins compiled against .NET Framework 4.6.2.
+
 ## Features
 
 * Simulates a target Dynamics 365/CRM instance by reading a local copy of its metadata.

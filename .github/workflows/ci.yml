@@ -23,9 +23,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: |
-            8.x
-            10.x
+          dotnet-version: 10.x
 
       - name: Install dependencies
         run: dotnet restore

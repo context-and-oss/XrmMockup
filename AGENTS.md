@@ -28,14 +28,16 @@ plugins, workflows, custom APIs, and security can be tested without a live envir
   - `MetadataGenerator.Tool.Tests/`: xUnit tests, including readers tested against XrmMockup.
 - `tests/XrmMockup365Test/`: engine tests.
 - `tests/TestPluginAssembly365/`: test plugins, activities, and early-bound context types.
+- `tests/TestPluginAssembly462/`: .NET Framework 4.6.2-only plugins for compatibility regression tests.
 - `tests/TestEnvProvisioner/`: live test-environment provisioning; not needed for ordinary local tests.
 
 ## Build and validation
 
 Run commands from the repository root. CI (`.github/workflows/ci.yml`) runs on
-Windows with .NET SDKs 8 and 10. The engine, engine tests, and test plugin assembly
-multi-target `net462` and `net10.0`; the modern metadata projects target `net10.0`.
-The legacy generator targets `net462`. Keep engine changes compatible with both
+Windows with .NET SDK 10. The engine targets `net462`, `net48`, and `net10.0`;
+the engine tests and main test plugin assembly target `net48` and `net10.0`. The
+compatibility test plugin assembly and legacy generator target `net462`; the modern
+metadata projects target `net10.0`. Keep engine changes compatible with all three
 targets and preserve `DATAVERSE_SERVICE_CLIENT` conditional code where SDK APIs differ.
 
 ```bash
