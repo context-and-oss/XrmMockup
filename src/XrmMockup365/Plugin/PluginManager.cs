@@ -57,7 +57,7 @@ namespace DG.Tools.XrmMockup
 
         private readonly List<IRegistrationStrategy<IPluginStepConfig>> registrationStrategies;
 
-        public PluginManager(ICoreOperations core, IEnumerable<Type> basePluginTypes, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, ILogger logger = null)
+        public PluginManager(ICoreOperations core, IEnumerable<Type> basePluginTypes, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, ILogger logger = null)
         {
             _core = core;
             _logger = logger ?? NullLogger.Instance;
@@ -144,7 +144,7 @@ namespace DG.Tools.XrmMockup
                 .ToList();
         }
 
-        private void RegisterPlugins(IEnumerable<Type> basePluginTypes, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
+        private void RegisterPlugins(IEnumerable<Type> basePluginTypes, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
         {
             foreach (var basePluginType in basePluginTypes)
             {
@@ -172,7 +172,7 @@ namespace DG.Tools.XrmMockup
             SortAllLists(register);
         }
 
-        private void RegisterDirectPlugins(IEnumerable<Type> basePluginTypes, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
+        private void RegisterDirectPlugins(IEnumerable<Type> basePluginTypes, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
         {
             if (basePluginTypes == null) return;
 
@@ -207,7 +207,7 @@ namespace DG.Tools.XrmMockup
             SortAllLists(register);
         }
 
-        private void RegisterPlugin(Type pluginType, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> metaPlugins, Dictionary<EventOperation, StageToTriggerMap> register)
+        private void RegisterPlugin(Type pluginType, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> metaPlugins, Dictionary<EventOperation, StageToTriggerMap> register)
         {
             _logger.LogDebug("Evaluating plugin type: {TypeName}", pluginType.FullName);
 
@@ -254,7 +254,7 @@ namespace DG.Tools.XrmMockup
             disableRegisteredPlugins = disable;
         }
 
-        public void RegisterAdditionalPlugin(Type pluginType, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, PluginRegistrationScope scope)
+        public void RegisterAdditionalPlugin(Type pluginType, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, PluginRegistrationScope scope)
         {
             if (scope == PluginRegistrationScope.Permanent)
             {
@@ -266,7 +266,7 @@ namespace DG.Tools.XrmMockup
             }
         }
 
-        private void RegisterSystemPlugins(Dictionary<EventOperation, StageToTriggerMap> register, Dictionary<string, EntityMetadata> metadata)
+        private void RegisterSystemPlugins(Dictionary<EventOperation, StageToTriggerMap> register, SortedDictionary<string, EntityMetadata> metadata)
         {
             var registrations = new List<IPluginStepConfig>();
 

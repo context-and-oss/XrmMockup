@@ -14,7 +14,8 @@
     <PackageId>XrmMockup.PermissionAnalyzer</PackageId>
     <!-- Project-specific metadata (shared metadata comes from Directory.Build.props) -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/CHANGELOG.md'))</PackageReleaseNotes>
+    <PackageReleaseNotes>Development build. See CHANGELOG.md for release history.</PackageReleaseNotes>
+    <PackageReleaseNotes Condition="'$(PermissionsReleaseNotesPath)' != ''">$([System.IO.File]::ReadAllText('$(PermissionsReleaseNotesPath)'))</PackageReleaseNotes>
     <Description>CLI tool that works out which Dataverse privileges your code needs, by static analysis</Description>
   </PropertyGroup>
   <ItemGroup>
@@ -42,6 +43,7 @@
   <ItemGroup>
     <!-- Icon is included by Directory.Build.props, license via PackageLicenseExpression -->
     <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="CHANGELOG.md" Pack="true" PackagePath="" />
   </ItemGroup>
   <Import Project="..\..\MetadataSkeleton\MetadataSkeleton.projitems" Label="Shared" />
 </Project>

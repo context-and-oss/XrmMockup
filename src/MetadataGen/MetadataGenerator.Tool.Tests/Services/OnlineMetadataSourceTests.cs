@@ -203,7 +203,7 @@ public class OnlineMetadataSourceTests
     [Fact]
     public async Task GetMetadataAsync_ReturnsMetadataSkeletonWithAllReaderResults()
     {
-        var entityMetadata = new Dictionary<string, EntityMetadata>
+        var entityMetadata = new SortedDictionary<string, EntityMetadata>
         {
             { "account", new EntityMetadata { LogicalName = "account" } }
         };

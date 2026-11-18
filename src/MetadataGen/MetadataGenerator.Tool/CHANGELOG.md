@@ -5,9 +5,11 @@ All notable changes to XrmMockup.MetadataGenerator will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
 * Add: `PrivilegeCatalog.xml` with every privilege (name, access right and tables) and every custom API with its execute privilege, for the permission analyzer
 * Add: Security role files list the role's privileges that aren't tied to a table, such as `prvActOnBehalfOfAnotherUser`, under `GlobalPrivileges`. XrmMockup ignores them, and role files generated before still load
+<!-- END GENERATED RELEASE NOTES -->
 
 ### v1.2.0 - 11 September 2026
 * Add: `--credential-type` (`-t`) to override DataverseConnection's `DataverseCredentialType` setting — `browser` (the default), `devicecode` or `azcli`

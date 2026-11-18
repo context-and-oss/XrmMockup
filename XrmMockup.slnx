@@ -27,10 +27,16 @@
   <Folder Name="/project/">
     <File Path=".github/workflows/ci.yml" />
     <File Path=".github/workflows/release.yml" />
+    <File Path=".github/workflows/release-automation.yml" />
+    <File Path=".github/workflows/pr-classification.yml" />
+    <File Path=".github/workflows/update-changelogs.yml" />
+    <File Path=".github/workflows/setup-release-labels.yml" />
+    <File Path="RELEASE.md" />
+    <File Path="docs/release-flow.md" />
+    <File Path="docs/release-sequence.md" />
     <File Path="README.md" />
     <File Path="RELEASE_NOTES.md" />
     <File Path="scripts/Pack-Local.ps1" />
-    <File Path="scripts/Set-VersionFromChangelog.ps1" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".gitignore" />
@@ -38,7 +44,6 @@
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/tests/">
-    <File Path="Tools/appsettings.json" />
     <Project Path="tests/TestEnvProvisioner/TestEnvProvisioner.csproj" />
     <Project Path="tests/TestPluginAssembly365/TestPluginAssembly365.csproj" />
     <Project Path="tests/XrmMockup365Test/XrmMockup365Test.csproj" />
@@ -50,5 +55,4 @@
   <Project Path="src/MetadataSkeleton/MetadataSkeleton.shproj" />
   <Project Path="src/ToolsCommon/ToolsCommon.csproj" />
   <Project Path="src/XrmMockup365/XrmMockup365.csproj" />
-  <Project Path="Tools/Tools.csproj" Id="d375a019-3229-4d24-955b-06248d1d12f5" />
 </Solution>

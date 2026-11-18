@@ -17,6 +17,41 @@ namespace DG.XrmMockupTest
     {
         public TestQuote(XrmMockupFixture fixture) : base(fixture) { }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void TestRetrieveCalculatedDecimalMarginFromMoneyFields(bool retrieveMultiple)
+        {
+            // The supplemental quote metadata defines the classic decimal calculation
+            // ((msdyn_totalamount - msdyn_estimatedcost) / msdyn_totalamount) * 100.
+            // Seed the Money operands directly to isolate the decimal calculation from
+            // the separate calculation of msdyn_totalamount (which is not requested here).
+            var quote = new Entity("quote")
+            {
+                ["msdyn_totalamount"] = new Money(150m),
+                ["msdyn_estimatedcost"] = new Money(112.5m),
+            };
+            crm.PopulateWith(quote);
+
+            Entity retrieved;
+            if (retrieveMultiple)
+            {
+                var query = new QueryExpression("quote")
+                {
+                    ColumnSet = new ColumnSet("msdyn_estimatedquotemargin"),
+                };
+                query.Criteria.AddCondition("quoteid", ConditionOperator.Equal, quote.Id);
+                retrieved = Assert.Single(orgAdminService.RetrieveMultiple(query).Entities);
+            }
+            else
+            {
+                retrieved = orgAdminService.Retrieve("quote", quote.Id,
+                    new ColumnSet("msdyn_estimatedquotemargin"));
+            }
+
+            Assert.Equal(25m, Assert.IsType<decimal>(retrieved["msdyn_estimatedquotemargin"]));
+        }
+
         [Fact]
         public void TestWinQuoteUsingStandardStatus()
         {

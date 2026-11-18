@@ -28,7 +28,7 @@ dotnet test --filter "FullyQualifiedName~DG.XrmMockupTest.TestWorkflow"
 dotnet pack src/XrmMockup365/XrmMockup365.csproj --configuration Release --output ./nupkg
 ```
 
-Releases are built by `.github/workflows/release.yml` when a GitHub release is published. Each package's version comes from the first `### vX.Y.Z` heading of its changelog (`RELEASE_NOTES.md` for XrmMockup365, `CHANGELOG.md` next to each tool), set by `scripts/Set-VersionFromChangelog.ps1`.
+Releases are built by `.github/workflows/release.yml` when a product tag is pushed. Product-scoped tags (`core-v*`, `metadata-v*`, `permissions-v*`) select a single package. `scripts/release/Prepare-Release.ps1` supplies its version and release notes through `.release/version.props`; ordinary builds use development versions. See `RELEASE.md`.
 
 ## Architecture
 

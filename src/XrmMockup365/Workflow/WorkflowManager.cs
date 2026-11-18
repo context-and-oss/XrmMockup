@@ -2,10 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -27,16 +25,14 @@ namespace DG.Tools.XrmMockup {
         private readonly ILogger _logger;
         private readonly ICoreOperations _core;
 
-        // Static caches shared across all WorkflowManager instances
-        private static readonly ConcurrentDictionary<string, WorkflowTree> _staticParsedWorkflows = new ConcurrentDictionary<string, WorkflowTree>();
+        // CodeActivity definitions can be reused, but WorkflowTree execution state cannot.
         private static readonly ConcurrentDictionary<string, CodeActivity> _staticCodeActivityCache = new ConcurrentDictionary<string, CodeActivity>();
-        private static readonly object _cacheLock = new object();
 
         private List<Entity> actions;
         private List<Entity> synchronousWorkflows;
         private List<Entity> asynchronousWorkflows;
         private List<WaitInfo> waitingWorkflows;
-        private Dictionary<string, EntityMetadata> metadata;
+        private SortedDictionary<string, EntityMetadata> metadata;
         private Dictionary<string, CodeActivity> codeActivityTriggers;
         private Dictionary<Guid, WorkflowTree> parsedWorkflows;
 
@@ -47,13 +43,13 @@ namespace DG.Tools.XrmMockup {
         internal int ActionsCount => actions.Count;
         internal int CodeActivityCount => codeActivityTriggers.Count;
 
-        public WorkflowManager(ICoreOperations core, IEnumerable<Type> codeActivityInstances, bool? IncludeAllWorkflows, List<Entity> mixedWorkflows, Dictionary<string, EntityMetadata> metadata, ILogger logger = null) {
+        public WorkflowManager(ICoreOperations core, IEnumerable<Type> codeActivityInstances, bool? IncludeAllWorkflows, List<Entity> mixedWorkflows, SortedDictionary<string, EntityMetadata> metadata, ILogger logger = null) {
             _core = core;
             _logger = logger ?? NullLogger.Instance;
             this.metadata = metadata;
-            this.actions = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == 3).ToList();
+            this.actions = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == (int)Workflow_Category.Action).ToList();
 
-            var workflows = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == 0).ToList();
+            var workflows = mixedWorkflows.Where(w => w.GetAttributeValue<OptionSetValue>("category").Value == (int)Workflow_Category.Workflow).ToList();
             synchronousWorkflows = new List<Entity>();
             asynchronousWorkflows = new List<Entity>();
             waitingWorkflows = new List<WaitInfo>();
@@ -411,22 +407,9 @@ namespace DG.Tools.XrmMockup {
         }
 
         internal WorkflowTree ParseWorkflow(Entity workflow) {
-            var cacheKey = GenerateWorkflowCacheKey(workflow);
-            
-            // Check static cache first
-            if (_staticParsedWorkflows.TryGetValue(cacheKey, out var cachedWorkflow))
-            {
-                cachedWorkflow.HardReset();
-                
-                // Also store in instance cache for legacy compatibility
-                if (!parsedWorkflows.ContainsKey(workflow.Id)) {
-                    parsedWorkflows[workflow.Id] = cachedWorkflow;
-                }
-                
-                return cachedWorkflow;
-            }
-            
-            // Check instance cache
+            // A WorkflowTree owns mutable Variables and is reset for each execution.
+            // Sharing it across managers lets parallel mockups replace each other's
+            // primary entity and route updates to records in a different database.
             if (parsedWorkflows.ContainsKey(workflow.Id)) {
                 parsedWorkflows[workflow.Id].HardReset();
                 return parsedWorkflows[workflow.Id];
@@ -435,9 +418,6 @@ namespace DG.Tools.XrmMockup {
             try {
                 var parsed = WorkflowConstructor.Parse(workflow, codeActivityTriggers, WorkflowConstructor.ParseAs.Workflow);
                 parsedWorkflows.Add(workflow.Id, parsed);
-                
-                // Cache in static cache for future instances
-                _staticParsedWorkflows.TryAdd(cacheKey, parsed);
                 
                 return parsed;
             } catch (Exception ex) {
@@ -449,10 +429,10 @@ namespace DG.Tools.XrmMockup {
         internal void AddWorkflow(Entity workflow) {
             if (workflow.LogicalName != LogicalNames.Workflow) return;
             var name = workflow.GetAttributeValue<string>("name") ?? workflow.Id.ToString();
-            // Category 3 = Action. Register it so it can be invoked by message name (Core dispatches
+            // Register actions so they can be invoked by message name (Core dispatches
             // to ExecuteAction via GetActionDefaultNull); otherwise an added action would be mis-filed
             // as a workflow and never be reachable.
-            if (workflow.GetAttributeValue<OptionSetValue>("category")?.Value == 3) {
+            if (workflow.GetAttributeValue<OptionSetValue>("category")?.Value == (int)Workflow_Category.Action) {
                 actions.Add(workflow);
                 _logger.LogDebug("Added action: {WorkflowName}", name);
                 return;
@@ -480,20 +460,5 @@ namespace DG.Tools.XrmMockup {
             waitingWorkflows = new List<WaitInfo>();
         }
 
-        private string GenerateWorkflowCacheKey(Entity workflow)
-        {
-            if (workflow == null) return "null_workflow";
-            
-            // Use workflow XAML + ID for cache key since XAML defines the workflow structure
-            var xaml = workflow.GetAttributeValue<string>("xaml") ?? "";
-            var workflowId = workflow.Id.ToString();
-            var combinedKey = $"{workflowId}:{xaml}";
-            
-            using (var sha256 = SHA256.Create())
-            {
-                var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(combinedKey));
-                return Convert.ToBase64String(hash);
-            }
-        }
     }
 }

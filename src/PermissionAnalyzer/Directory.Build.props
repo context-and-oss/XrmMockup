@@ -1,8 +1,9 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <!-- Version set by CI from CHANGELOG.md -->
-    <Version>0.0.0</Version>
+    <!-- Applies only to the permission analyzer subtree. -->
+    <Version Condition="'$(PermissionsReleaseVersion)' == ''">0.0.0-dev</Version>
+    <Version Condition="'$(PermissionsReleaseVersion)' != ''">$(PermissionsReleaseVersion)</Version>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>

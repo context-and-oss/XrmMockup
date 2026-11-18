@@ -452,6 +452,7 @@ namespace DG.Tools.XrmMockup
             new InitializeFileBlocksDownloadRequestHandler(this, db, metadata, security),
             new DownloadBlockRequestHandler(this, db, metadata, security),
             new InstantiateTemplateRequestHandler(this, db, metadata, security),
+            new SendEmailFromTemplateRequestHandler(this, db, metadata, security),
             new CreateMultipleRequestHandler(this, db, metadata, security),
             new UpdateMultipleRequestHandler(this, db, metadata, security),
             new DeleteMultipleRequestHandler(this, db, metadata, security),
@@ -530,6 +531,7 @@ namespace DG.Tools.XrmMockup
             {
                 toReturn = entity.CloneEntity(metadata, colsToKeep);
             }
+            toReturn.RowVersion = entity.RowVersion;
             toReturn.KeyAttributes = entity.CloneKeyAttributes();
             Utility.PopulateEntityReferenceNames(toReturn, db);
             return toReturn;

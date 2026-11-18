@@ -66,7 +66,10 @@ namespace WorkflowExecuter
         public static WorkflowTree ParseCalculated(string xaml, string workflowName)
         {
             var parsed = Parser.Parse(xaml);
-            return new WorkflowTree(CompressTree(parsed.Workflow, ParseAs.Workflow, workflowName)); ;
+            return new WorkflowTree(CompressTree(parsed.Workflow, ParseAs.Workflow, workflowName))
+            {
+                IsCalculatedField = true,
+            };
         }
 
         private static IWorkflowNode CompressTree(WorkflowParser.Workflow workflow, ParseAs parseAs, string workflowName)

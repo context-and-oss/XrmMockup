@@ -29,14 +29,14 @@ namespace DG.Tools.XrmMockup
         internal int Order { get; }
         internal Guid? ImpersonatingUserId { get; }
 
-        readonly Dictionary<string, EntityMetadata> Metadata;
+        readonly SortedDictionary<string, EntityMetadata> Metadata;
         readonly HashSet<string> Attributes;
         readonly IEnumerable<IImageSpecification> Images;
 
         private string DebuggerDisplay => $"{Stage} {Operation} {EntityName} [{string.Join(", ", Attributes)}]";
 
-        public PluginTrigger(string operation, ExecutionStage stage,
-                Action<MockupServiceProviderAndFactory> pluginExecute, IPluginStepConfig pluginRegistration, Dictionary<string, EntityMetadata> metadata)
+        public  PluginTrigger(string operation, ExecutionStage stage,
+                Action<MockupServiceProviderAndFactory> pluginExecute, IPluginStepConfig pluginRegistration, SortedDictionary<string, EntityMetadata> metadata)
         {
             PluginExecute = pluginExecute;
             EntityName = pluginRegistration.EntityLogicalName;
@@ -76,6 +76,8 @@ namespace DG.Tools.XrmMockup
             {
                 // Create the plugin context
                 var thisPluginContext = CreatePluginContext(pluginContext, guid, logicalName, preImage, postImage);
+                // Capture the async job's creation time when staging, rather than when it executes.
+                thisPluginContext.OperationCreatedOn = DateTime.UtcNow.Add(core.TimeOffset);
                 var provider = core.CreateServiceProviderAndFactory(thisPluginContext);
                 // Preserve async exception semantics (no TargetInvocationException unwrapping), but
                 // still time the execution and capture its trace messages into the grouped trace log.

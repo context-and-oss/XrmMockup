@@ -2,6 +2,7 @@ name: Check PR
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -25,18 +26,6 @@ jobs:
           dotnet-version: |
             8.x
             10.x
-
-      - name: Set XrmMockup365 version from RELEASE_NOTES.md
-        shell: pwsh
-        run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./RELEASE_NOTES.md -CsprojPath ./src/XrmMockup365/XrmMockup365.csproj
-
-      - name: Set MetadataGenerator version from CHANGELOG.md
-        shell: pwsh
-        run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -PropsPath ./src/MetadataGen/Directory.Build.props
-
-      - name: Set PermissionAnalyzer version from CHANGELOG.md
-        shell: pwsh
-        run: ./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/PermissionAnalyzer/PermissionAnalyzer.Tool/CHANGELOG.md -PropsPath ./src/PermissionAnalyzer/Directory.Build.props
 
       - name: Install dependencies
         run: dotnet restore
