@@ -5,6 +5,11 @@ All notable changes to XrmMockup.PermissionAnalyzer will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<!-- BEGIN GENERATED RELEASE NOTES -->
+### Unreleased
+* Add: Implement permission analyzer tool (#357)
+<!-- END GENERATED RELEASE NOTES -->
+
 ### v1.0.0-rc.1 - 23 October 2026
 * Add: `xrmmockup-permissions`, which lists the Dataverse table privileges, and privileges not tied to a table, that a solution or project needs, found by static analysis of its `IOrganizationService`, request and `OrganizationServiceContext` calls
 * Add: Checking them against security roles from the XrmMockup metadata, with `--fail-on-missing` to exit with `1` when a privilege is missing (`--strict` also fails on what couldn't be checked)
