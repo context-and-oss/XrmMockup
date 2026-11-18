@@ -42,12 +42,14 @@
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
     <File Path="CLAUDE.md" />
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TestEnvProvisioner/TestEnvProvisioner.csproj" />
     <Project Path="tests/TestPluginAssembly365/TestPluginAssembly365.csproj" />
+    <Project Path="tests/TestPluginAssembly462/TestPluginAssembly462.csproj" />
     <Project Path="tests/XrmMockup365Test/XrmMockup365Test.csproj" />
   </Folder>
   <Folder Name="/tests/folder items/">

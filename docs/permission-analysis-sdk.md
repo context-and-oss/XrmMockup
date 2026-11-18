@@ -19,7 +19,7 @@ Reference only the existing `XrmMockup365` package. Enable source loading explic
 There are **no additional NuGet packages and no dotnet tool installation is required**. The
 permission contracts, analyzer engine and workspace loader remain internal shared library
 projects. `XrmMockup365` ships the lightweight .NET Standard 2.0 contracts in its normal library
-assets for both supported target frameworks. It also carries the library-only .NET 10 analyzer
+assets for all three supported target frameworks. It also carries the library-only .NET 10 analyzer
 payload and its dependencies in a private folder. The opt-in target copies that payload into
 build/publish output; ordinary Core consumers do not copy or load it. Roslyn/MSBuild run in a
 separate load context so they do not change the host's workflow dependencies.
@@ -36,9 +36,9 @@ Repository/project-reference tests reference the internal contracts project dire
 `XrmMockupEnablePermissionAnalysis` to their Core project reference; packaged consumers need
 only the property above.
 
-Core retains .NET Framework 4.6.2 compatibility. Checks and result contracts are available there,
+Core supports .NET Framework 4.6.2 and 4.8. Checks and result contracts are available on both,
 but loading source requires .NET 10. No Roslyn/MSBuild dependencies are added to normal Core
-PackageReferences on either target framework.
+PackageReferences on any supported target framework.
 
 Install the .NET 10 SDK with `dotnet` on `PATH`, and restore/build the analyzed project before loading it. Load once in the test fixture and reuse it:
 

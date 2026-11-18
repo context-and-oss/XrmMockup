@@ -55,9 +55,7 @@ jobs:
           ../release-tools/scripts/release/Prepare-Release.ps1 -Tag $env:CANDIDATE_TAG -Preview:($env:PREVIEW -eq 'true')
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: |
-            8.x
-            10.x
+          dotnet-version: 10.x
       - name: Build, test and pack the selected product
         env:
           PACK_PROJECT: ${{ steps.prepare.outputs.project }}
