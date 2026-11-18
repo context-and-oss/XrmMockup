@@ -1,5 +1,6 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
+* Add: Add missing request handlers (#374)
 * Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
 <!-- END GENERATED RELEASE NOTES -->
 
