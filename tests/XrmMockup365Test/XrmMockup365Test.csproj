@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFrameworks>net462;net10.0</TargetFrameworks>
+		<TargetFrameworks>net48;net10.0</TargetFrameworks>
 		<DebugType>portable</DebugType>
 		<Title>XrmMockup365Test</Title>
 		<RootNamespace>DG.XrmMockupTest</RootNamespace>
@@ -19,10 +19,10 @@
 		<DefineConstants>TRACE</DefineConstants>
 		<ErrorReport>prompt</ErrorReport>
 	</PropertyGroup>
-	<PropertyGroup Condition="'$(TargetFramework)' != 'net462'">
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
 		<DefineConstants>$(DefineConstants);DATAVERSE_SERVICE_CLIENT</DefineConstants>
 	</PropertyGroup>
-	<ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
 		<Reference Include="System" />
 		<Reference Include="System.DirectoryServices" />
 		<Reference Include="System.DirectoryServices.AccountManagement" />
@@ -38,11 +38,13 @@
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\XrmMockup365\XrmMockup365.csproj" />
 		<ProjectReference Include="..\TestPluginAssembly365\TestPluginAssembly365.csproj" />
+		<!-- Intentionally load a net462 plugin assembly in both test hosts for regression coverage. -->
+		<ProjectReference Include="..\TestPluginAssembly462\TestPluginAssembly462.csproj" />
 	</ItemGroup>
-	<ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
 		<PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.59" />
 	</ItemGroup>
-	<ItemGroup Condition="'$(TargetFramework)' != 'net462'">
+	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
 		<PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
 		<PackageReference Include="UiPath.Workflow" Version="6.0.3" />
 	</ItemGroup>
