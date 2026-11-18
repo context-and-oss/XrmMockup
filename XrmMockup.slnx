@@ -35,6 +35,7 @@
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
     <File Path="CLAUDE.md" />
     <File Path="Directory.Build.props" />
   </Folder>
