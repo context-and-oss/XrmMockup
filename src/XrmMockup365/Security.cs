@@ -159,6 +159,18 @@ namespace DG.Tools.XrmMockup
                 Shares[target].Remove(revokee);
             }
         }
+        internal PrincipalAccess[] GetSharedPrincipalsAndAccess(EntityReference target)
+        {
+            // Return only explicit shares, not ownership, team membership or role-derived rights.
+            var entity = db.GetEntity(target);
+            if (!Shares.TryGetValue(entity.ToEntityReference(), out var shares)) return Array.Empty<PrincipalAccess>();
+            return shares.Select(share => new PrincipalAccess
+            {
+                Principal = new EntityReference(share.Key.LogicalName, share.Key.Id),
+                AccessMask = share.Value
+            }).ToArray();
+        }
+
         internal AccessRights GetAccessRights(EntityReference target, EntityReference userRef)
         {
             var entity = Core.GetDbRow(target);

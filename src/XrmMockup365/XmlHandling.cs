@@ -1,4 +1,5 @@
 ﻿using Microsoft.Xrm.Sdk.Query;
+using System.ServiceModel;
 using System.Linq;
 using System.Xml.Linq;
 
@@ -27,11 +28,18 @@ namespace DG.Tools.XrmMockup {
                 query.Criteria = FilterExpFromXml(entity.Element("filter").ToString());
             }
 
-            if (page == null && count != null) {
-                query.TopCount = int.Parse(count.Value);
-            } else if (page != null && count != null) {
-                query.PageInfo = new PagingInfo { PageNumber = int.Parse(page.Value), Count = int.Parse(count.Value) };
+            var top = fetch.Attribute("top");
+            if (top != null) query.TopCount = int.Parse(top.Value);
+            if (count != null || page != null) {
+                query.PageInfo = new PagingInfo {
+                    PageNumber = page == null ? 1 : int.Parse(page.Value),
+                    Count = count == null ? 5000 : int.Parse(count.Value),
+                    PagingCookie = (string)fetch.Attribute("paging-cookie")
+                };
+                if (query.PageInfo.PageNumber < 1 || query.PageInfo.Count < 1)
+                    throw new FaultException("FetchXML page and count must be positive.");
             }
+            query.PageInfo.ReturnTotalRecordCount = (string)fetch.Attribute("returntotalrecordcount") == "true";
 
             foreach (var order in entity.Elements("order")) {
                 var orderExp = new OrderExpression() {
