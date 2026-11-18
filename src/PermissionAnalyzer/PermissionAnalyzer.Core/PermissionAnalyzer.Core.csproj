@@ -4,13 +4,15 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <RootNamespace>XrmMockup.PermissionAnalyzer.Core</RootNamespace>
     <AssemblyName>XrmMockup.PermissionAnalyzer.Core</AssemblyName>
-    <!-- Internal library, not published as NuGet -->
+    <!-- Internal assembly, shipped by the owning products rather than independently released. -->
     <IsPackable>false</IsPackable>
+    <Description>Reusable static Dataverse privilege analysis engine for the CLI and SDK.</Description>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\PermissionAnalyzer.Abstractions\PermissionAnalyzer.Abstractions.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
   </ItemGroup>
 </Project>

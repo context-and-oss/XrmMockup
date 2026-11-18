@@ -70,6 +70,14 @@ public sealed class EntryPointSelector
             && (Same(e.Trigger?.Message, message) || Same(e.Trigger?.Message, ofType)));
     }
 
+    /// <summary>Exact SDK plugin type and assembly identity, unlike the CLI's shorthand selector.</summary>
+    public static EntryPointSelector TypedPlugin(PermissionScope scope) =>
+        new(scope.ToString(), e => e.Kind is EntryPointKind.PluginStep
+            && string.Equals(e.Type.Replace('+', '.'), scope.PluginType?.Replace('+', '.'), StringComparison.Ordinal)
+            && string.Equals(e.Assembly, scope.Assembly, StringComparison.Ordinal)
+            && (scope.Message is null || Same(e.Trigger?.Message, scope.Message))
+            && (scope.Stage is null || Same(e.Trigger?.Stage, scope.Stage)));
+
     public bool Matches(EntryPoint entryPoint) => _matches(entryPoint);
 
     public override string ToString() => _text;

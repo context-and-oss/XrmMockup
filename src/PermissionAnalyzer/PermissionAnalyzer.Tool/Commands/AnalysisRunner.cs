@@ -48,22 +48,7 @@ internal static class AnalysisRunner
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
-            var filter = new ProjectFilter(root, settings.ExcludeProjects);
-            using var loader = new CodeLoader(loggerFactory.CreateLogger<CodeLoader>());
-            await loader.AddAsync(settings.Target, builder, filter, cancellationToken);
-            foreach (var plugins in settings.PluginSolutions)
-            {
-                await loader.AddAsync(plugins, builder, filter, cancellationToken, pluginCode: true);
-            }
-            foreach (var pattern in filter.Unused)
-            {
-                logger.LogWarning("Exclude pattern '{Pattern}' matches no project", pattern);
-            }
-
-            foreach (var unmatched in builder.UnmatchedEntryMethods())
-            {
-                logger.LogWarning("No method in the solution matches entry point {Method}", unmatched);
-            }
+            await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory, cancellationToken);
 
             var manifest = builder.Build(roles?.SelectMany(r => r.Privileges.Keys), request.Scope);
             if (request.Scope is not null && manifest.EntryPoints.Count == 0)

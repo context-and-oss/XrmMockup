@@ -1,6 +1,6 @@
 using System.Runtime.Serialization;
 using System.Xml;
-using DG.Tools.XrmMockup;
+using XrmMockup.PermissionAnalyzer.Workspace.Serialization;
 using Microsoft.Xrm.Sdk.Metadata;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 

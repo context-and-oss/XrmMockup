@@ -20,6 +20,56 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// </param>
 public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null, IEnumerable<LookupColumn>? lookups = null)
 {
+    /// <summary>Copies extracted source summaries, replacing check-time plugin and lookup metadata.
+    /// The graph is read-only during Build. Loaded compilations and metadata-dependent summaries are reused;
+    /// entry point evaluation and role coverage are always fresh.</summary>
+    public ManifestBuilder WithMetadata(PermissionMetadata metadata)
+    {
+        if (metadata is null) throw new ArgumentNullException(nameof(metadata));
+        var key = LookupKey(metadata.Lookups);
+        var graphSource = this;
+        if (key != _lookupKey)
+        {
+            lock (_metadataGraphs)
+            {
+                if (!_metadataGraphs.TryGetValue(key, out graphSource))
+                {
+                    // Compilations are loaded once. Extract a metadata-dependent graph once per lookup
+                    // catalog, then reuse it; role coverage and entry point evaluation are never cached.
+                    graphSource = new ManifestBuilder(_rootDirectory, _customRules, metadata.Lookups);
+                    foreach (var input in _sourceInputs) graphSource.Add(input.Compilation, input.Kind, default);
+                    _metadataGraphs.Add(key, graphSource);
+                }
+            }
+        }
+        return new ManifestBuilder(this, graphSource, metadata);
+    }
+
+    private static string LookupKey(IEnumerable<LookupColumn> columns) => string.Join("\n", columns
+        .Select(c => c.Table.ToLowerInvariant() + ":" + c.Column.ToLowerInvariant() + ":" + string.Join(",", c.Targets.Select(t => t.ToLowerInvariant()).OrderBy(t => t, StringComparer.Ordinal)))
+        .Distinct().OrderBy(c => c, StringComparer.Ordinal));
+    private readonly string _lookupKey = LookupKey(lookups ?? []);
+    private readonly IReadOnlyList<RequestRule>? _customRules = rules?.ToList();
+    private readonly List<(Compilation Compilation, AddedCode Kind)> _sourceInputs = [];
+    private readonly Dictionary<string, ManifestBuilder> _metadataGraphs = new(StringComparer.Ordinal);
+
+    private readonly string _rootDirectory = rootDirectory;
+    private ManifestBuilder(ManifestBuilder source, ManifestBuilder graphSource, PermissionMetadata metadata) : this(source._rootDirectory, source._customRules, metadata.Lookups)
+    {
+        _graph = graphSource._graph; _paths = source._paths; _rules = source._rules;
+        _lookups = new LookupColumns(metadata.Lookups);
+        _privilegeCatalog = source._privilegeCatalog is null ? null : new Dictionary<string, PrivilegeDefinition>(source._privilegeCatalog, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in graphSource._entries) _entries.Add(pair.Key, pair.Value);
+        foreach (var pair in graphSource._plugins) _plugins.Add(pair.Key, pair.Value);
+        _cascadeOnlyEntries.UnionWith(graphSource._cascadeOnlyEntries);
+        _cascadeOnlyPlugins.UnionWith(graphSource._cascadeOnlyPlugins);
+        _reportedNodes.UnionWith(graphSource._reportedNodes);
+        _entryMethods.AddRange(source._entryMethods);
+        _workflows.AddRange(metadata.Workflows ?? source._workflows);
+        foreach (var pair in source._catalogCustomApis) _catalogCustomApis.Add(pair.Key, pair.Value);
+        AddPluginSteps(metadata.PluginSteps);
+    }
+
     private const string InjectedAssumption = "service is injected";
 
     private readonly SourcePaths _paths = new(rootDirectory);
@@ -79,6 +129,8 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         LastAddedHasUnboundCode = false;
         if (XrmSymbols.Create(compilation) is not { } symbols) return false;
 
+        _sourceInputs.Add((compilation, added));
+        _metadataGraphs.Clear();
         var extractor = new SummaryExtractor(compilation, symbols, _paths, _rules, _lookups);
         var summaries = extractor.Extract(cancellationToken);
         LastAddedHasUnboundCode = extractor.HasUnboundCode;

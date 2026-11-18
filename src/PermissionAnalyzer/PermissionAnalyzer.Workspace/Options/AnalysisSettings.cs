@@ -72,8 +72,8 @@ internal sealed record AnalysisSettings(string Target, string? MetadataDirectory
         return solutions.Count switch
         {
             1 => solutions[0],
-            0 => throw new ToolException($"No solution found in {directory}. Use {CliOptions.Solution.Primary} to give a solution or project."),
-            _ => throw new ToolException($"Several solutions found in {directory}. Use {CliOptions.Solution.Primary} to pick one."),
+            0 => throw new ToolException($"No solution found in {directory}. Use --solution to give a solution or project."),
+            _ => throw new ToolException($"Several solutions found in {directory}. Use --solution to pick one."),
         };
     }
 }

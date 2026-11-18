@@ -1,5 +1,5 @@
 using System.Runtime.Serialization;
-using DG.Tools.XrmMockup;
+using XrmMockup.PermissionAnalyzer.Workspace.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 using CrmDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth;

@@ -1,10 +1,10 @@
 using System.Runtime.Serialization;
-using DG.Tools.XrmMockup;
+using XrmMockup.PermissionAnalyzer.Workspace.Serialization;
 using Microsoft.Crm.Sdk.Messages;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 using XrmMockup.PermissionAnalyzer.Tool.Metadata;
 using CrmDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth;
-using RolePrivilege = DG.Tools.XrmMockup.RolePrivilege;
+using RolePrivilege = XrmMockup.PermissionAnalyzer.Workspace.Serialization.RolePrivilege;
 using PrivilegeDepth = XrmMockup.PermissionAnalyzer.Core.Model.PrivilegeDepth;
 
 namespace XrmMockup.PermissionAnalyzer.Tests;

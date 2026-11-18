@@ -20,6 +20,8 @@
     <File Path="src/MetadataGen/scripts/Regenerate-Metadata.ps1" />
   </Folder>
   <Folder Name="/PermissionAnalyzer/">
+    <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Abstractions/PermissionAnalyzer.Abstractions.csproj" />
+    <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Workspace/PermissionAnalyzer.Workspace.csproj" />
     <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Core/PermissionAnalyzer.Core.csproj" />
     <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Tests/PermissionAnalyzer.Tests.csproj" />
     <Project Path="src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj" />

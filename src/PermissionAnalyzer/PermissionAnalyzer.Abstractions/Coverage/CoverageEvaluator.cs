@@ -27,6 +27,13 @@ public sealed record Suppression(string Table, Privilege? Privilege, string? Rea
 /// </summary>
 public sealed class CoverageOptions
 {
+    public CoverageOptions() { }
+    /// <summary>Constructor for SDK consumers using older C# versions.</summary>
+    public CoverageOptions(RoleSet roles, IReadOnlyDictionary<string, RoleSet> users)
+    {
+        Roles = roles; Users = users;
+    }
+
     /// <summary>
     /// <c>--role</c>: for the caller and the application user. Replaces <see cref="Principals"/> when set.
     /// </summary>
@@ -59,7 +66,12 @@ public static class CoverageEvaluator
     private const string PrincipalsSetting = "XrmMockup:Permissions:Principals";
     private const string UsersSetting = "XrmMockup:Permissions:Users";
 
-    public static CoverageReport Evaluate(Manifest manifest, CoverageOptions options)
+    public static CoverageReport Evaluate(Manifest manifest, CoverageOptions options) => Evaluate(manifest, options, requireKnownIdentities: false);
+
+    /// <summary>SDK coverage must establish every non-SYSTEM identity, even for tables no role governs.</summary>
+    public static CoverageReport EvaluateForPermissionCheck(Manifest manifest, CoverageOptions options) => Evaluate(manifest, options, requireKnownIdentities: true);
+
+    private static CoverageReport Evaluate(Manifest manifest, CoverageOptions options, bool requireKnownIdentities)
     {
         var notGoverned = new HashSet<string>(manifest.NotRoleGoverned ?? [], StringComparer.Ordinal);
         var principals = new Dictionary<string, RoleSet>(StringComparer.OrdinalIgnoreCase);
@@ -99,7 +111,7 @@ public static class CoverageEvaluator
             {
                 var identity = requirement.RunsAs with { Assumed = false };
                 var roles = IdentityOf(identity);
-                var result = Check(requirement, roles, notGoverned, options.Suppress);
+                var result = Check(requirement, roles, notGoverned, options.Suppress, requireKnownIdentities);
                 coverage.Add(requirement, result);
                 if (result.Status == CoverageStatus.Missing) AddMissing(missing, (requirement.Table, requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
             }
@@ -185,9 +197,10 @@ public static class CoverageEvaluator
         found.In.Add(id);
     }
 
-    private static RequirementCoverage Check(Requirement requirement, IdentityRoles identity, HashSet<string> notGoverned, IReadOnlyList<Suppression> suppress)
+    private static RequirementCoverage Check(Requirement requirement, IdentityRoles identity, HashSet<string> notGoverned, IReadOnlyList<Suppression> suppress, bool requireKnownIdentities)
     {
         if (requirement.RunsAs.Kind == RunsAsKind.System) return new RequirementCoverage(CoverageStatus.System);
+        if (requireKnownIdentities && identity.Roles is null) return new RequirementCoverage(CoverageStatus.NotChecked);
         // No role can grant a table no role governs, whatever roles the identity has
         if (notGoverned.Contains(requirement.Table)) return new RequirementCoverage(CoverageStatus.NotGoverned);
         if (identity.Roles is not { } roles) return new RequirementCoverage(CoverageStatus.NotChecked);

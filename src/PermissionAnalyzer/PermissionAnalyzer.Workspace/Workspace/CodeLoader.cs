@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.Extensions.Logging;
 using XrmMockup.PermissionAnalyzer.Core.Analysis;
+using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 
@@ -17,8 +18,10 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 /// weaker than a later one's.
 /// </para>
 /// </summary>
-internal sealed class CodeLoader(ILogger<CodeLoader> logger) : IDisposable
+internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompleteSource = false) : IDisposable
 {
+    internal List<UnresolvedOperation> IncompleteSource { get; } = [];
+
     // MSBuild reports warnings such as NuGet audit results as failures too, so they're only shown when a project
     // turns out not to load, below
     private readonly List<string> _failures = [];
@@ -142,6 +145,17 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger) : IDisposable
                       $"or set {FrameworkReferences.Property} to a folder with them."
                     : " Restore or build it on this machine first.";
                 throw new ToolException($"Could not load {project.Name}: its references didn't resolve.{hint}{problems}");
+            }
+
+            if (collectIncompleteSource)
+            {
+                foreach (var error in compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error))
+                {
+                    var span = error.Location.GetLineSpan();
+                    var file = string.IsNullOrEmpty(span.Path) ? project.FilePath ?? project.Name : span.Path;
+                    var location = new SourceLocation(Path.GetRelativePath(solutionDirectory, file).Replace('\\', '/'), span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
+                    IncompleteSource.Add(new UnresolvedOperation("source compilation", [], error.ToString(), RunsAs.Caller, new RequirementSource(location, [])));
+                }
             }
 
             var added = pluginCode ? builder.AddPluginCode(compilation, cancellationToken)

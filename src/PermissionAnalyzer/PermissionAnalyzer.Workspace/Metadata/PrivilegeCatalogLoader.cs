@@ -1,5 +1,5 @@
 using System.Runtime.Serialization;
-using DG.Tools.XrmMockup;
+using XrmMockup.PermissionAnalyzer.Workspace.Serialization;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Metadata;
