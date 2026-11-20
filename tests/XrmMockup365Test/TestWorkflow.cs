@@ -35,7 +35,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "Activeworkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "Activeworkflow.xml"));
                 var acc = new Account()
                 {
                     Name = "Wap"
@@ -52,7 +52,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "AddStringWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "AddStringWorkflow.xml"));
                 var acc = new Account()
                 {
                     Name = "WapAdd"
@@ -69,7 +69,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "OtherwiseWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "OtherwiseWorkflow.xml"));
                 var otherwise = new Account()
                 {
                     Name = "Otherwise"
@@ -105,8 +105,23 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "WaitingWorkflow.xml"));
-                var acc = new Account();
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "WaitingWorkflow.xml"));
+
+                // The workflow's create step references this hard-coded currency (the original
+                // environment's base currency, "Dansk krone"), and its wait branch only resumes when
+                // the account's currency name equals "Dansk krone". Create that currency and put the
+                // account on it so the wait condition is satisfiable in the leaned environment.
+                var currency = new TransactionCurrency
+                {
+                    Id = new Guid("b26a2fe0-0154-e611-80dc-c4346bad0190"),
+                    CurrencyName = "Dansk krone",
+                    CurrencySymbol = "kr.",
+                    ExchangeRate = 1m,
+                    CurrencyPrecision = 2
+                };
+                orgAdminService.Create(currency);
+
+                var acc = new Account { TransactionCurrencyId = currency.ToEntityReference() };
                 acc.Id = orgAdminUIService.Create(acc);
 
                 var retrieved = orgAdminUIService.Retrieve(Account.EntityLogicalName, acc.Id, new ColumnSet(true)) as Account;
@@ -134,7 +149,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "RelatedWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "RelatedWorkflow.xml"));
                 var businessunit = new BusinessUnit();
                 businessunit["name"] = "business unit name 1";
                 businessunit.Id = orgAdminUIService.Create(businessunit);
@@ -165,7 +180,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "RelatedWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "RelatedWorkflow.xml"));
                 var businessunit = new BusinessUnit();
                 businessunit["name"] = "business unit name 2";
                 businessunit.Id = orgAdminUIService.Create(businessunit);
@@ -196,7 +211,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "OwningBUWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "OwningBUWorkflow.xml"));
                 var businessunit = new BusinessUnit
                 {
                     Name = "something"
@@ -222,7 +237,7 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "OwningBUWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "OwningBUWorkflow.xml"));
                 var businessunit = new BusinessUnit
                 {
                     Name = "delegatelab4"
@@ -277,7 +292,20 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "SendMailWorkflow.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "OtherWorkflows", "SendMailWorkflow.xml"));
+
+                // The workflow sets the created email's transactioncurrencyid to a currency the
+                // original environment shipped by default. The leaned environment's default currency
+                // has a different id, so create the hard-coded one the workflow references.
+                orgAdminService.Create(new TransactionCurrency
+                {
+                    Id = new Guid("b26a2fe0-0154-e611-80dc-c4346bad0190"),
+                    CurrencyName = "Workflow Currency",
+                    CurrencySymbol = "$",
+                    ExchangeRate = 1m,
+                    CurrencyPrecision = 2
+                });
+
                 var businessunit = new BusinessUnit
                 {
                     Name = "delegatelab4"
@@ -317,6 +345,9 @@ namespace DG.XrmMockupTest
             }
         }
 
+        /* DISABLED: these (already non-[Fact]) workflow type-conversion tests operate on the Lead entity
+           and Lead-targeted workflow definitions, both removed from the environment. Migrating them would
+           require re-authoring the workflow XML against an available entity. Retained for reference.
         //[Fact]
         public void TestClear()
         {
@@ -404,5 +435,6 @@ namespace DG.XrmMockupTest
             // TODO.. we should somewhere declare formating
             Assert.Equal($"{lead.NumberOfEmployees:N0}", retrieved.Description);
         }
+        */
     }
 }

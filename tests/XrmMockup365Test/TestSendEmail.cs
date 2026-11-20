@@ -1,5 +1,6 @@
 ﻿using DG.XrmFramework.BusinessDomain.ServiceContext;
 using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Xrm.Sdk;
 using System.Linq;
 using System.ServiceModel;
 using Xunit;
@@ -22,14 +23,14 @@ namespace DG.XrmMockupTest
 
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
                         PartyId = crm.AdminUser
                     }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -53,8 +54,8 @@ namespace DG.XrmMockupTest
             using (var context = new Xrm(orgAdminUIService))
             {
                 var retrievedEmail = context.EmailSet.FirstOrDefault();
-                Assert.Equal(EmailState.Completed, retrievedEmail.StateCode);
-                Assert.Equal(Email_StatusCode.PendingSend, retrievedEmail.StatusCode);
+                Assert.Equal(email_statecode.Completed, retrievedEmail.StateCode);
+                Assert.Equal(email_statuscode.PendingSend, retrievedEmail.StatusCode);
             }
         }
 
@@ -70,14 +71,14 @@ namespace DG.XrmMockupTest
 
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
                         PartyId = crm.AdminUser
                     }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -100,8 +101,8 @@ namespace DG.XrmMockupTest
             using (var context = new Xrm(orgAdminUIService))
             {
                 var retrievedEmail = context.EmailSet.FirstOrDefault();
-                Assert.Equal(EmailState.Completed, retrievedEmail.StateCode);
-                Assert.Equal(Email_StatusCode.Sent, retrievedEmail.StatusCode);
+                Assert.Equal(email_statecode.Completed, retrievedEmail.StateCode);
+                Assert.Equal(email_statuscode.Sent, retrievedEmail.StatusCode);
             }
         }
 
@@ -110,14 +111,14 @@ namespace DG.XrmMockupTest
         {
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
                         PartyId = crm.AdminUser
                     }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -141,8 +142,57 @@ namespace DG.XrmMockupTest
             using (var context = new Xrm(orgAdminUIService))
             {
                 var retrievedEmail = context.EmailSet.FirstOrDefault();
-                Assert.Equal(EmailState.Completed, retrievedEmail.StateCode);
-                Assert.Equal(Email_StatusCode.PendingSend, retrievedEmail.StatusCode);
+                Assert.Equal(email_statecode.Completed, retrievedEmail.StateCode);
+                Assert.Equal(email_statuscode.PendingSend, retrievedEmail.StatusCode);
+            }
+        }
+
+        [Fact]
+        public void TestSendEmailRequestSuccessWhenEmailStatusFailed()
+        {
+            var contact = new Contact
+            {
+                FirstName = "Test",
+                EMailAddress1 = "test@test.com"
+            };
+            contact.Id = orgAdminUIService.Create(contact);
+
+            var email = new Email
+            {
+                from = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = crm.AdminUser
+                    }
+                },
+                to = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = contact.ToEntityReference()
+                    }
+                },
+                Subject = "Test Email",
+                StatusCode = email_statuscode.Failed
+            };
+            email.Id = orgAdminUIService.Create(email);
+
+            var sendEmailRequest = new SendEmailRequest
+            {
+                EmailId = email.Id,
+                IssueSend = true
+            };
+
+            var response = orgAdminUIService.Execute(sendEmailRequest) as SendEmailResponse;
+            Assert.NotNull(response);
+            Assert.Equal(email.Subject, response.Subject);
+
+            using (var context = new Xrm(orgAdminUIService))
+            {
+                var retrievedEmail = context.EmailSet.FirstOrDefault();
+                Assert.Equal(email_statecode.Completed, retrievedEmail.StateCode);
+                Assert.Equal(email_statuscode.PendingSend, retrievedEmail.StatusCode);
             }
         }
 
@@ -158,14 +208,14 @@ namespace DG.XrmMockupTest
 
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
                         PartyId = crm.AdminUser
                     }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -192,14 +242,14 @@ namespace DG.XrmMockupTest
         {
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
                         PartyId = crm.AdminUser
                     }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -245,7 +295,7 @@ namespace DG.XrmMockupTest
 
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -268,7 +318,7 @@ namespace DG.XrmMockupTest
         {
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty()
                     {
@@ -291,7 +341,7 @@ namespace DG.XrmMockupTest
         {
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty(),
                     new ActivityParty(),
@@ -312,7 +362,7 @@ namespace DG.XrmMockupTest
         {
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
@@ -335,17 +385,126 @@ namespace DG.XrmMockupTest
         {
             var email = new Email
             {
-                From = new ActivityParty[]
+                from = new ActivityParty[]
                 {
                     new ActivityParty
                     {
                         PartyId = crm.AdminUser
                     }
                 },
-                To = new ActivityParty[]
+                to = new ActivityParty[]
                 {
                     new ActivityParty()
                 }
+            };
+            email.Id = orgAdminUIService.Create(email);
+
+            var sendEmailRequest = new SendEmailRequest
+            {
+                EmailId = email.Id
+            };
+
+            Assert.Throws<FaultException>(() => orgAdminUIService.Execute(sendEmailRequest));
+        }
+
+        [Fact]
+        public void TestSendEmailRequestFailsWhenRecipientHasNoEmailAddress1()
+        {
+            var contact = new Contact
+            {
+                FirstName = "Test"
+            };
+            contact.Id = orgAdminUIService.Create(contact);
+
+            var email = new Email
+            {
+                from = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = crm.AdminUser
+                    }
+                },
+                to = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = contact.ToEntityReference()
+                    }
+                },
+                Subject = "Test Email",
+            };
+            email.Id = orgAdminUIService.Create(email);
+
+            var sendEmailRequest = new SendEmailRequest
+            {
+                EmailId = email.Id
+            };
+
+            Assert.Throws<FaultException>(() => orgAdminUIService.Execute(sendEmailRequest));
+        }
+
+        [Fact]
+        public void TestSendEmailRequestSuccessWithSystemUserRecipient()
+        {
+            var email = new Email
+            {
+                from = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = crm.AdminUser
+                    }
+                },
+                to = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = testUser1.ToEntityReference()
+                    }
+                },
+                Subject = "Test Email",
+            };
+            email.Id = orgAdminUIService.Create(email);
+
+            var sendEmailRequest = new SendEmailRequest
+            {
+                EmailId = email.Id,
+                IssueSend = true
+            };
+
+            var response = orgAdminUIService.Execute(sendEmailRequest) as SendEmailResponse;
+            Assert.NotNull(response);
+            Assert.Equal(email.Subject, response.Subject);
+        }
+
+        [Fact]
+        public void TestSendEmailRequestFailsWhenSystemUserRecipientHasNoEmailAddress()
+        {
+            var userWithNoEmail = new SystemUser
+            {
+                BusinessUnitId = crm.RootBusinessUnit,
+                IsLicensed = true
+            };
+            userWithNoEmail = crm.CreateUser(orgAdminService, userWithNoEmail, new System.Guid[0]).ToEntity<SystemUser>();
+
+            var email = new Email
+            {
+                from = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = crm.AdminUser
+                    }
+                },
+                to = new ActivityParty[]
+                {
+                    new ActivityParty
+                    {
+                        PartyId = userWithNoEmail.ToEntityReference()
+                    }
+                },
+                Subject = "Test Email",
             };
             email.Id = orgAdminUIService.Create(email);
 

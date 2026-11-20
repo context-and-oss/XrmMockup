@@ -65,6 +65,7 @@ namespace DG.Tools.XrmMockup.Internal
                 clone[metadata.PrimaryIdAttribute] = entity.Id;
             }
             clone.EntityState = entity.EntityState;
+            clone.RowVersion = entity.RowVersion;
             clone.KeyAttributes = entity.CloneKeyAttributes();
 
             return clone.SetAttributes(entity.Attributes, metadata, cols);
@@ -187,7 +188,7 @@ namespace DG.Tools.XrmMockup.Internal
         }
 
 
-        public static EntityMetadata GetMetadata(this Dictionary<string, EntityMetadata> metadata, string logicalName)
+        public static EntityMetadata GetMetadata(this SortedDictionary<string, EntityMetadata> metadata, string logicalName)
         {
             if (!metadata.ContainsKey(logicalName))
             {
@@ -255,7 +256,7 @@ namespace DG.Tools.XrmMockup.Internal
             }
         }
 
-        internal static RelationshipMetadataBase GetRelationshipMetadataDefaultNull(Dictionary<string, EntityMetadata> entityMetadata, string name, Guid metadataId, EntityReference userRef)
+        internal static RelationshipMetadataBase GetRelationshipMetadataDefaultNull(SortedDictionary<string, EntityMetadata> entityMetadata, string name, Guid metadataId, EntityReference userRef)
         {
             if (name == null && metadataId == Guid.Empty)
             {
@@ -451,7 +452,7 @@ namespace DG.Tools.XrmMockup.Internal
             HandlePrecision(metadata, db, entity);
         }
 
-        internal static bool HasCircularReference(Dictionary<string, EntityMetadata> metadata, Entity entity)
+        internal static bool HasCircularReference(SortedDictionary<string, EntityMetadata> metadata, Entity entity)
         {
             if (!metadata.ContainsKey(entity.LogicalName)) return false;
             var attributeMetadata = metadata.GetMetadata(entity.LogicalName).Attributes;
@@ -622,7 +623,10 @@ namespace DG.Tools.XrmMockup.Internal
                     if (row != null)
                     {
                         var nameAttr = row.Metadata.PrimaryNameAttribute;
-                        eRef.Name = row.GetColumn<string>(nameAttr);
+                        if (!string.IsNullOrEmpty(nameAttr))
+                        {
+                            eRef.Name = row.GetColumn<string>(nameAttr);
+                        }
                     }
                 }
                 else if (attr.Value is AliasedValue aliasedValue && aliasedValue.Value is EntityReference aliasedRef)
@@ -654,7 +658,7 @@ namespace DG.Tools.XrmMockup.Internal
             return attribute;
         }
 
-        internal static RelationshipMetadataBase GetRelatedEntityMetadata(Dictionary<string, EntityMetadata> metadata, string entityType, string relationshipName)
+        internal static RelationshipMetadataBase GetRelatedEntityMetadata(SortedDictionary<string, EntityMetadata> metadata, string entityType, string relationshipName)
         {
             if (!metadata.ContainsKey(entityType))
             {
@@ -725,7 +729,27 @@ namespace DG.Tools.XrmMockup.Internal
             }
 
             var files = Directory.GetFiles(pathToWorkflows, "*.xml");
-            return files.Select(GetWorkflow).ToList();
+            var workflowsByFile = files.ToDictionary(f => f, GetWorkflow);
+
+            // Detect duplicate workflow ids across files. This typically indicates leftover files
+            // from older metadata generations whose tooling did not clear the Workflows folder
+            // before writing renamed workflows back to disk. Picking a winner silently would risk
+            // running a stale version, so we fail loud with an actionable message.
+            var duplicates = workflowsByFile
+                .GroupBy(kvp => kvp.Value.Id)
+                .Where(g => g.Count() > 1)
+                .ToList();
+            if (duplicates.Count > 0)
+            {
+                var details = string.Join("; ", duplicates.Select(g =>
+                    $"workflow id {g.Key} appears in: {string.Join(", ", g.Select(kvp => Path.GetFileName(kvp.Key)))}"));
+                throw new MockupException(
+                    $"Duplicate workflow ids found in '{pathToWorkflows}'. {details}. " +
+                    "This usually means leftover XML files from a previous metadata generation. " +
+                    "Delete the Workflows folder and re-generate metadata.");
+            }
+
+            return workflowsByFile.Values.ToList();
         }
 
         internal static Entity GetWorkflow(string path)
@@ -857,18 +881,30 @@ namespace DG.Tools.XrmMockup.Internal
             if (metadataAtt is BooleanAttributeMetadata booleanAttributeMetadata)
             {
                 var booleanOptions = booleanAttributeMetadata.OptionSet;
+                if (booleanOptions.TrueOption == null && booleanOptions.FalseOption == null)
+                {
+                    return $"{value}";
+                }
+
                 var label = (bool)value ? booleanOptions.TrueOption.Label : booleanOptions.FalseOption.Label;
                 return label.UserLocalizedLabel.Label;
             }
 
             if (metadataAtt is MoneyAttributeMetadata)
             {
-                var currencysymbol =
-                    db.GetEntity(
-                        db.GetEntity(entity.ToEntityReference())
-                        .GetAttributeValue<EntityReference>("transactioncurrencyid"))
-                    .GetAttributeValue<string>("currencysymbol");
+                // A Money value can be present without an associated transactioncurrencyid — e.g. a
+                // calculated Money field projected onto the entity during a read (which, unlike a real
+                // write, does not run HandleCurrencies to backfill the currency). Without a currency we
+                // cannot resolve a symbol, so skip the formatted value rather than dereferencing a null
+                // currency reference (which previously threw and broke RetrieveMultiple's formatting).
+                var currencyRef = db.GetEntity(entity.ToEntityReference())
+                    .GetAttributeValue<EntityReference>("transactioncurrencyid");
+                if (currencyRef == null)
+                {
+                    return null;
+                }
 
+                var currencysymbol = db.GetEntity(currencyRef).GetAttributeValue<string>("currencysymbol");
                 return currencysymbol + (value as Money).Value.ToString();
             }
 
@@ -1132,6 +1168,7 @@ namespace DG.Tools.XrmMockup.Internal
         public const string Workflow = "workflow";
         public const string Team = "team";
         public const string Contact = "contact";
+        public const string Account = "account";
         public const string Lead = "lead";
         public const string Opportunity = "opportunity";
         public const string TeamMembership = "teammembership";
@@ -1140,6 +1177,8 @@ namespace DG.Tools.XrmMockup.Internal
         public const string Quote = "quote";
         public const string QuoteDetail = "quotedetail";
         public const string QuoteClose = "quoteclose";
+        public const string Email = "email";
+        public const string Template = "template";
     }
 
     [DataContract()]
@@ -1179,7 +1218,9 @@ namespace DG.Tools.XrmMockup.Internal
     }
 
     [DataContract()]
+#pragma warning disable CS8981 // Name matches the Dataverse logical name of the option set
     internal enum componentstate
+#pragma warning restore CS8981
     {
 
         [EnumMember()]
@@ -1252,6 +1293,15 @@ namespace DG.Tools.XrmMockup.Internal
 
         [EnumMember()]
         BusinessProcessFlow = 4,
+
+        [EnumMember()]
+        ModernFlow = 5,
+
+        [EnumMember()]
+        DesktopFlow = 6,
+
+        [EnumMember()]
+        AIFlow = 7,
     }
 
     [DataContract()]
@@ -1263,6 +1313,9 @@ namespace DG.Tools.XrmMockup.Internal
 
         [EnumMember()]
         Activated = 1,
+
+        [EnumMember()]
+        Suspended = 2,
     }
 
     [DataContract()]
@@ -1274,6 +1327,9 @@ namespace DG.Tools.XrmMockup.Internal
 
         [EnumMember()]
         Activated = 2,
+
+        [EnumMember()]
+        CompanyDLPViolation = 3,
     }
 
     [DataContract()]

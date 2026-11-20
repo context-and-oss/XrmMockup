@@ -7,6 +7,7 @@ namespace DG.Tools.XrmMockup.Serialization
     {
         public Guid Id { get; set; }
         public bool IsDeleted { get; set; }
+        public long RowVersion { get; set; }
         public Dictionary<string, TableColumnDTO> Columns { get; set; }
     }
 }

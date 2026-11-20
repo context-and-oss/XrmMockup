@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using XrmMockup.MetadataGenerator.Core.Extensions;
 using XrmMockup.MetadataGenerator.Core.Models;
-using XrmMockup.MetadataGenerator.Tool.Logging;
 using XrmMockup.MetadataGenerator.Tool.Options;
+using XrmMockup.Tools.Common.Logging;
 
 using MsOptions = Microsoft.Extensions.Options;
 
@@ -19,8 +19,15 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds configuration services.
     /// </summary>
-    public static IServiceCollection AddToolConfiguration(this IServiceCollection services)
+    /// <param name="services">The service collection.</param>
+    /// <param name="configurationOverrides">
+    /// Flat configuration keys from the command line, applied with the highest precedence.
+    /// </param>
+    public static IServiceCollection AddToolConfiguration(
+        this IServiceCollection services,
+        ConfigurationOverrides? configurationOverrides = null)
     {
+        services.AddSingleton(configurationOverrides ?? ConfigurationOverrides.Empty);
         services.AddSingleton<IConfigReader, ConfigReader>();
         services.AddSingleton(sp => sp.GetRequiredService<IConfigReader>().GetConfiguration());
         return services;
@@ -55,11 +62,7 @@ public static class ServiceCollectionExtensions
             builder
                 .AddFilter("Microsoft", LogLevel.Warning)
                 .AddFilter("System", LogLevel.Warning)
-                .AddConsole(options =>
-                {
-                    options.FormatterName = ShortCategoryConsoleFormatter.FormatterName;
-                })
-                .AddConsoleFormatter<ShortCategoryConsoleFormatter, SimpleConsoleFormatterOptions>(options =>
+                .AddShortCategoryConsole(options =>
                 {
                     options.TimestampFormat = "HH:mm:ss ";
                     options.ColorBehavior = LoggerColorBehavior.Enabled;
@@ -74,10 +77,11 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddMetadataGeneratorTool(
         this IServiceCollection services,
-        Func<MetadataConfiguration, GeneratorOptions> optionsFactory)
+        Func<MetadataConfiguration, GeneratorOptions> optionsFactory,
+        ConfigurationOverrides? configurationOverrides = null)
     {
         return services
-            .AddToolConfiguration()
+            .AddToolConfiguration(configurationOverrides)
             .AddGeneratorOptions(optionsFactory)
             .AddToolLogging()
             .AddMetadataGenerator();

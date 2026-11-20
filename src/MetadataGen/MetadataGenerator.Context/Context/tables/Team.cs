@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Collection of system users that routinely collaborate. Teams can be used to simplify record sharing and provide team members with common access to organization data when team members belong to different Business Units.</para>
 /// <para>Display Name: Team</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("team")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -371,9 +371,9 @@ public partial class Team : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("teamid")]
     [DisplayName("Team")]
-    public Guid TeamId
+    public Guid? TeamId
     {
-        get => GetAttributeValue<Guid>("teamid");
+        get => GetAttributeValue<Guid?>("teamid");
         set => SetId("teamid", value);
     }
 

@@ -6,7 +6,6 @@ using Microsoft.Xrm.Sdk.Query;
 using System.ServiceModel;
 using Microsoft.Xrm.Sdk.Messages;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
-using DG.XrmContext;
 using Xunit;
 using Xunit.Sdk;
 using DG.Tools.XrmMockup.Internal;

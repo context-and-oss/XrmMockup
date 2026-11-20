@@ -56,6 +56,35 @@ namespace DG.Tools.XrmMockup
         private readonly Dictionary<string, long> timers;
         public IReadOnlyDictionary<string, long> Timers => new ReadOnlyDictionary<string, long>(timers);
 
+        /// <summary>
+        /// A snapshot of the trace messages emitted to <see cref="ITracingService"/> during
+        /// plugin, workflow and custom API execution, allowing tests to assert on them.
+        /// <para>Only populated when using the default tracing service factory, i.e. when a
+        /// custom <see cref="XrmMockupSettings.TracingServiceFactory"/> has not been supplied.</para>
+        /// </summary>
+        public IReadOnlyList<string> TraceLog =>
+            (Core.TracingServiceFactory as TracingServiceFactory)?.TraceLog ?? Array.Empty<string>();
+
+        /// <summary>
+        /// Clears all collected trace messages from the <see cref="TraceLog"/>.
+        /// </summary>
+        public void ClearTraceLog() =>
+            (Core.TracingServiceFactory as TracingServiceFactory)?.Clear();
+
+        /// <summary>
+        /// The trace messages emitted during plugin execution, grouped by the plugin execution
+        /// that produced them, mirroring the plugintracelog records of a real Dynamics 365
+        /// environment. Each entry carries the invoking type, message, primary entity, depth,
+        /// correlation id, mode, timing, the ordered list of trace messages and any exception.
+        /// <para>Internal XrmMockup system plugins are excluded.</para>
+        /// </summary>
+        public IReadOnlyList<PluginTraceLog> PluginTraceLog => Core.PluginTraceLogs;
+
+        /// <summary>
+        /// Clears all collected <see cref="PluginTraceLog"/> entries.
+        /// </summary>
+        public void ClearPluginTraceLog() => Core.ClearPluginTraceLogs();
+
         protected XrmMockupSettings Settings { get; }
         protected MetadataSkeleton Metadata { get; }
         protected List<Entity> Workflows { get; }
@@ -190,6 +219,7 @@ namespace DG.Tools.XrmMockup
         /// </summary>
         public void ResetEnvironment() {
             Core.ResetEnvironment();
+            ClearTraceLog();
         }
 
 
@@ -283,6 +313,15 @@ namespace DG.Tools.XrmMockup
         /// <param name="entities"></param>
         public void PopulateWith(params Entity[] entities) {
             Core.PopulateWith(entities);
+        }
+
+        /// <summary>
+        /// Prefills the local database with data from the online service based on the query.
+        /// Only works when OnlineDataServiceFactory or OnlineEnvironment is configured.
+        /// </summary>
+        /// <param name="query">The query to execute against the online service.</param>
+        public void PrefillDBWithOnlineData(QueryExpression query) {
+            Core.PrefillDBWithOnlineData(query);
         }
 
         /// <summary>

@@ -1,7 +1,9 @@
-﻿using DG.Tools.XrmMockup;
+using DG.Tools.XrmMockup;
 using DG.Tools.XrmMockup.Plugin.RegistrationStrategy;
 using XrmPluginCore.Enums;
 using XrmPluginCore.Interfaces.CustomApi;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Metadata;
 using System;
@@ -21,13 +23,23 @@ namespace DG.Tools.XrmMockup.Plugin.RegistrationStrategy.DAXIF
 
     internal class CustomApiRegistrationStrategy : IRegistrationStrategy<ICustomApiConfig>
     {
+        private readonly ILogger _logger;
+
+        public CustomApiRegistrationStrategy(ILogger logger = null)
+        {
+            _logger = logger ?? NullLogger.Instance;
+        }
+
         public IEnumerable<ICustomApiConfig> AnalyzeType(IPlugin plugin)
         {
             var pluginType = plugin.GetType();
             if (pluginType.GetMethod("GetCustomAPIConfig") == null)
             {
+                _logger.LogDebug("[DAXIF] {TypeName}: no GetCustomAPIConfig method found, skipping", pluginType.FullName);
                 yield break;
             }
+
+            _logger.LogDebug("[DAXIF] {TypeName}: found GetCustomAPIConfig method, extracting config", pluginType.FullName);
 
             var configs = pluginType
                 .GetMethod("GetCustomAPIConfig")
@@ -41,6 +53,8 @@ namespace DG.Tools.XrmMockup.Plugin.RegistrationStrategy.DAXIF
             var ownerType = Enum.TryParse<OwnerType>(configs.Item2.Item3, true, out var ownerTypeEnum)
                 ? ownerTypeEnum
                 : (OwnerType?)null;
+
+            _logger.LogDebug("[DAXIF] {TypeName}: registered custom API '{UniqueName}'", pluginType.FullName, configs.Item1.Item1);
 
             yield return new CustomApiConfig
             {

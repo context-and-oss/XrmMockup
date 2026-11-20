@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
@@ -61,6 +62,41 @@ namespace DG.XrmMockupTest
 
             var updatedContact = Contact.Retrieve(orgAdminService, contactId);
             Assert.Equal(updateContact1.FirstName, updatedContact.FirstName);
+        }
+
+        [Fact]
+        public void TestUpdateMultipleThrowsWhenEntityNameMissing()
+        {
+            var contactId = orgGodService.Create(new Contact { FirstName = "John", LastName = "Doe" });
+
+            var updateMultipleRequest = new UpdateMultipleRequest
+            {
+                Targets = new EntityCollection
+                {
+                    Entities = { new Contact(contactId) { FirstName = "Johny" } }
+                }
+            };
+
+            var exception = Assert.Throws<FaultException>(() => orgAdminService.Execute(updateMultipleRequest));
+            Assert.Equal("The required field 'EntityName' is missing.", exception.Message);
+        }
+
+        [Fact]
+        public void TestUpdateMultipleThrowsWhenEntityLogicalNameMismatch()
+        {
+            var contactId = orgGodService.Create(new Contact { FirstName = "John", LastName = "Doe" });
+
+            var updateMultipleRequest = new UpdateMultipleRequest
+            {
+                Targets = new EntityCollection
+                {
+                    EntityName = Account.EntityLogicalName,
+                    Entities = { new Contact(contactId) { FirstName = "Johny" } }
+                }
+            };
+
+            var exception = Assert.Throws<FaultException>(() => orgAdminService.Execute(updateMultipleRequest));
+            Assert.Equal($"The entity logical name '{Contact.EntityLogicalName}' does not match the expected entity logical name '{Account.EntityLogicalName}'.", exception.Message);
         }
     }
 }

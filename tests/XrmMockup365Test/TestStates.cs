@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.Xrm.Sdk.Query;
 using System.ServiceModel;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
@@ -17,34 +17,44 @@ namespace DG.XrmMockupTest
         {
             var acc = new Account()
             {
-                StateCode = AccountState.Active,
-                StatusCode = Account_StatusCode.Active
+                StateCode = account_statecode.Active,
+                StatusCode = account_statuscode.Active
             };
             acc.Id = orgAdminUIService.Create(acc);
-            acc.SetState(orgAdminUIService, AccountState.Inactive, Account_StatusCode.Inactive);
+            acc.SetState(orgAdminUIService, account_statecode.Inactive, account_statuscode.Inactive);
 
             var retrieved = orgAdminUIService.Retrieve(Account.EntityLogicalName, acc.Id, new ColumnSet(true)) as Account;
-            Assert.Equal(AccountState.Inactive, retrieved.StateCode);
+            Assert.Equal(account_statecode.Inactive, retrieved.StateCode);
         }
 
         [Fact]
         public void TestStatusTransitions()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active
             };
             man.Id = orgAdminUIService.Create(man);
-            man.SetState(orgAdminUIService, dg_manState.Inactive, dg_man_statuscode.Inactive);
+            orgAdminUIService.Execute(new SetStateRequest
+            {
+                EntityMoniker = man.ToEntityReference(),
+                State = new Microsoft.Xrm.Sdk.OptionSetValue((int)ctx_parent_statecode.Inactive),
+                Status = new Microsoft.Xrm.Sdk.OptionSetValue((int)ctx_parent_statuscode.Inactive)
+            });
 
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
-            Assert.Equal(dg_manState.Inactive, retrieved.statecode);
-            Assert.Equal(dg_man_statuscode.Inactive, retrieved.statuscode);
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
+            Assert.Equal(ctx_parent_statecode.Inactive, retrieved.statecode);
+            Assert.Equal(ctx_parent_statuscode.Inactive, retrieved.statuscode);
 
             try
             {
-                man.SetState(orgAdminUIService, dg_manState.Active, dg_man_statuscode.Active);
+                orgAdminUIService.Execute(new SetStateRequest
+                {
+                    EntityMoniker = man.ToEntityReference(),
+                    State = new Microsoft.Xrm.Sdk.OptionSetValue((int)ctx_parent_statecode.Active),
+                    Status = new Microsoft.Xrm.Sdk.OptionSetValue((int)ctx_parent_statuscode.Active)
+                });
                 throw new XunitException();
             }
             catch (Exception e)
@@ -56,20 +66,20 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active
             };
             man.Id = orgAdminUIService.Create(man);
 
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewState = dg_manState.Inactive.ToString(),
-                NewStatus = (int)dg_man_statuscode.Inactive
+                NewState = ctx_parent_statecode.Inactive.ToString(),
+                NewStatus = (int)ctx_parent_statuscode.Inactive
             };
 
             var response = orgAdminUIService.Execute(request) as IsValidStateTransitionResponse;
@@ -79,20 +89,20 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition_FailsWhenStateCodeInvalid()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active
             };
             man.Id = orgAdminUIService.Create(man);
 
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewState = dg_manState.Active.ToString(),
-                NewStatus = (int)dg_man_statuscode.Inactive
+                NewState = ctx_parent_statecode.Active.ToString(),
+                NewStatus = (int)ctx_parent_statuscode.Inactive
             };
             try
             {
@@ -108,20 +118,20 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition_FailsWhenStatusCodeInvalid()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active
             };
             man.Id = orgAdminUIService.Create(man);
 
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewState = dg_manState.Inactive.ToString(),
-                NewStatus = (int)dg_man_statuscode.Active
+                NewState = ctx_parent_statecode.Inactive.ToString(),
+                NewStatus = (int)ctx_parent_statuscode.Active
             };
             try
             {
@@ -139,8 +149,8 @@ namespace DG.XrmMockupTest
         {
             var request = new IsValidStateTransitionRequest
             {
-                NewState = dg_manState.Active.ToString(),
-                NewStatus = (int)dg_man_statuscode.Active
+                NewState = ctx_parent_statecode.Active.ToString(),
+                NewStatus = (int)ctx_parent_statuscode.Active
             };
             try
             {
@@ -156,19 +166,19 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition_FailsWhenNewStateIsMissing()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active
             };
             man.Id = orgAdminUIService.Create(man);
 
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewStatus = (int)dg_man_statuscode.Active
+                NewStatus = (int)ctx_parent_statuscode.Active
             };
             try
             {
@@ -184,19 +194,19 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition_FailsWhenNewStatusIsMissing()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active
             };
             man.Id = orgAdminUIService.Create(man);
 
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewState = dg_manState.Active.ToString()
+                NewState = ctx_parent_statecode.Active.ToString()
             };
             try
             {
@@ -214,9 +224,9 @@ namespace DG.XrmMockupTest
         {
             var request = new IsValidStateTransitionRequest
             {
-                Entity = new Microsoft.Xrm.Sdk.EntityReference(dg_man.EntityLogicalName, Guid.NewGuid()),
-                NewState = dg_manState.Active.ToString(),
-                NewStatus = (int)dg_man_statuscode.Active
+                Entity = new Microsoft.Xrm.Sdk.EntityReference(ctx_parent.EntityLogicalName, Guid.NewGuid()),
+                NewState = ctx_parent_statecode.Active.ToString(),
+                NewStatus = (int)ctx_parent_statuscode.Active
             };
             try
             {
@@ -232,20 +242,23 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition_FailsWhenEnforceStateTransitionsFalse()
         {
-            var field = new dg_field()
+            // Originally backed by dg_field (an entity that does NOT enforce state transitions).
+            // dg_field was removed; the standard "account" entity also does not enforce transitions,
+            // so it stands in here to exercise the "enforce transitions = false" code path.
+            var account = new Account()
             {
-                statecode = dg_fieldState.Active,
-                statuscode = dg_field_statuscode.Active,
+                StateCode = account_statecode.Active,
+                StatusCode = account_statuscode.Active,
             };
-            field.Id = orgAdminUIService.Create(field);
+            account.Id = orgAdminUIService.Create(account);
 
-            var retrieved = orgAdminUIService.Retrieve(dg_field.EntityLogicalName, field.Id, new ColumnSet(true)) as dg_field;
+            var retrieved = orgAdminUIService.Retrieve(Account.EntityLogicalName, account.Id, new ColumnSet(true)) as Account;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewState = dg_fieldState.Inactive.ToString(),
-                NewStatus = (int)dg_field_statuscode.Inactive
+                NewState = account_statecode.Inactive.ToString(),
+                NewStatus = (int)account_statuscode.Inactive
             };
             try
             {
@@ -261,19 +274,19 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestIsValidStateTransition_FailsWhenSameState()
         {
-            var man = new dg_man()
+            var man = new ctx_parent()
             {
-                statecode = dg_manState.Active,
-                statuscode = dg_man_statuscode.Active,
+                statecode = ctx_parent_statecode.Active,
+                statuscode = ctx_parent_statuscode.Active,
             };
             man.Id = orgAdminUIService.Create(man);
-            var retrieved = orgAdminUIService.Retrieve(dg_man.EntityLogicalName, man.Id, new ColumnSet(true)) as dg_man;
+            var retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, man.Id, new ColumnSet(true)) as ctx_parent;
 
             var request = new IsValidStateTransitionRequest
             {
                 Entity = retrieved.ToEntityReference(),
-                NewState = dg_manState.Active.ToString(),
-                NewStatus = (int)dg_man_statuscode.Active
+                NewState = ctx_parent_statecode.Active.ToString(),
+                NewStatus = (int)ctx_parent_statuscode.Active
             };
             try
             {
@@ -289,22 +302,18 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestStateStatuscodeCreate()
         {
-            var incidentId = orgAdminService.Create(new Incident { });
-            var incident = orgAdminService.Retrieve(Incident.EntityLogicalName, incidentId, new ColumnSet(true)).ToEntity<Incident>();
-            Assert.Equal(IncidentState.Active, incident.StateCode);
-            Assert.Equal(Incident_StatusCode.OnHold, incident.StatusCode);
-
-            var accId = orgAdminService.Create(new Account { StateCode = AccountState.Inactive });
+            // Migrated: the original also asserted Incident default state/status (Incident removed); kept the
+            // Account portion, which verifies default statecode/statuscode behaviour on create.
+            var accId = orgAdminService.Create(new Account { StateCode = account_statecode.Inactive });
             var acc = orgAdminService.Retrieve(Account.EntityLogicalName, accId, new ColumnSet(true)).ToEntity<Account>();
-            Assert.Equal(AccountState.Active, acc.StateCode);
-            Assert.Equal(Account_StatusCode.Somestatus, acc.StatusCode);
+            Assert.Equal(account_statecode.Active, acc.StateCode);
+            Assert.Equal(account_statuscode.Active, acc.StatusCode);
 
-            accId = orgAdminService.Create(new Account { StatusCode = Account_StatusCode.Active });
+            accId = orgAdminService.Create(new Account { StatusCode = account_statuscode.Active });
             acc = orgAdminService.Retrieve(Account.EntityLogicalName, accId, new ColumnSet(true)).ToEntity<Account>();
-            Assert.Equal(AccountState.Active, acc.StateCode);
-            Assert.Equal(Account_StatusCode.Active, acc.StatusCode);
+            Assert.Equal(account_statecode.Active, acc.StateCode);
+            Assert.Equal(account_statuscode.Active, acc.StatusCode);
         }
-
 
         [Fact]
         public void TestStateStatuscodeUpdate()
@@ -312,22 +321,22 @@ namespace DG.XrmMockupTest
             var acc = new Account { };
             acc.Id = orgAdminService.Create(acc);
             var retrieved = orgAdminService.Retrieve(Account.EntityLogicalName, acc.Id, new ColumnSet(true)).ToEntity<Account>();
-            Assert.Equal(AccountState.Active, retrieved.StateCode);
-            Assert.Equal(Account_StatusCode.Somestatus, retrieved.StatusCode);
+            Assert.Equal(account_statecode.Active, retrieved.StateCode);
+            Assert.Equal(account_statuscode.Active, retrieved.StatusCode);
 
-            acc.StateCode = AccountState.Inactive;
+            acc.StateCode = account_statecode.Inactive;
             orgAdminService.Update(acc);
             retrieved = orgAdminService.Retrieve(Account.EntityLogicalName, acc.Id, new ColumnSet(true)).ToEntity<Account>();
-            Assert.Equal(AccountState.Inactive, retrieved.StateCode);
-            Assert.Equal(Account_StatusCode.Inactive, retrieved.StatusCode);
+            Assert.Equal(account_statecode.Inactive, retrieved.StateCode);
+            Assert.Equal(account_statuscode.Inactive, retrieved.StatusCode);
 
             acc.StateCode = null;
-            acc.StatusCode = Account_StatusCode.Active;
+            acc.StatusCode = account_statuscode.Active;
             orgAdminService.Update(acc);
 
             retrieved = orgAdminService.Retrieve(Account.EntityLogicalName, acc.Id, new ColumnSet(true)).ToEntity<Account>();
-            Assert.Equal(AccountState.Active, retrieved.StateCode);
-            Assert.Equal(Account_StatusCode.Active, retrieved.StatusCode);
+            Assert.Equal(account_statecode.Active, retrieved.StateCode);
+            Assert.Equal(account_statuscode.Active, retrieved.StatusCode);
         }
     }
 }

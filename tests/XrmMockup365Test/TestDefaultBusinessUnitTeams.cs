@@ -88,7 +88,7 @@ namespace DG.XrmMockupTest
             businessUnit = (BusinessUnit)orgAdminService.Retrieve(LogicalNames.BusinessUnit, businessUnit.Id, new ColumnSet("name", "createdby"));
 
             Assert.Equal(businessUnit.Name, fetchedTeam.Name);
-            Assert.Equal(Team_TeamType.Owner, fetchedTeam.TeamType);
+            Assert.Equal(team_type.Owner, fetchedTeam.TeamType);
             Assert.Equal(true, fetchedTeam.IsDefault);
             Assert.Equal("Default team for the parent business unit. The name and membership for default team are inherited from their parent business unit.",
                  fetchedTeam.Description);

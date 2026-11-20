@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>A component of a CRM solution.</para>
 /// <para>Display Name: Solution Component</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("solutioncomponent")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -175,9 +175,9 @@ public partial class SolutionComponent : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("solutioncomponentid")]
     [DisplayName("Solution Component Identifier")]
-    public Guid SolutionComponentId
+    public Guid? SolutionComponentId
     {
-        get => GetAttributeValue<Guid>("solutioncomponentid");
+        get => GetAttributeValue<Guid?>("solutioncomponentid");
         set => SetId("solutioncomponentid", value);
     }
 

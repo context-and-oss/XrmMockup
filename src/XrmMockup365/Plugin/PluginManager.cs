@@ -3,6 +3,8 @@ using DG.Tools.XrmMockup.Plugin.RegistrationStrategy;
 using DG.Tools.XrmMockup.SystemPlugins;
 using XrmPluginCore.Enums;
 using XrmPluginCore.Interfaces.Plugin;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Metadata;
 using System;
@@ -22,6 +24,9 @@ namespace DG.Tools.XrmMockup
 
     internal class PluginManager
     {
+        private readonly ILogger _logger;
+        private readonly ICoreOperations _core;
+
         // Static caches shared across all PluginManager instances
         private static readonly ConcurrentDictionary<string, Dictionary<EventOperation, StageToTriggerMap>> _cachedRegisteredPlugins = new ConcurrentDictionary<string, Dictionary<EventOperation, StageToTriggerMap>>();
         private static readonly ConcurrentDictionary<string, Dictionary<EventOperation, StageToTriggerMap>> _cachedSystemPlugins = new ConcurrentDictionary<string, Dictionary<EventOperation, StageToTriggerMap>>();
@@ -50,17 +55,20 @@ namespace DG.Tools.XrmMockup
             new SetAnnotationIsDocument()
         };
 
-        private readonly List<IRegistrationStrategy<IPluginStepConfig>> registrationStrategies = new List<IRegistrationStrategy<IPluginStepConfig>>
-        {
-            new Plugin.RegistrationStrategy.XrmPluginCore.PluginRegistrationStrategy(),
-            new Plugin.RegistrationStrategy.DAXIF.PluginRegistrationStrategy()
-        };
+        private readonly List<IRegistrationStrategy<IPluginStepConfig>> registrationStrategies;
 
-        public PluginManager(IEnumerable<Type> basePluginTypes, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins)
+        public PluginManager(ICoreOperations core, IEnumerable<Type> basePluginTypes, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, ILogger logger = null)
         {
+            _core = core;
+            _logger = logger ?? NullLogger.Instance;
+            registrationStrategies = new List<IRegistrationStrategy<IPluginStepConfig>>
+            {
+                new Plugin.RegistrationStrategy.XrmPluginCore.PluginRegistrationStrategy(_logger),
+                new Plugin.RegistrationStrategy.DAXIF.PluginRegistrationStrategy(_logger)
+            };
             temporaryPlugins = new Dictionary<EventOperation, StageToTriggerMap>();
 
-            var pluginCacheKey = GeneratePluginCacheKey(basePluginTypes);
+            var pluginCacheKey = GeneratePluginCacheKey(basePluginTypes, plugins);
             var systemCacheKey = "system_plugins";
 
             // Check if we have cached results
@@ -69,6 +77,12 @@ namespace DG.Tools.XrmMockup
                 // Use cached results - no reflection/instantiation needed
                 registeredPlugins = ClonePluginDictionary(_cachedRegisteredPlugins[pluginCacheKey]);
                 registeredSystemPlugins = ClonePluginDictionary(_cachedSystemPlugins[systemCacheKey]);
+
+                _logger.LogDebug("Loaded {Count} plugin registrations from cache", registeredPlugins.Values.SelectMany(s => s.Values.SelectMany(l => l)).Count());
+                foreach (var reg in PluginRegistrations)
+                {
+                    _logger.LogDebug("  Plugin: {Registration}", reg);
+                }
             }
             else
             {
@@ -79,6 +93,8 @@ namespace DG.Tools.XrmMockup
                     {
                         registeredPlugins = ClonePluginDictionary(_cachedRegisteredPlugins[pluginCacheKey]);
                         registeredSystemPlugins = ClonePluginDictionary(_cachedSystemPlugins[systemCacheKey]);
+
+                        _logger.LogDebug("Loaded {Count} plugin registrations from cache", registeredPlugins.Values.SelectMany(s => s.Values.SelectMany(l => l)).Count());
                     }
                     else
                     {
@@ -86,9 +102,7 @@ namespace DG.Tools.XrmMockup
                         registeredPlugins = new Dictionary<EventOperation, StageToTriggerMap>();
                         registeredSystemPlugins = new Dictionary<EventOperation, StageToTriggerMap>();
 
-                        // TODO: Find all concrete types that implement IPlugin, handle system plugins separately
-                        // TODO: How do we filter CustomAPIs?
-                        // TODO: Should basePluginTypes act as an optional filter?
+                        _logger.LogInformation("Scanning assemblies for plugin registrations...");
 
                         RegisterPlugins(basePluginTypes, metadata, plugins, registeredPlugins);
                         RegisterDirectPlugins(basePluginTypes, metadata, plugins, registeredPlugins);
@@ -97,6 +111,19 @@ namespace DG.Tools.XrmMockup
                         // Cache for future instances
                         _cachedRegisteredPlugins[pluginCacheKey] = ClonePluginDictionary(registeredPlugins);
                         _cachedSystemPlugins[systemCacheKey] = ClonePluginDictionary(registeredSystemPlugins);
+
+                        foreach (var reg in PluginRegistrations)
+                        {
+                            _logger.LogInformation("  Registered plugin: {Registration}", reg);
+                        }
+
+                        foreach (var missing in missingRegistrations)
+                        {
+                            _logger.LogWarning("  Plugin type missing registration: {TypeName}", missing.FullName);
+                        }
+
+                        _logger.LogInformation("Plugin scanning complete: {Count} registrations, {MissingCount} missing",
+                            PluginRegistrations.Count, missingRegistrations.Count);
                     }
                 }
             }
@@ -117,11 +144,13 @@ namespace DG.Tools.XrmMockup
                 .ToList();
         }
 
-        private void RegisterPlugins(IEnumerable<Type> basePluginTypes, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
+        private void RegisterPlugins(IEnumerable<Type> basePluginTypes, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
         {
             foreach (var basePluginType in basePluginTypes)
             {
                 if (basePluginType == null) continue;
+
+                _logger.LogDebug("Scanning for types extending base plugin type: {BaseType}", basePluginType.FullName);
 
                 // Look for any currently loaded types in the AppDomain that implement the base type
                 var pluginTypes = AppDomain.CurrentDomain.GetAssemblies()
@@ -130,7 +159,10 @@ namespace DG.Tools.XrmMockup
                             !t.IsAbstract
                             && t.IsPublic
                             && t.BaseType != null
-                            && (t.BaseType == basePluginType || (t.BaseType.IsGenericType && t.BaseType.GetGenericTypeDefinition() == basePluginType))));
+                            && (t.BaseType == basePluginType || (t.BaseType.IsGenericType && t.BaseType.GetGenericTypeDefinition() == basePluginType))))
+                    .ToList();
+
+                _logger.LogDebug("Found {Count} concrete type(s) extending {BaseType}", pluginTypes.Count, basePluginType.FullName);
 
                 foreach (var type in pluginTypes)
                 {
@@ -140,9 +172,11 @@ namespace DG.Tools.XrmMockup
             SortAllLists(register);
         }
 
-        private void RegisterDirectPlugins(IEnumerable<Type> basePluginTypes, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
+        private void RegisterDirectPlugins(IEnumerable<Type> basePluginTypes, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, Dictionary<EventOperation, StageToTriggerMap> register)
         {
             if (basePluginTypes == null) return;
+
+            var scannedAssemblies = new HashSet<Assembly>();
 
             foreach (var pluginType in basePluginTypes)
             {
@@ -150,9 +184,20 @@ namespace DG.Tools.XrmMockup
 
                 Assembly proxyTypeAssembly = pluginType.Assembly;
 
+                if (!scannedAssemblies.Add(proxyTypeAssembly))
+                {
+                    _logger.LogDebug("Skipping already-scanned assembly {Assembly}", proxyTypeAssembly.GetName().Name);
+                    continue;
+                }
+
+                _logger.LogDebug("Scanning assembly {Assembly} for direct IPlugin implementations", proxyTypeAssembly.GetName().Name);
+
                 // Look for any currently loaded types in assembly that implement IPlugin
                 var types = proxyTypeAssembly.GetLoadableTypes()
-                    .Where(t => t.BaseType == typeof(object) && !t.IsAbstract && t.IsPublic && typeof(IPlugin).IsAssignableFrom(t));
+                    .Where(t => t.BaseType == typeof(object) && !t.IsAbstract && t.IsPublic && typeof(IPlugin).IsAssignableFrom(t))
+                    .ToList();
+
+                _logger.LogDebug("Found {Count} direct IPlugin type(s) in {Assembly}", types.Count, proxyTypeAssembly.GetName().Name);
 
                 foreach (var type in types)
                 {
@@ -162,11 +207,14 @@ namespace DG.Tools.XrmMockup
             SortAllLists(register);
         }
 
-        private void RegisterPlugin(Type pluginType, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> metaPlugins, Dictionary<EventOperation, StageToTriggerMap> register)
+        private void RegisterPlugin(Type pluginType, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> metaPlugins, Dictionary<EventOperation, StageToTriggerMap> register)
         {
+            _logger.LogDebug("Evaluating plugin type: {TypeName}", pluginType.FullName);
+
             var plugin = _pluginInstanceCache.GetOrAdd(pluginType, Utility.CreatePluginInstance);
             if (plugin == null)
             {
+                _logger.LogWarning("Failed to create instance of plugin type: {TypeName}", pluginType.FullName);
                 return;
             }
 
@@ -176,17 +224,19 @@ namespace DG.Tools.XrmMockup
 
             // If we didn't find any steps, try the MetadataRegistrationStrategy as a last resort
             if (!steps.Any()) {
-                steps = new MetadataRegistrationStrategy().AnalyzeType(pluginType, metaPlugins);
+                _logger.LogDebug("{TypeName}: no steps from primary strategies, trying MetadataRegistrationStrategy", pluginType.FullName);
+                steps = new MetadataRegistrationStrategy(_logger).AnalyzeType(pluginType, metaPlugins);
             }
 
             var triggers = steps.Select(t => new PluginTrigger(t.EventOperation, t.ExecutionStage, plugin.Execute, t, metadata));
 
             if (!triggers.Any())
             {
+                _logger.LogDebug("{TypeName}: no registrations found from any strategy", pluginType.FullName);
                 missingRegistrations.Add(pluginType);
                 return;
             }
-            
+
             foreach (var trigger in triggers)
             {
                 AddTrigger(trigger, register);
@@ -204,7 +254,7 @@ namespace DG.Tools.XrmMockup
             disableRegisteredPlugins = disable;
         }
 
-        public void RegisterAdditionalPlugin(Type pluginType, Dictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, PluginRegistrationScope scope)
+        public void RegisterAdditionalPlugin(Type pluginType, SortedDictionary<string, EntityMetadata> metadata, List<MetaPlugin> plugins, PluginRegistrationScope scope)
         {
             if (scope == PluginRegistrationScope.Permanent)
             {
@@ -216,7 +266,7 @@ namespace DG.Tools.XrmMockup
             }
         }
 
-        private void RegisterSystemPlugins(Dictionary<EventOperation, StageToTriggerMap> register, Dictionary<string, EntityMetadata> metadata)
+        private void RegisterSystemPlugins(Dictionary<EventOperation, StageToTriggerMap> register, SortedDictionary<string, EntityMetadata> metadata)
         {
             var registrations = new List<IPluginStepConfig>();
 
@@ -255,23 +305,27 @@ namespace DG.Tools.XrmMockup
         }
 
         /// <summary>
-        /// Sorts all the registered which shares the same entry point based on their given order
+        /// Sorts all the registered which shares the same entry point based on their given order.
+        /// Uses a stable sort so plugins with equal ExecutionOrder preserve their registration order.
         /// </summary>
-        private void SortAllLists(Dictionary<EventOperation, StageToTriggerMap> plugins)
+        private static void SortAllLists(Dictionary<EventOperation, StageToTriggerMap> plugins)
         {
             foreach (var dictEntry in plugins)
             {
                 foreach (var listEntry in dictEntry.Value)
                 {
-                    listEntry.Value.Sort();
+                    var sorted = listEntry.Value.OrderBy(t => t.Order).ToList();
+                    listEntry.Value.Clear();
+                    listEntry.Value.AddRange(sorted);
                 }
             }
         }
 
         public void TriggerSync(string operation, ExecutionStage stage,
-                object entity, Entity preImage, Entity postImage, PluginContext pluginContext, Core core, Func<PluginTrigger, bool> executionOrderFilter)
+                object entity, Entity preImage, Entity postImage, PluginContext pluginContext, Func<PluginTrigger, bool> executionOrderFilter,
+                ISet<string> systemInjectedAttributes = null)
         {
-            TriggerSyncInternal(operation, stage, entity, preImage, postImage, pluginContext, core, executionOrderFilter);
+            TriggerSyncInternal(operation, stage, entity, preImage, postImage, pluginContext, executionOrderFilter, systemInjectedAttributes);
 
             // Check if this is a Single -> Multiple request
             var isKnownOp = Enum.TryParse<EventOperationEnum>(operation, out var knownOp);
@@ -299,8 +353,16 @@ namespace DG.Tools.XrmMockup
                     ? request.RequestName
                     : throw new MockupException($"Could not create request for operation {operation}");
 
-                // TODO: Images for multiple are handled in IPluginExecutionContext4
-                TriggerSyncInternal(multipleOperation.ToString(), stage, entityCollection, null, null, multiplePluginContext, core, executionOrderFilter);
+                // Populate IPluginExecutionContext4 image collections
+                multiplePluginContext.PreEntityImagesCollection = new[] {
+                    preImage != null ? new EntityImageCollection { { "PreImage", preImage } } : new EntityImageCollection()
+                };
+                multiplePluginContext.PostEntityImagesCollection = new[] {
+                    postImage != null ? new EntityImageCollection { { "PostImage", postImage } } : new EntityImageCollection()
+                };
+
+
+                TriggerSyncInternal(multipleOperation.ToString(), stage, entityCollection, null, null, multiplePluginContext, executionOrderFilter, systemInjectedAttributes);
             }
 
             // Check if this is a Multiple -> Single request
@@ -333,20 +395,27 @@ namespace DG.Tools.XrmMockup
 
                 var targets = pluginContext.InputParameters[multipleImageProperty] as EntityCollection;
 
-                foreach (var targetEntity in targets.Entities)
+                for (int i = 0; i < targets.Entities.Count; i++)
                 {
+                    var targetEntity = targets.Entities[i];
                     var singlePluginContext = pluginContext.Clone();
                     singlePluginContext.InputParameters[singleImageProperty] = targetEntity;
                     singlePluginContext.MessageName = singleMessageName;
-                    
-                    // TODO: Recalculate preImage and postImage here
-                    TriggerSyncInternal(singleOperation.ToString(), stage, targetEntity, preImage, postImage, singlePluginContext, core, executionOrderFilter);
+
+                    // Extract per-entity images from IPluginExecutionContext4 collections
+                    var entityPreImage = pluginContext.PreEntityImagesCollection.Length > i
+                        && pluginContext.PreEntityImagesCollection[i].TryGetValue("PreImage", out var pre) ? pre : preImage;
+                    var entityPostImage = pluginContext.PostEntityImagesCollection.Length > i
+                        && pluginContext.PostEntityImagesCollection[i].TryGetValue("PostImage", out var post) ? post : postImage;
+
+                    TriggerSyncInternal(singleOperation.ToString(), stage, targetEntity, entityPreImage, entityPostImage, singlePluginContext, executionOrderFilter, systemInjectedAttributes);
                 }
             }
         }
 
         private void TriggerSyncInternal(EventOperation operation, ExecutionStage stage,
-                object entity, Entity preImage, Entity postImage, PluginContext pluginContext, Core core, Func<PluginTrigger, bool> executionOrderFilter)
+                object entity, Entity preImage, Entity postImage, PluginContext pluginContext, Func<PluginTrigger, bool> executionOrderFilter,
+                ISet<string> systemInjectedAttributes = null)
         {
             if (!disableRegisteredPlugins && registeredPlugins.TryGetValue(operation, out var operationPlugins) && operationPlugins.TryGetValue(stage, out var stagePlugins))
                 stagePlugins
@@ -354,7 +423,7 @@ namespace DG.Tools.XrmMockup
                     .Where(executionOrderFilter)
                     .OrderBy(p => p.GetExecutionOrder())
                     .ToList()
-                    .ForEach(p => p.ExecuteIfMatch(entity, preImage, postImage, pluginContext, core));
+                    .ForEach(p => p.ExecuteIfMatch(entity, preImage, postImage, pluginContext, _core, systemInjectedAttributes: systemInjectedAttributes));
 
             if (temporaryPlugins.TryGetValue(operation, out var tempOperationPlugins) && tempOperationPlugins.TryGetValue(stage, out var tempStagePlugins))
                 tempStagePlugins
@@ -362,17 +431,18 @@ namespace DG.Tools.XrmMockup
                     .Where(executionOrderFilter)
                     .OrderBy(p => p.GetExecutionOrder())
                     .ToList()
-                    .ForEach(p => p.ExecuteIfMatch(entity, preImage, postImage, pluginContext, core));
+                    .ForEach(p => p.ExecuteIfMatch(entity, preImage, postImage, pluginContext, _core, systemInjectedAttributes: systemInjectedAttributes));
         }
 
         public void StageAsync(EventOperation operation, ExecutionStage stage,
-                object entity, Entity preImage, Entity postImage, PluginContext pluginContext, Core core)
+                object entity, Entity preImage, Entity postImage, PluginContext pluginContext,
+                ISet<string> systemInjectedAttributes = null)
         {
             if (!disableRegisteredPlugins && registeredPlugins.TryGetValue(operation, out var operationPlugins) && operationPlugins.TryGetValue(stage, out var stagePlugins))
                 stagePlugins
                     .Where(p => p.GetExecutionMode() == ExecutionMode.Asynchronous)
                     .OrderBy(p => p.GetExecutionOrder())
-                    .Select(p => p.ToPluginExecution(entity, preImage, postImage, pluginContext, core))
+                    .Select(p => p.ToPluginExecution(entity, preImage, postImage, pluginContext, _core, systemInjectedAttributes))
                     .ToList()
                     .ForEach(pendingAsyncPlugins.Enqueue);
 
@@ -380,7 +450,7 @@ namespace DG.Tools.XrmMockup
                 tempStagePlugins
                     .Where(p => p.GetExecutionMode() == ExecutionMode.Asynchronous)
                     .OrderBy(p => p.GetExecutionOrder())
-                    .Select(p => p.ToPluginExecution(entity, preImage, postImage, pluginContext, core))
+                    .Select(p => p.ToPluginExecution(entity, preImage, postImage, pluginContext, _core, systemInjectedAttributes))
                     .ToList()
                     .ForEach(pendingAsyncPlugins.Enqueue);
         }
@@ -394,7 +464,8 @@ namespace DG.Tools.XrmMockup
         }
 
         public void TriggerSystem(EventOperation operation, ExecutionStage stage,
-                object entity, Entity preImage, Entity postImage, PluginContext pluginContext, Core core)
+                object entity, Entity preImage, Entity postImage, PluginContext pluginContext,
+                ISet<string> systemInjectedAttributes = null)
         {
             if (!registeredSystemPlugins.TryGetValue(operation, out var stagePlugins))
             {
@@ -406,19 +477,33 @@ namespace DG.Tools.XrmMockup
                 return;
             }
 
-            plugins.ForEach(p => p.ExecuteIfMatch(entity, preImage, postImage, pluginContext, core));
+            // System plugins are XrmMockup's own internal simulation, not user-registered steps,
+            // so they are excluded from the grouped plugin trace log.
+            plugins.ForEach(p => p.ExecuteIfMatch(entity, preImage, postImage, pluginContext, _core, recordTrace: false, systemInjectedAttributes: systemInjectedAttributes));
         }
 
-        private string GeneratePluginCacheKey(IEnumerable<Type> basePluginTypes)
+        private string GeneratePluginCacheKey(IEnumerable<Type> basePluginTypes, IEnumerable<MetaPlugin> plugins)
         {
-            if (basePluginTypes == null) return "null_types";
+            var typeNames = (basePluginTypes ?? Enumerable.Empty<Type>())
+                .Where(t => t != null).Select(t => t.FullName).OrderBy(n => n);
 
-            var typeNames = basePluginTypes.Where(t => t != null).Select(t => t.FullName).OrderBy(n => n);
-            var combinedTypes = string.Join("|", typeNames);
+            // The registered plugin set depends on the supplied plugin metadata (e.g. IPluginMetadata),
+            // not just the base types. Two settings with the same base types but different plugin
+            // metadata must NOT share a cache entry, otherwise the registrations leak between them
+            // depending on which Core is constructed first (order-dependent failures).
+            var pluginKeys = (plugins ?? Enumerable.Empty<MetaPlugin>())
+                .Select(p => string.Join("~",
+                    p.PluginTypeAssemblyName, p.AssemblyName, p.MessageName, p.PrimaryEntity,
+                    p.Stage, p.Rank, p.Mode, p.FilteredAttributes, p.AsyncAutoDelete, p.ImpersonatingUserId,
+                    p.Images == null ? "" : string.Join(",", p.Images
+                        .Select(i => $"{i.Name}/{i.EntityAlias}/{i.ImageType}/{i.Attributes}").OrderBy(s => s))))
+                .OrderBy(s => s);
+
+            var combined = string.Join("|", typeNames) + "##" + string.Join("|", pluginKeys);
 
             using (var sha256 = SHA256.Create())
             {
-                var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(combinedTypes));
+                var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(combined));
                 return Convert.ToBase64String(hash);
             }
         }

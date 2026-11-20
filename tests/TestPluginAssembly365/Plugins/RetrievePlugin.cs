@@ -22,7 +22,7 @@ namespace DG.Some.Namespace
         {
             var entity = localContext.PluginExecutionContext.OutputParameters["BusinessEntity"] as Entity;
 
-            if (entity.ToEntity<Contact>().StateCode == ContactState.Inactive)
+            if (entity.ToEntity<Contact>().StateCode == contact_statecode.Inactive)
             {
                 throw new InvalidPluginExecutionException("Inactive contacts cannot be retrieved.");
             }

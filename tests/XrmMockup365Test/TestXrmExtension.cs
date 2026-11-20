@@ -1,5 +1,4 @@
-﻿using DG.XrmContext;
-using DG.Tools.XrmMockup;
+﻿using DG.Tools.XrmMockup;
 using Microsoft.Xrm.Sdk;
 
 namespace DG.XrmMockupTest

@@ -2,7 +2,7 @@ using System.Runtime.Serialization;
 
 namespace XrmMockup.MetadataGenerator.Tool.Context;
 
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [DataContract]
 #pragma warning disable CS8981
 public enum systemuser_preferredaddresscode
@@ -10,9 +10,11 @@ public enum systemuser_preferredaddresscode
 {
     [EnumMember]
     [OptionSetMetadata("Mailing Address", 1033)]
+    [OptionSetMetadata("Postadresse", 1030)]
     MailingAddress = 1,
 
     [EnumMember]
     [OptionSetMetadata("Other Address", 1033)]
+    [OptionSetMetadata("Anden adresse", 1030)]
     OtherAddress = 2,
 }

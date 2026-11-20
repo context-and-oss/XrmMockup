@@ -18,7 +18,6 @@ namespace DG.XrmMockupTest
         public IOrganizationServiceAsync2 orgAdminUIService { get; protected set; }
         public IOrganizationServiceAsync2 orgAdminService { get; protected set; }
         public IOrganizationServiceAsync2 orgGodService { get; protected set; }
-        public IOrganizationServiceAsync2 orgRealDataService { get; protected set; }
 
         public IOrganizationServiceAsync2 testUser1Service { get; protected set; }
         public IOrganizationServiceAsync2 testUser2Service { get; protected set; }
@@ -28,7 +27,6 @@ namespace DG.XrmMockupTest
         public IOrganizationService orgAdminUIService { get; protected set; }
         public IOrganizationService orgAdminService { get; protected set; }
         public IOrganizationService orgGodService { get; protected set; }
-        public IOrganizationService orgRealDataService { get; protected set; }
 
         public IOrganizationService testUser1Service { get; protected set; }
         public IOrganizationService testUser2Service { get; protected set; }
@@ -97,8 +95,6 @@ namespace DG.XrmMockupTest
             orgAdminUIService = crm.GetAdminService(new MockupServiceSettings(true, false, MockupServiceSettings.Role.UI));
             orgGodService = crm.GetAdminService(new MockupServiceSettings(false, true, MockupServiceSettings.Role.SDK));
             orgAdminService = crm.GetAdminService();
-            // Skip real data service - it causes online connection issues and isn't needed for most tests
-            orgRealDataService = null;
 
             //create an admin user to run our impersonating user plugins as
             var adminUser = new Entity("systemuser") { Id = Guid.Parse("3b961284-cd7a-4fa3-af7e-89802e88dd5c") };
@@ -117,7 +113,7 @@ namespace DG.XrmMockupTest
         private void InitialiseAccessTeamConfiguration()
         {
             //create a new security role with basic level only on all contact privileges
-            var accessTeamTestRole = crm.CloneSecurityRole("Salesperson");
+            var accessTeamTestRole = crm.CloneSecurityRole("XrmMockup Test Access Team");
             accessTeamTestRole.Name = "AccessTeamTest";
             var contactPriv = accessTeamTestRole.Privileges["contact"];
             var newPriv = new Dictionary<AccessRights, DG.Tools.XrmMockup.RolePrivilege>();
@@ -143,7 +139,7 @@ namespace DG.XrmMockupTest
             crm.AddSecurityRole(accessTeamTestRole);
 
             //create a new security role without share priv on contact
-            var accessTeamTestRole2 = crm.CloneSecurityRole("Salesperson");
+            var accessTeamTestRole2 = crm.CloneSecurityRole("XrmMockup Test Access Team");
             accessTeamTestRole2.Name = "AccessTeamTestNoShare";
             var contactPriv2 = accessTeamTestRole.Privileges["contact"];
             var newPriv2 = new Dictionary<AccessRights, DG.Tools.XrmMockup.RolePrivilege>();
@@ -158,7 +154,7 @@ namespace DG.XrmMockupTest
             crm.AddSecurityRole(accessTeamTestRole2);
 
             //create a new security role without write priv on contact
-            var accessTeamTestRole3 = crm.CloneSecurityRole("Salesperson");
+            var accessTeamTestRole3 = crm.CloneSecurityRole("XrmMockup Test Access Team");
             accessTeamTestRole3.Name = "AccessTeamTestNoWrite";
             var contactPriv3 = accessTeamTestRole.Privileges["contact"];
             var newPriv3 = new Dictionary<AccessRights, DG.Tools.XrmMockup.RolePrivilege>();

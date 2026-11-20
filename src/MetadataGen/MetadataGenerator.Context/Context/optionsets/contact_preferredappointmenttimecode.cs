@@ -2,7 +2,7 @@ using System.Runtime.Serialization;
 
 namespace XrmMockup.MetadataGenerator.Tool.Context;
 
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [DataContract]
 #pragma warning disable CS8981
 public enum contact_preferredappointmenttimecode
@@ -10,13 +10,16 @@ public enum contact_preferredappointmenttimecode
 {
     [EnumMember]
     [OptionSetMetadata("Morning", 1033)]
+    [OptionSetMetadata("Morgen", 1030)]
     Morning = 1,
 
     [EnumMember]
     [OptionSetMetadata("Afternoon", 1033)]
+    [OptionSetMetadata("Eftermiddag", 1030)]
     Afternoon = 2,
 
     [EnumMember]
     [OptionSetMetadata("Evening", 1033)]
+    [OptionSetMetadata("Aften", 1030)]
     Evening = 3,
 }

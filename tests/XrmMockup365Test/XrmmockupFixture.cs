@@ -2,20 +2,17 @@
 using DG.Tools.XrmMockup;
 using Microsoft.Xrm.Sdk;
 using XrmPluginCore;
-using Microsoft.Xrm.Sdk.Client;
 using System;
 using TestPluginAssembly365.Plugins.LegacyDaxif;
 using TestPluginAssembly365.Plugins.ServiceBased;
 
 public class XrmMockupFixture : IDisposable
 {
-    // Shared settings instances to ensure metadata cache hits
+    // Shared settings instance to ensure metadata cache hits
     private static XrmMockupSettings _sharedSettings;
-    private static XrmMockupSettings _sharedRealDataSettings;
     private static readonly object _settingsLock = new object();
-    
+
     public XrmMockupSettings Settings => _sharedSettings;
-    public XrmMockupSettings RealDataSettings => _sharedRealDataSettings;
 
     public XrmMockupFixture()
     {
@@ -34,31 +31,6 @@ public class XrmMockupFixture : IDisposable
                     MetadataDirectoryPath = GetMetadataPath(),
                     IPluginMetadata = metaPlugins
                 };
-
-                try
-                {
-                    _sharedRealDataSettings = new XrmMockupSettings
-                    {
-                        BasePluginTypes = _sharedSettings.BasePluginTypes,
-                        CodeActivityInstanceTypes = _sharedSettings.CodeActivityInstanceTypes,
-                        EnableProxyTypes = _sharedSettings.EnableProxyTypes,
-                        IncludeAllWorkflows = _sharedSettings.IncludeAllWorkflows,
-                        ExceptionFreeRequests = _sharedSettings.ExceptionFreeRequests,
-                        MetadataDirectoryPath = GetMetadataPath(),
-                        OnlineEnvironment = new Env
-                        {
-                            providerType = AuthenticationProviderType.OnlineFederation,
-                            uri = "https://exampleURL/XRMServices/2011/Organization.svc",
-                            username = "exampleUser",
-                            password = "examplePass"
-                        }
-                    };
-                }
-                catch
-                {
-                    // ignore - set to null
-                    _sharedRealDataSettings = null;
-                }
             }
         }
     }
@@ -117,6 +89,100 @@ public class XrmMockupFixture : IDisposable
             PrimaryEntity = "contact",
             Rank = 10,
             Stage = 40 //pre op as it only updates a field name
+        },
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.Some.Namespace.AccountPluginExecutionContext7PreOp",
+            MessageName = "Create",
+            PrimaryEntity = "account",
+            Rank = 10,
+            Stage = 20
+        },
+        // Non-DAXIF plugins that, in the original environment, were registered via a separate plugin
+        // solution captured in Metadata.xml. That solution isn't part of the leaned environment, so we
+        // register their steps here instead (TestUpdateBase / TestImages depend on them).
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.Delegate.TSTOnboarding.Plugins.AccountCurrencyBase",
+            MessageName = "Update",
+            PrimaryEntity = "account",
+            Rank = 10,
+            Stage = 40 // post-operation; appends "UpdateBase" to the name
+        },
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.Delegate.TSTOnboarding.Plugins.AccountBothImagePlugin",
+            MessageName = "Update",
+            PrimaryEntity = "account",
+            Rank = 10,
+            Stage = 40, // post-operation; requires both a pre- and post-image
+            Images = new System.Collections.Generic.List<MetaImage>
+            {
+                // ImageType.Both (2) populates both PreEntityImages and PostEntityImages.
+                new MetaImage { Name = "image", EntityAlias = "image", ImageType = 2 }
+            }
+        },
+        // BusTicketSync (non-DAXIF) fires on Associate/Disassociate of the ctx_parent_child N:N and
+        // stamps ctx_parent.ctx_Amount (25/26). Associate/Disassociate steps must be registered on
+        // AnyEntity (empty PrimaryEntity) — the plugin itself filters on the relationship schema name.
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.NotAKeyWord.SSPOnBoarding.Plugins.BusTicketSync",
+            MessageName = "Associate",
+            PrimaryEntity = "",
+            Rank = 10,
+            Stage = 40
+        },
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.NotAKeyWord.SSPOnBoarding.Plugins.BusTicketSync",
+            MessageName = "Disassociate",
+            PrimaryEntity = "",
+            Rank = 10,
+            Stage = 40
+        },
+        // Late-bound re-creation of the old IncidentDeleteAllRelatedResolutionsOnClose plugin: on an
+        // incident statecode change (Active -> not-Active) for the test incident, deletes related
+        // incidentresolution records. Needs pre+post images on statecode (and title for the gate).
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.Delegate.TSTOnboarding.Plugins.IncidentDeleteResolutionsOnClose",
+            MessageName = "Update",
+            PrimaryEntity = "incident",
+            Rank = 10,
+            Stage = 40,
+            FilteredAttributes = "statecode",
+            Images = new System.Collections.Generic.List<MetaImage>
+            {
+                new MetaImage { Name = "PreImage", EntityAlias = "PreImage", ImageType = 0, Attributes = "statecode,title" }, // PreImage
+                new MetaImage { Name = "PostImage", EntityAlias = "PostImage", ImageType = 1, Attributes = "statecode" },     // PostImage
+            }
+        },
+        // Late-bound re-creation of the old OpportunityWinLose plugin: stamps the opportunity's
+        // description with "SetFromWinLose" on the Win and Lose messages (post-operation).
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.Delegate.TSTOnboarding.Plugins.OpportunityWinLoseDescription",
+            MessageName = "Win",
+            PrimaryEntity = "opportunity",
+            Rank = 10,
+            Stage = 40
+        },
+        new MetaPlugin()
+        {
+            PluginTypeAssemblyName = "TestPluginAssembly365",
+            AssemblyName = "DG.Delegate.TSTOnboarding.Plugins.OpportunityWinLoseDescription",
+            MessageName = "Lose",
+            PrimaryEntity = "opportunity",
+            Rank = 10,
+            Stage = 40
         }
     };
 }

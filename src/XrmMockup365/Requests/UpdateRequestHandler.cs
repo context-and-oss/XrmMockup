@@ -69,21 +69,6 @@ namespace DG.Tools.XrmMockup
             }
         }
 
-        internal override void InitializePreOperation(OrganizationRequest orgRequest, EntityReference userRef, Entity preImage)
-        {
-            var entity = orgRequest["Target"] as Entity;
-
-            if (Utility.IsValidAttribute("modifiedon", metadata.EntityMetadata.GetMetadata(entity.LogicalName)))
-            {
-                entity["modifiedon"] = preImage.Contains("modifiedon") ? preImage["modifiedon"] : null;
-            }
-
-            if (Utility.IsValidAttribute("modifiedby", metadata.EntityMetadata.GetMetadata(entity.LogicalName)))
-            {
-                entity["modifiedby"] = preImage.Contains("modifiedby") ? preImage["modifiedby"] : null;
-            }
-        }
-
         internal override OrganizationResponse Execute(OrganizationRequest orgRequest, EntityReference userRef)
         {
             var request = MakeRequest<UpdateRequest>(orgRequest);

@@ -24,33 +24,41 @@ internal sealed class SecurityRoleReader(
     public async Task<Dictionary<Guid, SecurityRole>> GetSecurityRolesAsync(
         Guid rootBusinessUnitId,
         string[] solutions,
-        string[] additionalSecurityRoles,
+        string[]? securityRoles,
+        bool allSecurityRoles,
         CancellationToken ct = default)
     {
         logger.LogInformation("Getting security roles");
 
         return await Task.Run(() =>
         {
-            // Get role IDs to filter by (if solutions specified)
-            var roleIdsToInclude = GetRoleIdsToInclude(solutions, additionalSecurityRoles, rootBusinessUnitId);
+            // Get role IDs to filter by
+            var roleIdsToInclude = GetRoleIdsToInclude(solutions, securityRoles, allSecurityRoles, rootBusinessUnitId);
+
+            // Empty set means explicitly no roles wanted — early return
+            if (roleIdsToInclude is { Count: 0 })
+            {
+                logger.LogInformation("No security roles to retrieve");
+                return [];
+            }
 
             // Query all required data
-            var privileges = QueryPaging(new QueryExpression(Privilege)
+            var privileges = _service.RetrieveAll(new QueryExpression(Privilege)
             {
-                ColumnSet = new ColumnSet("privilegeid", "accessright", "canbeglobal", "canbedeep", "canbelocal", "canbebasic")
+                ColumnSet = new ColumnSet("privilegeid", "name", "accessright", "canbeglobal", "canbedeep", "canbelocal", "canbebasic")
             });
 
-            var privilegeOTCs = QueryPaging(new QueryExpression(PrivilegeOtc)
+            var privilegeOTCs = _service.RetrieveAll(new QueryExpression(PrivilegeOtc)
             {
                 ColumnSet = new ColumnSet("privilegeid", "objecttypecode")
             });
 
-            var rolePrivileges = QueryPaging(new QueryExpression(RolePrivileges)
+            var rolePrivileges = _service.RetrieveAll(new QueryExpression(RolePrivileges)
             {
                 ColumnSet = new ColumnSet("privilegeid", "roleid", "privilegedepthmask")
             });
 
-            var roleList = QueryPaging(GetRoleQuery(roleIdsToInclude));
+            var roleList = _service.RetrieveAll(GetRoleQuery(roleIdsToInclude));
 
             // Join: roleprivileges inner join roles
             // Use GetAttributeValue for defensive access in case parentrootroleid is missing
@@ -88,11 +96,12 @@ internal sealed class SecurityRoleReader(
             foreach (var e in validSecurityRoles)
             {
                 var entityName = (string)e.pp.privilegeOTC!["objecttypecode"];
-
-                if (entityName == "none") continue;
+                var global = entityName == PrivilegeReader.NoTable;
+                var privilegeName = e.pp.privilege!.GetAttributeValue<string>("name");
+                if (global && string.IsNullOrEmpty(privilegeName)) continue;
 
                 var rp = ToRolePrivilege(e.pp.privilege!, e.rpr!.roleprivilege);
-                if (rp.AccessRight == AccessRights.None) continue;
+                if (!global && rp.AccessRight == AccessRights.None) continue;
 
                 var roleId = (Guid)e.rpr.roleprivilege["roleid"];
                 if (!roles.TryGetValue(roleId, out var roleValue))
@@ -119,7 +128,8 @@ internal sealed class SecurityRoleReader(
                     {
                         Name = name,
                         RoleId = roleId,
-                        Privileges = []
+                        Privileges = [],
+                        GlobalPrivileges = []
                     };
                     roles[roleId] = roleValue;
 
@@ -127,6 +137,13 @@ internal sealed class SecurityRoleReader(
                     {
                         roles[roleId].RoleTemplateId = ((EntityReference)e.rpr.role["roletemplateid"]).Id;
                     }
+                }
+
+                // Privileges that aren't tied to a table are kept apart, so XrmMockup's table checks don't see them
+                if (global)
+                {
+                    roleValue.GlobalPrivileges.TryAdd(privilegeName, rp);
+                    continue;
                 }
 
                 if (!roleValue.Privileges.TryGetValue(entityName, out var value))
@@ -144,24 +161,6 @@ internal sealed class SecurityRoleReader(
             }
             return roles;
         }, ct);
-    }
-
-    private List<Entity> QueryPaging(QueryExpression query)
-    {
-        query.PageInfo.PageNumber = 1;
-        var entities = new List<Entity>();
-        var resp = _service.RetrieveMultiple(query);
-        entities.AddRange(resp.Entities);
-
-        while (resp.MoreRecords)
-        {
-            query.PageInfo.PageNumber++;
-            query.PageInfo.PagingCookie = resp.PagingCookie;
-            resp = _service.RetrieveMultiple(query);
-            entities.AddRange(resp.Entities);
-        }
-
-        return entities;
     }
 
     private static DG.Tools.XrmMockup.RolePrivilege ToRolePrivilege(Entity privilege, Entity rolePrivilege)
@@ -185,6 +184,7 @@ internal sealed class SecurityRoleReader(
             2 => PrivilegeDepth.Local,
             4 => PrivilegeDepth.Deep,
             8 => PrivilegeDepth.Global,
+            16 => PrivilegeDepth.RecordFilter,
             _ => throw new NotImplementedException($"Unknown privilege depth mask: {privilegeDepth}")
         };
     }
@@ -204,40 +204,38 @@ internal sealed class SecurityRoleReader(
     }
 
     /// <summary>
-    /// Gets the set of role IDs to include based on solutions and additional role names.
-    /// Returns null if no filtering is needed (no solutions specified).
+    /// Gets the set of role IDs to include based on solutions, named roles, and allSecurityRoles flag.
+    /// Returns null if no filtering is needed (all roles should be returned).
+    /// Returns an empty set if explicitly no roles are wanted.
     /// </summary>
-    private HashSet<Guid>? GetRoleIdsToInclude(string[] solutions, string[] additionalSecurityRoles, Guid rootBusinessUnitId)
+    private HashSet<Guid>? GetRoleIdsToInclude(string[] solutions, string[]? securityRoles, bool allSecurityRoles, Guid rootBusinessUnitId)
     {
-        if (solutions.Length == 0)
+        // allSecurityRoles overrides everything — return all roles
+        if (allSecurityRoles)
+            return null;
+
+        // No solutions and no configured roles → all roles (backward compat)
+        if (solutions.Length == 0 && securityRoles is null)
             return null;
 
         var roleIds = new HashSet<Guid>();
 
-        // Get role IDs from solutions
-        var solutionRoleIds = GetRoleIdsFromSolutions(solutions);
-        foreach (var id in solutionRoleIds)
+        if (solutions.Length > 0)
         {
-            roleIds.Add(id);
-        }
-
-        if (logger.IsEnabled(LogLevel.Information))
-        {
-            logger.LogInformation("Found {Count} roles in specified solutions", solutionRoleIds.Count);
-        }
-
-        // Get role IDs by name for additional roles
-        if (additionalSecurityRoles.Length > 0)
-        {
-            var additionalRoleIds = GetRoleIdsByName(additionalSecurityRoles, rootBusinessUnitId);
-            foreach (var id in additionalRoleIds)
-            {
-                roleIds.Add(id);
-            }
-
+            roleIds = GetRoleIdsFromSolutions(solutions);
             if (logger.IsEnabled(LogLevel.Information))
             {
-                logger.LogInformation("Found {Count} additional roles by name", additionalRoleIds.Count);
+                logger.LogInformation("Found {Count} roles in specified solutions", roleIds.Count);
+            }
+        }
+
+        if (securityRoles is { Length: > 0 })
+        {
+            var namedRoleIds = GetRoleIdsByName(securityRoles, rootBusinessUnitId);
+            roleIds.UnionWith(namedRoleIds);
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation("Found {Count} roles by name", namedRoleIds.Count);
             }
         }
 
@@ -289,13 +287,23 @@ internal sealed class SecurityRoleReader(
 
         var query = new QueryExpression(Role)
         {
-            ColumnSet = new ColumnSet("roleid")
+            ColumnSet = new ColumnSet("roleid", "name")
         };
         query.Criteria.AddCondition("name", ConditionOperator.In, roleNames.Cast<object>().ToArray());
         query.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, rootBusinessUnitId);
 
         var results = _service.RetrieveMultiple(query);
-        return results.Entities.Select(e => e.Id).ToHashSet();
+
+        if (results.Entities.Count < roleNames.Length)
+        {
+            var foundNames = results.Entities
+                .Select(e => e.GetAttributeValue<string>("name"))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missingNames = roleNames.Where(n => !foundNames.Contains(n));
+            logger.LogWarning("Security roles not found: {MissingRoles}", string.Join(", ", missingNames));
+        }
+
+        return [.. results.Entities.Select(e => e.Id)];
     }
 
     /// <summary>

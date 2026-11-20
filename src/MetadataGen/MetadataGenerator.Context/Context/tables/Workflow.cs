@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Set of logical rules that define the steps necessary to automate a specific business process, task, or set of actions to be performed.</para>
 /// <para>Display Name: Process</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("workflow")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -323,6 +323,18 @@ public partial class Workflow : ExtendedEntity
     {
         get => GetAttributeValue<Guid?>("entityimageid");
         set => SetAttributeValue("entityimageid", value);
+    }
+
+    /// <summary>
+    /// <para>Flow group the flow is associated with.</para>
+    /// <para>Display Name: Flow Group</para>
+    /// </summary>
+    [AttributeLogicalName("flowgroup")]
+    [DisplayName("Flow Group")]
+    public EntityReference? FlowGroup
+    {
+        get => GetAttributeValue<EntityReference?>("flowgroup");
+        set => SetAttributeValue("flowgroup", value);
     }
 
     /// <summary>
@@ -1079,9 +1091,9 @@ public partial class Workflow : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("workflowid")]
     [DisplayName("Process")]
-    public Guid WorkflowId
+    public Guid? WorkflowId
     {
-        get => GetAttributeValue<Guid>("workflowid");
+        get => GetAttributeValue<Guid?>("workflowid");
         set => SetId("workflowid", value);
     }
 

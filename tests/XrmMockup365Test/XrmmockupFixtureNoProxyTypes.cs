@@ -1,18 +1,15 @@
 ﻿using DG.Some.Namespace;
 using DG.Tools.XrmMockup;
 using XrmPluginCore;
-using Microsoft.Xrm.Sdk.Client;
 using System;
 
 public class XrmMockupFixtureNoProxyTypes : IDisposable
 {
     // Shared settings instances to ensure metadata cache hits
     private static XrmMockupSettings _sharedSettings;
-    private static XrmMockupSettings _sharedRealDataSettings;
     private static readonly object _settingsLock = new object();
     
     public XrmMockupSettings Settings => _sharedSettings;
-    public XrmMockupSettings RealDataSettings => _sharedRealDataSettings;
 
     public XrmMockupFixtureNoProxyTypes()
     {
@@ -30,31 +27,6 @@ public class XrmMockupFixtureNoProxyTypes : IDisposable
                     MetadataDirectoryPath = GetMetadataPath(),
                     IPluginMetadata = metaPlugins
                 };
-
-                try
-                {
-                    _sharedRealDataSettings = new XrmMockupSettings
-                    {
-                        BasePluginTypes = _sharedSettings.BasePluginTypes,
-                        CodeActivityInstanceTypes = _sharedSettings.CodeActivityInstanceTypes,
-                        EnableProxyTypes = _sharedSettings.EnableProxyTypes,
-                        IncludeAllWorkflows = _sharedSettings.IncludeAllWorkflows,
-                        ExceptionFreeRequests = _sharedSettings.ExceptionFreeRequests,
-                        MetadataDirectoryPath = GetMetadataPath(),
-                        OnlineEnvironment = new Env
-                        {
-                            providerType = AuthenticationProviderType.OnlineFederation,
-                            uri = "https://exampleURL/XRMServices/2011/Organization.svc",
-                            username = "exampleUser",
-                            password = "examplePass"
-                        }
-                    };
-                }
-                catch
-                {
-                    // ignore - set to null
-                    _sharedRealDataSettings = null;
-                }
             }
         }
     }

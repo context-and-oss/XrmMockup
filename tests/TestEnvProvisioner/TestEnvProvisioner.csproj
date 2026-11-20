@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>XrmMockup.TestEnvProvisioner</RootNamespace>
+    <AssemblyName>XrmMockup.TestEnvProvisioner</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Part of the test suite (lives under tests/), but intentionally NOT in XrmMockup.slnx and not
+         a test project: it is a console tool run on demand against a live Dataverse environment to
+         (re)create the custom test entities, relationships, option sets and security roles that the
+         XrmMockup test suite depends on. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DataverseConnection" Version="1.2.5" />
+    <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -35,10 +35,14 @@ internal sealed class MetadataGeneratorService(
             skeleton.RootBusinessUnit.Id,
             ct);
 
+        // Get the privilege catalog
+        var privilegeCatalog = await metadataSource.GetPrivilegeCatalogAsync(ct);
+
         // Serialize all outputs
         await serializer.SerializeMetadataAsync(skeleton, ct);
         await serializer.SerializeWorkflowsAsync(workflows, ct);
         await serializer.SerializeSecurityRolesAsync(securityRoles, ct);
+        await serializer.SerializePrivilegeCatalogAsync(privilegeCatalog, ct);
         await serializer.GenerateTypeDeclarationsAsync(securityRoles, ct);
 
         logger.LogInformation("Metadata generation completed successfully");

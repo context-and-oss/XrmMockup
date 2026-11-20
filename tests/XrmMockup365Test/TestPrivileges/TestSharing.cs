@@ -21,7 +21,7 @@ namespace DG.XrmMockupTest
                 var businessunit = new BusinessUnit();
                 businessunit["name"] = "business unit name";
                 businessunit.Id = orgAdminUIService.Create(businessunit);
-                var otherUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles._000TestingRole);
+                var otherUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestReadOnly);
                 var sharingUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.SystemAdministrator);
 
                 var otherService = crm.CreateOrganizationService(otherUser.Id);

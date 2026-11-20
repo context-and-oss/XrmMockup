@@ -246,6 +246,37 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
+        public void TestUploadBlockExceedingMaxChunkSizeThrows()
+        {
+            // Arrange
+            var account = new Account { Name = "Test Account Chunk Size" };
+            account.Id = orgAdminService.Create(account);
+
+            var initUploadRequest = new InitializeFileBlocksUploadRequest
+            {
+                Target = account.ToEntityReference(),
+                FileName = "large.bin",
+                FileAttributeName = "dg_testfile"
+            };
+            var initUploadResponse = (InitializeFileBlocksUploadResponse)orgAdminService.Execute(initUploadRequest);
+            var uploadToken = initUploadResponse.FileContinuationToken;
+
+            // Create a block larger than 4 MB (5 MB)
+            var oversizedBlock = new byte[5 * 1024 * 1024];
+
+            var uploadBlockRequest = new UploadBlockRequest
+            {
+                FileContinuationToken = uploadToken,
+                BlockId = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
+                BlockData = oversizedBlock
+            };
+
+            // Act & Assert
+            var exception = Assert.Throws<FaultException>(() => orgAdminService.Execute(uploadBlockRequest));
+            Assert.Contains("Maximum chunk size supported: 4 MB", exception.Message);
+        }
+
+        [Fact]
         public void TestInvalidUploadTokenThrows()
         {
             // Arrange

@@ -2,7 +2,7 @@ using System.Runtime.Serialization;
 
 namespace XrmMockup.MetadataGenerator.Tool.Context;
 
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [DataContract]
 #pragma warning disable CS8981
 public enum contact_haschildrencode
@@ -10,5 +10,6 @@ public enum contact_haschildrencode
 {
     [EnumMember]
     [OptionSetMetadata("Default Value", 1033)]
+    [OptionSetMetadata("Standardværdi", 1030)]
     DefaultValue = 1,
 }

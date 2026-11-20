@@ -18,6 +18,7 @@ internal sealed class OnlineMetadataSource(
     IOptionSetReader optionSetReader,
     ICurrencyReader currencyReader,
     IOrganizationReader organizationReader,
+    IPrivilegeReader privilegeReader,
     IOptions<GeneratorOptions> options,
     ILogger<OnlineMetadataSource> logger) : IMetadataSource
 {
@@ -78,6 +79,12 @@ internal sealed class OnlineMetadataSource(
             rootBusinessUnitId,
             _options.Solutions,
             _options.SecurityRoles,
+            _options.AllSecurityRoles,
             ct);
+    }
+
+    public async Task<PrivilegeCatalog> GetPrivilegeCatalogAsync(CancellationToken ct = default)
+    {
+        return await privilegeReader.GetPrivilegeCatalogAsync(ct);
     }
 }

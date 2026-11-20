@@ -16,6 +16,11 @@ internal sealed partial class DataContractMetadataSerializer(
     IOptions<GeneratorOptions> options,
     ILogger<DataContractMetadataSerializer> logger) : IMetadataSerializer
 {
+    /// <summary>
+    /// The file the privilege catalog is written to, next to Metadata.xml.
+    /// </summary>
+    public const string PrivilegeCatalogFile = "PrivilegeCatalog.xml";
+
     private readonly GeneratorOptions _options = options.Value;
 
     public async Task SerializeMetadataAsync(
@@ -117,6 +122,28 @@ internal sealed partial class DataContractMetadataSerializer(
         }, ct);
     }
 
+    public async Task SerializePrivilegeCatalogAsync(
+        PrivilegeCatalog catalog,
+        CancellationToken ct = default)
+    {
+        await Task.Run(() =>
+        {
+            Directory.CreateDirectory(_options.OutputDirectory);
+
+            var serializer = new DataContractSerializer(typeof(PrivilegeCatalog));
+            var catalogPath = Path.Combine(_options.OutputDirectory, PrivilegeCatalogFile);
+
+            using var stream = new FileStream(catalogPath, FileMode.Create);
+            using var writer = CreateXmlWriter(stream);
+            serializer.WriteObject(writer, catalog);
+
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation("Written {Count} privileges to {Path}", catalog.Privileges.Count, catalogPath);
+            }
+        }, ct);
+    }
+
     public async Task GenerateTypeDeclarationsAsync(
         Dictionary<Guid, SecurityRole> securityRoles,
         CancellationToken ct = default)
@@ -131,7 +158,7 @@ internal sealed partial class DataContractMetadataSerializer(
             file.WriteLine("namespace DG.Tools.XrmMockup {");
             file.WriteLine("\tpublic struct SecurityRoles {");
 
-            foreach (var securityRole in securityRoles.OrderBy(x => x.Value.Name))
+            foreach (var securityRole in securityRoles.OrderBy(x => x.Value.Name, StringComparer.Ordinal))
             {
                 file.WriteLine($"\t\tpublic static Guid {ToSafeName(securityRole.Value.Name)} = new Guid(\"{securityRole.Key}\");");
             }

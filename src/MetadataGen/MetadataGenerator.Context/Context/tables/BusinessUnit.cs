@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Business, division, or department in the Microsoft Dynamics 365 database.</para>
 /// <para>Display Name: Business Unit</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("businessunit")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -579,9 +579,9 @@ public partial class BusinessUnit : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("businessunitid")]
     [DisplayName("Business Unit")]
-    public Guid BusinessUnitId
+    public Guid? BusinessUnitId
     {
-        get => GetAttributeValue<Guid>("businessunitid");
+        get => GetAttributeValue<Guid?>("businessunitid");
         set => SetId("businessunitid", value);
     }
 

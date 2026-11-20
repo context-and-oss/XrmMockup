@@ -36,6 +36,16 @@ namespace WorkflowExecuter
                 throw new WorkflowException($"The variable with id '{VariableId}' before being set, check the workflow has the correct format.");
             }
 
+            // When evaluating a calculated/formula field during a read, persistence is suppressed: the
+            // computed value already lives in the "primaryEntity" variable for the caller to project onto
+            // the returned entity, so re-Updating the whole record would be a spurious write (firing the
+            // update pipeline, mutating data, and tripping the update-time circular-reference guard).
+            // Real workflows leave this flag unset and still persist.
+            if (variables.TryGetValue(WorkflowTree.SuppressWritesKey, out var suppress) && suppress is bool b && b)
+            {
+                return;
+            }
+
             var entity = variables[VariableId] as Entity;
             orgService.Update(entity);
 

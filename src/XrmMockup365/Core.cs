@@ -1,16 +1,20 @@
-﻿using DG.Tools.XrmMockup.Database;
+using DG.Tools.XrmMockup.Database;
 using DG.Tools.XrmMockup.Internal;
+using DG.Tools.XrmMockup.Logging;
 using DG.Tools.XrmMockup.Serialization;
+using DG.Tools.XrmMockup.Online;
 using XrmPluginCore.Enums;
 using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Client;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Organization;
 using Microsoft.Xrm.Sdk.Query;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -28,7 +32,7 @@ namespace DG.Tools.XrmMockup
     /// <summary>
     /// Class for handling all requests to the database
     /// </summary>
-    internal class Core : IXrmMockupExtension
+    internal partial class Core : IXrmMockupExtension, ICoreOperations
     {
         public TimeSpan TimeOffset { get; private set; }
         public MockupServiceProviderAndFactory ServiceFactory { get; private set; }
@@ -50,6 +54,7 @@ namespace DG.Tools.XrmMockup
         internal OrganizationDetail OrganizationDetail { get; private set; }
         internal EntityReference BaseCurrency { get; private set; }
 
+        private RequestExecutionPipeline pipeline;
         private PluginManager pluginManager;
         private CustomApiManager customApiManager;
         private WorkflowManager workflowManager;
@@ -59,11 +64,14 @@ namespace DG.Tools.XrmMockup
         private XrmDb db;
         private Dictionary<string, Snapshot> snapshots;
         private Dictionary<string, Type> entityTypeMap = new Dictionary<string, Type>();
-        private OrganizationServiceProxy OnlineProxy;
+        private IOnlineDataService OnlineDataService;
         private int baseCurrencyPrecision;
         private FormulaFieldEvaluator FormulaFieldEvaluator { get; set; }
         private List<string> systemAttributeNames;
         internal FileBlockStore FileBlockStore { get; private set; }
+
+        /// <summary>Logger scoped to the mockup engine; used by request handlers to surface warnings.</summary>
+        internal ILogger Logger { get; private set; }
 
         /// <summary>
         /// Creates a new instance of Core
@@ -79,8 +87,9 @@ namespace DG.Tools.XrmMockup
                 SecurityRoles = SecurityRoles,
                 BaseCurrency = metadata.BaseOrganization.GetAttributeValue<EntityReference>("basecurrencyid"),
                 BaseCurrencyPrecision = metadata.BaseOrganization.GetAttributeValue<int>("pricingdecimalprecision"),
-                OnlineProxy = null,
-                EntityTypeMap = new Dictionary<string, Type>()
+                OnlineDataService = null,
+                EntityTypeMap = new Dictionary<string, Type>(),
+                LoggerFactory = ResolveLoggerFactory(Settings)
             };
 
             InitializeCore(initData);
@@ -99,8 +108,9 @@ namespace DG.Tools.XrmMockup
                 SecurityRoles = staticCache.SecurityRoles,
                 BaseCurrency = staticCache.BaseCurrency,
                 BaseCurrencyPrecision = staticCache.BaseCurrencyPrecision,
-                OnlineProxy = staticCache.OnlineProxy,
-                EntityTypeMap = staticCache.EntityTypeMap
+                OnlineDataService = staticCache.OnlineDataService,
+                EntityTypeMap = staticCache.EntityTypeMap,
+                LoggerFactory = staticCache.LoggerFactory
             };
 
             InitializeCore(initData);
@@ -111,19 +121,31 @@ namespace DG.Tools.XrmMockup
         /// </summary>
         private void InitializeCore(CoreInitializationData initData)
         {
+            var sw = Stopwatch.StartNew();
+            var loggerFactory = initData.LoggerFactory ?? NullLoggerFactory.Instance;
+            var coreLogger = loggerFactory.CreateLogger(typeof(Core).FullName);
+            Logger = coreLogger;
+
             TimeOffset = new TimeSpan();
             settings = initData.Settings;
-            metadata = initData.Metadata;
+            // Metadata reads share cached immutable objects; customization handlers copy affected
+            // objects on write so one mockup cannot change another instance's choices.
+            metadata = new MetadataSkeleton
+            {
+                EntityMetadata = new SortedDictionary<string, EntityMetadata>(initData.Metadata.EntityMetadata),
+                OptionSets = initData.Metadata.OptionSets?.ToArray() ?? Array.Empty<OptionSetMetadataBase>(),
+                DefaultStateStatus = initData.Metadata.DefaultStateStatus.ToDictionary(p => p.Key, p => new Dictionary<int, int>(p.Value)),
+                Currencies = initData.Metadata.Currencies, BaseOrganization = initData.Metadata.BaseOrganization,
+                RootBusinessUnit = initData.Metadata.RootBusinessUnit, Plugins = initData.Metadata.Plugins
+            };
             BaseCurrency = initData.BaseCurrency;
             baseCurrencyPrecision = initData.BaseCurrencyPrecision;
-            OnlineProxy = initData.OnlineProxy;
+            OnlineDataService = initData.OnlineDataService;
+            db = new XrmDb(metadata.EntityMetadata, initData.OnlineDataService);
             entityTypeMap = initData.EntityTypeMap;
-
-            db = new XrmDb(initData.Metadata.EntityMetadata, initData.OnlineProxy);
-            EnsureFileAttachmentMetadata();
             FileBlockStore = new FileBlockStore();
             snapshots = new Dictionary<string, Snapshot>();
-            security = new Security(this, initData.Metadata, initData.SecurityRoles, db);
+            security = new Security(this, metadata, initData.SecurityRoles, db);
             TracingServiceFactory = initData.Settings.TracingServiceFactory ?? new TracingServiceFactory();
             ServiceFactory = new MockupServiceProviderAndFactory(this);
 
@@ -134,10 +156,15 @@ namespace DG.Tools.XrmMockup
                 allPlugins.AddRange(initData.Settings.IPluginMetadata);
             }
 
-            pluginManager = new PluginManager(initData.Settings.BasePluginTypes, initData.Metadata.EntityMetadata, allPlugins);
-            workflowManager = new WorkflowManager(initData.Settings.CodeActivityInstanceTypes, initData.Settings.IncludeAllWorkflows,
-                initData.Workflows, initData.Metadata.EntityMetadata);
-            customApiManager = new CustomApiManager(initData.Settings.BaseCustomApiTypes);
+            var pluginLogger = loggerFactory.CreateLogger(typeof(PluginManager).FullName);
+            pluginManager = new PluginManager(this, initData.Settings.BasePluginTypes, metadata.EntityMetadata, allPlugins, pluginLogger);
+
+            var workflowLogger = loggerFactory.CreateLogger(typeof(WorkflowManager).FullName);
+            workflowManager = new WorkflowManager(this, initData.Settings.CodeActivityInstanceTypes, initData.Settings.IncludeAllWorkflows,
+                initData.Workflows, metadata.EntityMetadata, workflowLogger);
+
+            var apiLogger = loggerFactory.CreateLogger(typeof(CustomApiManager).FullName);
+            customApiManager = new CustomApiManager(this, initData.Settings.BaseCustomApiTypes, initData.Settings.StrictCustomApiParameters, apiLogger);
 
             var typesMissingRegistration = pluginManager.missingRegistrations
                 .Intersect(customApiManager.missingRegistration)
@@ -148,7 +175,23 @@ namespace DG.Tools.XrmMockup
                 throw new Exception($"The following plugin types are missing plugin or custom api registrations: {typeNames}");
             }
 
-            systemAttributeNames = new List<string>() { "createdon", "createdby", "modifiedon", "modifiedby" };
+            sw.Stop();
+            coreLogger.LogInformation("XrmMockup initialized in {ElapsedMs}ms - Plugins: {PluginCount}, Workflows: sync={SyncCount} async={AsyncCount}, Custom APIs: {ApiCount}",
+                sw.ElapsedMilliseconds,
+                pluginManager.PluginRegistrations.Count,
+                workflowManager.SynchronousWorkflowCount,
+                workflowManager.AsynchronousWorkflowCount,
+                customApiManager.RegisteredApiCount);
+
+            // System-managed attributes that Dataverse resolves during the main operation. They are
+            // not present in the Target during the pre-stages, but are copied back onto the Target for
+            // post-operation plugins (and are always available via the post-image).
+            systemAttributeNames = new List<string>()
+            {
+                "createdon", "createdby", "modifiedon", "modifiedby",
+                "ownerid", "owningbusinessunit", "owninguser", "owningteam",
+                "statecode", "statuscode"
+            };
 
             RequestHandlers = GetRequestHandlers(db);
             InitializeDB();
@@ -166,6 +209,8 @@ namespace DG.Tools.XrmMockup
 
             security.InitializeSecurityRoles(db);
             OrganizationDetail = initData.Settings.OrganizationDetail;
+
+            pipeline = new RequestExecutionPipeline(this, pluginManager, workflowManager);
 
             FormulaFieldEvaluator = new FormulaFieldEvaluator(ServiceFactory);
         }
@@ -185,7 +230,7 @@ namespace DG.Tools.XrmMockup
             var baseCurrency = metadata.BaseOrganization.GetAttributeValue<EntityReference>("basecurrencyid");
             var baseCurrencyPrecision = metadata.BaseOrganization.GetAttributeValue<int>("pricingdecimalprecision");
 
-            var onlineProxy = BuildOnlineProxy(settings);
+            var onlineDataService = BuildOnlineDataService(settings);
             var entityTypeMap = new Dictionary<string, Type>();
 
             // Build entity type map for proxy types if enabled
@@ -194,29 +239,41 @@ namespace DG.Tools.XrmMockup
                 BuildEntityTypeMap(settings, entityTypeMap);
             }
 
-            // Note: IPluginMetadata is handled per-instance in the Core constructor 
+            // Note: IPluginMetadata is handled per-instance in the Core constructor
             // to avoid modifying the shared cache
 
-            return new StaticMetadataCache(metadata, workflows, securityRoles, entityTypeMap, 
-                baseCurrency, baseCurrencyPrecision, onlineProxy);
+            var loggerFactory = ResolveLoggerFactory(settings);
+
+            return new StaticMetadataCache(metadata, workflows, securityRoles, entityTypeMap,
+                baseCurrency, baseCurrencyPrecision, onlineDataService, loggerFactory);
         }
 
-        private static OrganizationServiceProxy BuildOnlineProxy(XrmMockupSettings settings)
+        private static ILoggerFactory ResolveLoggerFactory(XrmMockupSettings settings)
         {
+            if (settings.LoggerFactory != null)
+                return settings.LoggerFactory;
+
+            if (!string.IsNullOrEmpty(settings.LogFilePath))
+                return new FileLoggerFactory(settings.LogFilePath, settings.MinLogLevel);
+
+            return NullLoggerFactory.Instance;
+        }
+
+        private static IOnlineDataService BuildOnlineDataService(XrmMockupSettings settings)
+        {
+#if DATAVERSE_SERVICE_CLIENT
+            // Allow injection for testing
+            if (settings.OnlineDataServiceFactory != null)
+            {
+                return settings.OnlineDataServiceFactory();
+            }
+
             if (settings.OnlineEnvironment.HasValue)
             {
                 var env = settings.OnlineEnvironment.Value;
-                var orgHelper = new OrganizationHelper(
-                    new Uri(env.uri),
-                    env.providerType,
-                    env.username,
-                    env.password,
-                    env.domain);
-                var proxy = orgHelper.GetServiceProxy();
-                if (settings.EnableProxyTypes == true)
-                    proxy.EnableProxyTypes();
-                return proxy;
+                return new OnlineDataService(env.Url);
             }
+#endif
             return null;
         }
 
@@ -379,6 +436,7 @@ namespace DG.Tools.XrmMockup
             new RevokeAccessRequestHandler(this, db, metadata, security),
             new WinOpportunityRequestHandler(this, db, metadata, security),
             new LoseOpportunityRequestHandler(this, db, metadata, security),
+            new QualifyLeadRequestHandler(this, db, metadata, security),
             new RetrieveAllOptionSetsRequestHandler(this, db, metadata, security),
             new RetrieveOptionSetRequestHandler(this, db, metadata, security),
             new RetrieveExchangeRateRequestHandler(this, db, metadata, security),
@@ -403,13 +461,28 @@ namespace DG.Tools.XrmMockup
             new InitializeFileBlocksDownloadRequestHandler(this, db, metadata, security),
             new DownloadBlockRequestHandler(this, db, metadata, security),
             new InstantiateTemplateRequestHandler(this, db, metadata, security),
+            new SendEmailFromTemplateRequestHandler(this, db, metadata, security),
             new CreateMultipleRequestHandler(this, db, metadata, security),
             new UpdateMultipleRequestHandler(this, db, metadata, security),
+            new DeleteMultipleRequestHandler(this, db, metadata, security),
             new UpsertMultipleRequestHandler(this, db, metadata, security),
             new ExecuteTransactionRequestHandler(this, db, metadata, security),
             new WinQuoteRequestHandler(this, db, metadata, security),
             new CloseQuoteRequestHandler(this, db, metadata, security),
-            new ReviseQuoteRequestHandler(this, db, metadata, security)
+            new ReviseQuoteRequestHandler(this, db, metadata, security),
+            new AddToQueueRequestHandler(this, db, metadata, security),
+            new AddMemberListRequestHandler(this, db, metadata, security),
+            new AddListMembersListRequestHandler(this, db, metadata, security),
+            new BulkDeleteRequestHandler(this, db, metadata, security),
+            new ExecuteFetchRequestHandler(this, db, metadata, security),
+            new InitializeFromRequestHandler(this, db, metadata, security),
+            new InsertOptionValueRequestHandler(this, db, metadata, security),
+            new InsertStatusValueRequestHandler(this, db, metadata, security),
+            new PickFromQueueRequestHandler(this, db, metadata, security),
+            new PublishXmlRequestHandler(this, db, metadata, security),
+            new RemoveFromQueueRequestHandler(this, db, metadata, security),
+            new RetrieveSharedPrincipalsAndAccessRequestHandler(this, db, metadata, security),
+            new NavigateToNextEntityRequestHandler(this, db, metadata, security)
         };
 
         internal void EnableProxyTypes(Assembly assembly)
@@ -425,25 +498,6 @@ namespace DG.Tools.XrmMockup
                     entityTypeMap.Add(logicalName, type);
                 }
             }
-        }
-
-        private OrganizationServiceProxy GetOnlineProxy()
-        {
-            if (OnlineProxy == null && settings.OnlineEnvironment.HasValue)
-            {
-                var env = settings.OnlineEnvironment.Value;
-                var orgHelper = new OrganizationHelper(
-                    new Uri(env.uri),
-                    env.providerType,
-                    env.username,
-                    env.password,
-                    env.domain);
-                this.OnlineProxy = orgHelper.GetServiceProxy();
-                if (settings.EnableProxyTypes == true)
-                    OnlineProxy.EnableProxyTypes();
-            }
-
-            return OnlineProxy;
         }
 
         internal IOrganizationService GetWorkflowService()
@@ -467,7 +521,7 @@ namespace DG.Tools.XrmMockup
             return null;
         }
 
-        internal DbRow GetDbRow(EntityReference entityReference)
+        public DbRow GetDbRow(EntityReference entityReference)
         {
             return db.GetDbRow(entityReference);
         }
@@ -499,6 +553,7 @@ namespace DG.Tools.XrmMockup
             {
                 toReturn = entity.CloneEntity(metadata, colsToKeep);
             }
+            toReturn.RowVersion = entity.RowVersion;
             toReturn.KeyAttributes = entity.CloneKeyAttributes();
             Utility.PopulateEntityReferenceNames(toReturn, db);
             return toReturn;
@@ -734,258 +789,140 @@ namespace DG.Tools.XrmMockup
         /// <summary>
         /// Execute the request and trigger plugins if needed
         /// </summary>
-        /// <param name="request"></param>
-        /// <param name="userRef"></param>
-        /// <returns></returns>
         public OrganizationResponse Execute(OrganizationRequest request, EntityReference userRef)
         {
             return Execute(request, userRef, null);
         }
 
-        internal OrganizationResponse Execute(OrganizationRequest request, EntityReference userRef,
+        public OrganizationResponse Execute(OrganizationRequest request, EntityReference userRef,
             PluginContext parentPluginContext)
         {
-            // Setup
-            HandleInternalPreOperations(request, userRef);
-
-            var primaryRef = Mappings.GetPrimaryEntityReferenceFromRequest(request);
-
-            // Create the plugin context
-            var pluginContext = new PluginContext()
-            {
-                UserId = userRef.Id,
-                InitiatingUserId = userRef.Id,
-                MessageName = RequestNameToMessageName(request.RequestName),
-                Depth = 1,
-                ExtensionDepth = 1,
-                OrganizationName = OrganizationName,
-                OrganizationId = OrganizationId,
-                PrimaryEntityName = primaryRef?.LogicalName,
-            };
-            if (primaryRef != null)
-            {
-                var refEntity = db.GetEntityOrNull(primaryRef);
-                pluginContext.PrimaryEntityId = refEntity == null ? Guid.Empty : refEntity.Id;
-            }
-
-            foreach (var prop in request.Parameters)
-            {
-                pluginContext.InputParameters[prop.Key] = prop.Value;
-            }
-
-            if (parentPluginContext != null)
-            {
-                pluginContext.ParentContext = parentPluginContext;
-                pluginContext.Depth = parentPluginContext.Depth + 1;
-                pluginContext.ExtensionDepth = parentPluginContext.ExtensionDepth + 1;
-                parentPluginContext.ExtensionDepth = pluginContext.ExtensionDepth;
-            }
-
-            var buRef = GetBusinessUnit(userRef);
-            pluginContext.BusinessUnitId = buRef.Id;
-
-            // Get the request message from the mapping, if present, otherwise use the RequestName
-            var requestMessage = Mappings.RequestToEventOperation.TryGetValue(request.GetType(), out var eventOperation)
-                ? eventOperation.ToString()
-                : request.RequestName;
-
-            var entityInfo = GetEntityInfo(request);
-
-            var settings = MockupExecutionContext.GetSettings(request);
-            // Validation
-            if (!settings.SetUnsettableFields && (request is UpdateRequest || request is CreateRequest))
-            {
-                var entity = request is UpdateRequest
-                    ? (request as UpdateRequest).Target
-                    : (request as CreateRequest).Target;
-                Utility.RemoveUnsettableAttributes(request.RequestName,
-                    metadata.EntityMetadata.GetMetadata(entity.LogicalName), entity);
-            }
-
-            var shouldTrigger = settings.TriggerProcesses && entityInfo != null;
-
-            Entity preImage = TryRetrieve(primaryRef);
-            if (preImage != null)
-                primaryRef.Id = preImage.Id;
-
-            if (shouldTrigger)
-            {
-                // System Pre-validation
-                pluginManager.TriggerSystem(requestMessage, ExecutionStage.PreValidation, entityInfo.Item1, preImage, null, pluginContext, this);
-                // Pre-validation
-                pluginManager.TriggerSync(requestMessage, ExecutionStage.PreValidation, entityInfo.Item1, preImage, null, pluginContext, this, (_) => true);
-            }
-
-            //perform security checks for the request
-            CheckRequestSecurity(request, userRef);
-
-            //perform initialization of preoperation 
-            InitializePreOperation(request, userRef, preImage);
-
-            if (shouldTrigger)
-            {
-                // Shared variables should be moved to parent context when transitioning from 10 to 20.
-                pluginContext.ParentContext = pluginContext.Clone();
-                pluginContext.SharedVariables.Clear();
-
-                // Pre-operation
-                pluginManager.TriggerSync(requestMessage, ExecutionStage.PreOperation, entityInfo.Item1, preImage, null, pluginContext, this, (p) => p.GetExecutionOrder() == 0);
-
-                if (settings.TriggerWorkflows)
-                {
-                    workflowManager.TriggerSync(requestMessage, ExecutionStage.PreOperation, entityInfo.Item1, preImage, null, pluginContext, this);
-                }
-                pluginManager.TriggerSync(requestMessage, ExecutionStage.PreOperation, entityInfo.Item1, preImage, null, pluginContext, this, (p) => p.GetExecutionOrder() != 0);
-
-                // System Pre-operation
-                pluginManager.TriggerSystem(requestMessage, ExecutionStage.PreOperation, entityInfo.Item1, preImage, null, pluginContext, this);
-            }
-
-            // Core operation
-            OrganizationResponse response = ExecuteRequest(request, userRef, parentPluginContext, pluginContext);
-
-            // Post-operation
-            if (shouldTrigger)
-            {
-                // In RetrieveMultipleRequests, the OutputParameters bag contains the entity collection
-                if (request is RetrieveMultipleRequest)
-                {
-                    pluginContext.OutputParameters["BusinessEntityCollection"] =
-                        (response as RetrieveMultipleResponse)?.EntityCollection;
-                }
-                else if (request is RetrieveRequest)
-                {
-                    pluginContext.OutputParameters["BusinessEntity"] = TryRetrieve((request as RetrieveRequest).Target);
-                }
-
-                var syncPostImage = TryRetrieve(primaryRef);
-
-                //copy the createon etc system attributes onto the target so they are available for postoperation processing
-                if (syncPostImage != null)
-                {
-                    CopySystemAttributes(syncPostImage, entityInfo.Item1 as Entity);
-                }
-
-                pluginManager.TriggerSystem(requestMessage, ExecutionStage.PostOperation, entityInfo.Item1, preImage, syncPostImage, pluginContext, this);
-
-                pluginManager.TriggerSync(requestMessage, ExecutionStage.PostOperation, entityInfo.Item1, preImage, syncPostImage, pluginContext, this, (p) => p.GetExecutionOrder() == 0);
-
-                if (settings.TriggerWorkflows)
-                {
-                    workflowManager.TriggerSync(requestMessage, ExecutionStage.PostOperation, entityInfo.Item1, preImage, syncPostImage, pluginContext, this);
-                }
-
-                pluginManager.TriggerSync(requestMessage, ExecutionStage.PostOperation, entityInfo.Item1, preImage, syncPostImage, pluginContext, this, (p) => p.GetExecutionOrder() != 0);
-                    
-                var asyncPostImage = TryRetrieve(primaryRef);
-                pluginManager.StageAsync(requestMessage, ExecutionStage.PostOperation, entityInfo.Item1, preImage, asyncPostImage, pluginContext, this);
-
-                if (settings.TriggerWorkflows)
-                {
-                    workflowManager.StageAsync(requestMessage, ExecutionStage.PostOperation, entityInfo.Item1, preImage, asyncPostImage, pluginContext, this);
-                }
-
-                //When last Sync has been executed we trigger the Async jobs.
-                if (parentPluginContext == null)
-                {
-                    pluginManager.TriggerAsyncWaitingJobs();
-
-                    if (settings.TriggerWorkflows)
-                    {
-                        workflowManager.TriggerAsync(this);
-                    }
-                }
-
-                if (settings.TriggerWorkflows)
-                {
-                    workflowManager.ExecuteWaitingWorkflows(pluginContext, this);
-                }
-            }
-
-            // Trigger Extension
-            if (this.settings.MockUpExtensions.Count != 0)
-            {
-                /*
-                 * When moving business units, more than eight layers occur...
-                 */
-                if (pluginContext.ExtensionDepth > 8)
-                {
-                    throw new FaultException(
-                        "This workflow job was canceled because the workflow that started it included an infinite loop." +
-                        " Correct the workflow logic and try again.");
-                }
-            }
-
-            switch (request.RequestName)
-            {
-                case "Create":
-                    var createResponse = (CreateResponse)response;
-                    var entityLogicalName = ((Entity)request.Parameters["Target"]).LogicalName;
-                    var reference = primaryRef ?? new EntityReference(entityLogicalName, createResponse.id);
-
-                    var createdEntity = GetDbRow(reference).ToEntity();
-                    TriggerExtension(
-                        new MockupService(this, userRef.Id, pluginContext), request,
-                        createdEntity, null, userRef);
-                    break;
-                case "Update":
-                    var updatedEntity = GetDbRow(primaryRef).ToEntity();
-                    TriggerExtension(
-                        new MockupService(this, userRef.Id, pluginContext), request,
-                        updatedEntity, preImage, userRef);
-                    break;
-                case "Delete":
-                    TriggerExtension(
-                        new MockupService(this, userRef.Id, pluginContext), request,
-                        null, preImage, userRef);
-                    break;
-            }
-
-            return response;
+            return pipeline.Execute(request, userRef, parentPluginContext);
         }
 
-        private void CopySystemAttributes(Entity postImage, Entity item1)
-        {
-            if (item1 == null)
-            {
-                return;
-            }
+        // ── ICoreOperations — infrastructure methods the pipeline calls back into Core for ──
 
-            foreach (var systemAttributeName in this.systemAttributeNames)
+        public bool HasMockupExtensions => settings.MockUpExtensions.Count != 0;
+
+        public EntityReference GetBusinessUnit(EntityReference owner)
+        {
+            return Utility.GetBusinessUnit(db, owner);
+        }
+
+        public ISet<string> CopySystemAttributes(Entity postImage, Entity target)
+        {
+            var injected = new HashSet<string>();
+            if (target == null) return injected;
+
+            foreach (var systemAttributeName in systemAttributeNames)
             {
                 if (postImage.Contains(systemAttributeName))
                 {
-                    if (postImage[systemAttributeName] is EntityReference)
+                    // Only attributes this copy *adds* are reported. One the caller (or a
+                    // pre-operation plugin) already put in the Target is a genuine part of the
+                    // update and must keep counting towards plugin/workflow attribute filters.
+                    var wasAbsent = !target.Contains(systemAttributeName);
+
+                    if (postImage[systemAttributeName] is EntityReference reference)
                     {
-                        item1[systemAttributeName] = new EntityReference(
-                            postImage.GetAttributeValue<EntityReference>(systemAttributeName).LogicalName,
-                            postImage.GetAttributeValue<EntityReference>(systemAttributeName).Id);
+                        target[systemAttributeName] = new EntityReference(reference.LogicalName, reference.Id);
                     }
-                    else if (postImage[systemAttributeName] is DateTime)
+                    else if (postImage[systemAttributeName] is DateTime dateTime)
                     {
-                        item1[systemAttributeName] = postImage.GetAttributeValue<DateTime>(systemAttributeName);
+                        target[systemAttributeName] = dateTime;
                     }
+                    else if (postImage[systemAttributeName] is OptionSetValue optionSet)
+                    {
+                        target[systemAttributeName] = new OptionSetValue(optionSet.Value);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    if (wasAbsent) injected.Add(systemAttributeName);
                 }
             }
+
+            return injected;
         }
 
-        internal void HandleInternalPreOperations(OrganizationRequest request, EntityReference userRef)
+        public void HandleInternalPreOperations(OrganizationRequest request, EntityReference userRef)
         {
             if (request.RequestName == "Create")
             {
                 var entity = request["Target"] as Entity;
                 if (entity.Id == Guid.Empty)
-                {
                     entity.Id = Guid.NewGuid();
-                }
 
-                if (entity.GetAttributeValue<EntityReference>("ownerid") == null &&
-                    Utility.IsValidAttribute("ownerid", metadata.EntityMetadata.GetMetadata(entity.LogicalName)))
+                // Note: ownerid is intentionally NOT defaulted here. In Dataverse the owner is
+                // resolved during the main operation (stage 30), so it must not be visible in the
+                // Target during the PreValidation/PreOperation stages. The persisted default (calling
+                // user) is applied by CreateRequestHandler.Execute, and the resolved value surfaces
+                // afterwards via the post-image and the post-operation Target.
+            }
+        }
+
+        public OrganizationResponse ExecuteAction(OrganizationRequest request)
+        {
+            return ExecuteActionInternal(request);
+        }
+
+        public bool HandlesCustomApi(string requestName) => customApiManager.HandlesRequest(requestName);
+
+        public IEnumerable<KeyValuePair<string, object>> GetCustomApiInputParameters(OrganizationRequest request) => customApiManager.GetInputParameters(request);
+
+        public OrganizationResponse ExecuteCustomApi(OrganizationRequest request, PluginContext pluginContext)
+        {
+            return customApiManager.Execute(request, pluginContext);
+        }
+
+        public bool IsExceptionFreeRequest(string requestName)
+        {
+            return settings.ExceptionFreeRequests?.Contains(requestName) ?? false;
+        }
+
+        public IOrganizationService CreateMockupService(Guid? userId, PluginContext pluginContext)
+        {
+            return new MockupService(this, userId, pluginContext);
+        }
+
+        public MockupServiceProviderAndFactory CreateServiceProviderAndFactory(PluginContext pluginContext)
+        {
+            return new MockupServiceProviderAndFactory(this, pluginContext, TracingServiceFactory);
+        }
+
+        private readonly List<PluginTraceLog> _pluginTraceLogs = new List<PluginTraceLog>();
+        private readonly object _pluginTraceLogLock = new object();
+
+        public void RecordPluginTrace(PluginTraceLog log)
+        {
+            lock (_pluginTraceLogLock)
+            {
+                _pluginTraceLogs.Add(log);
+            }
+        }
+
+        internal IReadOnlyList<PluginTraceLog> PluginTraceLogs
+        {
+            get
+            {
+                lock (_pluginTraceLogLock)
                 {
-                    entity["ownerid"] = userRef;
+                    return _pluginTraceLogs.ToList();
                 }
             }
         }
+
+        internal void ClearPluginTraceLogs()
+        {
+            lock (_pluginTraceLogLock)
+            {
+                _pluginTraceLogs.Clear();
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────────
 
         internal void AddTime(TimeSpan offset)
         {
@@ -993,109 +930,9 @@ namespace DG.Tools.XrmMockup
             TriggerWaitingWorkflows();
         }
 
-        private OrganizationResponse ExecuteRequest(
-            OrganizationRequest request, 
-            EntityReference userRef,
-            PluginContext parentPluginContext,
-            PluginContext pluginContext)
-        {
-            if (request is AssignRequest assignRequest)
-            {
-                var targetEntity = db.GetEntityOrNull(assignRequest.Target);
-                if (targetEntity.GetAttributeValue<EntityReference>("ownerid") != assignRequest.Assignee)
-                {
-                    var req = new UpdateRequest
-                    {
-                        Target = new Entity(assignRequest.Target.LogicalName, assignRequest.Target.Id)
-                    };
-                    req.Target.Attributes["ownerid"] = assignRequest.Assignee;
-                    Execute(req, userRef, parentPluginContext);
-                }
-
-                return new AssignResponse();
-            }
-
-            if (request is SetStateRequest setstateRequest)
-            {
-                var targetEntity = db.GetEntityOrNull(setstateRequest.EntityMoniker);
-                if (targetEntity.GetAttributeValue<OptionSetValue>("statecode") != setstateRequest.State ||
-                    targetEntity.GetAttributeValue<OptionSetValue>("statuscode") != setstateRequest.Status)
-                {
-                    var req = new UpdateRequest
-                    {
-                        Target = new Entity(setstateRequest.EntityMoniker.LogicalName, setstateRequest.EntityMoniker.Id)
-                    };
-                    req.Target.Attributes["statecode"] = setstateRequest.State;
-                    req.Target.Attributes["statuscode"] = setstateRequest.Status;
-                    Execute(req, userRef, parentPluginContext);
-                }
-
-                return new SetStateResponse();
-            }
-
-            if (workflowManager.GetActionDefaultNull(request.RequestName) != null)
-            {
-                return ExecuteAction(request);
-            }
-
-            if (customApiManager.HandlesRequest(request.RequestName))
-            {
-                return customApiManager.Execute(request, this, pluginContext);
-            }
-
-            var handler = RequestHandlers.FirstOrDefault(x => x.HandlesRequest(request.RequestName));
-            if (handler != null)
-            {
-                var response = handler.Execute(request, userRef);
-                if (response != null && string.IsNullOrEmpty(response.ResponseName))
-                {
-                    response.ResponseName = request.RequestName;
-                }
-                return response;
-            }
-
-            if (settings.ExceptionFreeRequests?.Contains(request.RequestName) ?? false)
-            {
-                return new OrganizationResponse();
-            }
-
-            throw new NotImplementedException(
-                $"Execute for the request '{request.RequestName}' has not been implemented yet.");
-        }
-
-        private void CheckRequestSecurity(OrganizationRequest request, EntityReference userRef)
-        {
-            var handler = RequestHandlers.FirstOrDefault(x => x.HandlesRequest(request.RequestName));
-            if (handler != null)
-            {
-                handler.CheckSecurity(request, userRef);
-            }
-        }
-
-        private void InitializePreOperation(OrganizationRequest request, EntityReference userRef, Entity preImage)
-        {
-            var handler = RequestHandlers.FirstOrDefault(x => x.HandlesRequest(request.RequestName));
-            if(handler != null)
-            {
-                handler.InitializePreOperation(request, userRef, preImage);
-            }
-        }
-
-        private string RequestNameToMessageName(string requestName)
-        {
-            switch (requestName)
-            {
-                case "LoseOpportunity": return "Lose";
-                case "WinOpportunity": return "Win";
-                case "CloseQuote": return "Lose";
-                case "WinQuote": return "Win";
-                default: return requestName;
-            }
-        }
-
         internal void TriggerWaitingWorkflows()
         {
-            workflowManager.ExecuteWaitingWorkflows(null, this);
+            workflowManager.ExecuteWaitingWorkflows(null);
         }
 
         internal void AddWorkflow(Entity workflow)
@@ -1126,6 +963,14 @@ namespace DG.Tools.XrmMockup
             }
         }
 
+        /// <summary>
+        /// Prefills the local database with data from the online service based on the query.
+        /// </summary>
+        internal void PrefillDBWithOnlineData(QueryExpression query)
+        {
+            db.PrefillDBWithOnlineData(query);
+        }
+
         internal Dictionary<string, Dictionary<AccessRights, PrivilegeDepth>> GetPrivilege(Guid principleId)
         {
             return security.GetPrincipalPrivilege(principleId);
@@ -1147,7 +992,7 @@ namespace DG.Tools.XrmMockup
             return security.HasPermission(entityRef, access, principleRef);
         }
 
-        private OrganizationResponse ExecuteAction(OrganizationRequest request)
+        private OrganizationResponse ExecuteActionInternal(OrganizationRequest request)
         {
             var action = workflowManager.GetActionDefaultNull(request.RequestName);
 
@@ -1168,7 +1013,7 @@ namespace DG.Tools.XrmMockup
                 workflow.Variables.Add(argumentName, input.Value);
             }
 
-            var postExecution = workflowManager.ExecuteWorkflow(workflow, entity, null, this);
+            var postExecution = workflowManager.ExecuteWorkflow(workflow, entity, null);
 
             var outputs = workflow.Output.Where(a => postExecution.Variables.ContainsKey(a.Name))
                 .Select(a => new KeyValuePair<string, object>(a.Name, postExecution.Variables[a.Name]));
@@ -1261,15 +1106,11 @@ namespace DG.Tools.XrmMockup
         }
 
 
-        private Entity TryRetrieve(EntityReference reference)
+        public Entity TryRetrieve(EntityReference reference)
         {
             return db.GetEntityOrNull(reference)?.CloneEntity();
         }
 
-        private EntityReference GetBusinessUnit(EntityReference owner)
-        {
-            return Utility.GetBusinessUnit(db, owner);
-        }
         #endregion
 
         internal void DisableRegisteredPlugins(bool include)
@@ -1281,7 +1122,7 @@ namespace DG.Tools.XrmMockup
         internal List<string> TemporaryPluginRegistrations => pluginManager.TemporaryPluginRegistrations;
         internal List<string> SystemPluginRegistrations => pluginManager.SystemPluginRegistrations;
 
-        internal XrmMockupSettings GetMockupSettings()
+        public XrmMockupSettings GetMockupSettings()
         {
             return settings;
         }
@@ -1360,15 +1201,15 @@ namespace DG.Tools.XrmMockup
             this.TimeOffset = new TimeSpan();
             workflowManager.ResetWorkflows(settings.IncludeAllWorkflows);
 
+            ClearPluginTraceLogs();
             pluginManager.ResetPlugins();
-            this.db = new XrmDb(metadata.EntityMetadata, GetOnlineProxy());
-            EnsureFileAttachmentMetadata();
+            this.db = new XrmDb(metadata.EntityMetadata, OnlineDataService);
             this.RequestHandlers = GetRequestHandlers(db);
             InitializeDB();
             security.ResetEnvironment(db);
         }
 
-        internal EntityMetadata GetEntityMetadata(string entityLogicalName)
+        public EntityMetadata GetEntityMetadata(string entityLogicalName)
         {
             if (!metadata.EntityMetadata.TryGetValue(entityLogicalName, out var entityMetadata))
             {
@@ -1378,10 +1219,20 @@ namespace DG.Tools.XrmMockup
             return entityMetadata;
         }
 
-        internal void ExecuteCalculatedFields(DbRow row)
+        internal void ExecuteCalculatedFields(EntityMetadata entityMetadata, Entity entity, ISet<string> requestedAttributes = null)
         {
-            var attributes = row.Metadata.Attributes.Where(
+            // requestedAttributes == null means "all columns" (e.g. ColumnSet(true)); only filter when
+            // the caller has supplied an explicit list. Skipping unrequested calculated columns avoids
+            // running their formulas, which is both faster and prevents a broken/unused calculated
+            // field from blocking unrelated reads (the original cast bug was surfaced this way: a
+            // mixed-type Concat in one calc field blew up every Retrieve, even when the column was
+            // never selected).
+            var attributes = entityMetadata.Attributes.Where(
                 m => m.SourceType == (int)SourceType.CalculatedAttribute && !(m is MoneyAttributeMetadata && m.LogicalName.EndsWith("_base")));
+            if (requestedAttributes != null)
+            {
+                attributes = attributes.Where(m => requestedAttributes.Contains(m.LogicalName));
+            }
 
             foreach (var attr in attributes)
             {
@@ -1396,17 +1247,31 @@ namespace DG.Tools.XrmMockup
 
                 var tree = WorkflowConstructor.ParseCalculated(definition, $"{attr.EntityLogicalName}.{attr.LogicalName}");
                 var factory = ServiceFactory;
-                tree.Execute(row.ToEntity().CloneEntity(row.Metadata, new ColumnSet(true)), TimeOffset, GetWorkflowService(),
-                    factory, factory.GetService<ITracingService>());
+                // Calculated fields are evaluated on demand and projected onto the entity being
+                // returned. Unlike rollup fields they are never persisted to the database, so we run
+                // the calculation workflow against a clone and copy the computed value back onto the
+                // returned entity (the workflow leaves its result in the "primaryEntity" variable).
+                var resultTree = tree.Execute(entity.CloneEntity(entityMetadata, new ColumnSet(true)), TimeOffset, GetWorkflowService(),
+                    factory, factory.GetService<ITracingService>(), suppressWrites: true);
+
+                if (resultTree.Variables.TryGetValue("InputEntities(\"primaryEntity\")", out var resultObj)
+                    && resultObj is Entity result && result.Contains(attr.LogicalName))
+                {
+                    entity[attr.LogicalName] = result[attr.LogicalName];
+                }
             }
         }
 
-        internal async System.Threading.Tasks.Task ExecuteFormulaFields(EntityMetadata entityMetadata, Entity entity)
+        internal async System.Threading.Tasks.Task ExecuteFormulaFields(EntityMetadata entityMetadata, Entity entity, ISet<string> requestedAttributes = null)
         {
             if (!settings.EnablePowerFxFields)
                 return;
 
             var attributes = entityMetadata.Attributes.Where(m => m.SourceType == (int)SourceType.FormulaAttribute);
+            if (requestedAttributes != null)
+            {
+                attributes = attributes.Where(m => requestedAttributes.Contains(m.LogicalName));
+            }
             foreach (var attr in attributes)
             {
                 var definition = Utility.GetFormulaDefinition(attr, SourceType.FormulaAttribute);
@@ -1418,7 +1283,43 @@ namespace DG.Tools.XrmMockup
                     continue;
                 }
 
-                entity[attr.LogicalName] = await FormulaFieldEvaluator.Evaluate(definition, entity, TimeOffset);
+                try
+                {
+                    entity[attr.LogicalName] = CoerceFormulaValue(await FormulaFieldEvaluator.Evaluate(definition, entity, TimeOffset), attr);
+                }
+                catch (Exception ex)
+                {
+                    // In Dataverse a formula field whose expression errors at runtime (e.g. referencing
+                    // a blank source, like Mid(name, 3) on an empty name) surfaces as a blank value on
+                    // that field — it does not fail the whole Retrieve. Mirror that: trace and leave the
+                    // field unset rather than letting one formula column break reading the record.
+                    var trace = ServiceFactory.GetService<ITracingService>();
+                    trace.Trace($"Formula field on {attr.EntityLogicalName} field {attr.LogicalName} could not be evaluated: {ex.Message}");
+                }
+            }
+        }
+
+        // PowerFx evaluates numeric expressions to decimal. Coerce the result to the formula
+        // attribute's declared CLR type so the strongly-typed accessors (e.g. int? for a whole-number
+        // formula column) don't fail casting decimal to the target type.
+        private static object CoerceFormulaValue(object value, AttributeMetadata attr)
+        {
+            if (value == null) return null;
+
+            switch (attr.AttributeType)
+            {
+                case AttributeTypeCode.Integer:
+                    return Convert.ToInt32(value);
+                case AttributeTypeCode.BigInt:
+                    return Convert.ToInt64(value);
+                case AttributeTypeCode.Double:
+                    return Convert.ToDouble(value);
+                case AttributeTypeCode.Decimal:
+                    return value is decimal ? value : Convert.ToDecimal(value);
+                case AttributeTypeCode.Money:
+                    return value is Money ? value : new Money(Convert.ToDecimal(value));
+                default:
+                    return value;
             }
         }
 
@@ -1435,54 +1336,6 @@ namespace DG.Tools.XrmMockup
         internal void AddSecurityRole(SecurityRole role)
         {
             security.AddSecurityRole(role);
-        }
-
-        private void EnsureFileAttachmentMetadata()
-        {
-            if (db.IsValidEntity("fileattachment"))
-                return;
-
-            var entityMetadata = new EntityMetadata();
-            SetMetadataProperty(entityMetadata, "LogicalName", "fileattachment");
-            SetMetadataProperty(entityMetadata, "PrimaryIdAttribute", "fileattachmentid");
-            SetMetadataProperty(entityMetadata, "PrimaryNameAttribute", "filename");
-
-            var attributes = new AttributeMetadata[]
-            {
-                CreateAttributeMetadata<UniqueIdentifierAttributeMetadata>("fileattachmentid", AttributeTypeCode.Uniqueidentifier),
-                CreateAttributeMetadata<StringAttributeMetadata>("filename", AttributeTypeCode.String),
-                CreateAttributeMetadata<DateTimeAttributeMetadata>("createdon", AttributeTypeCode.DateTime),
-                CreateAttributeMetadata<BigIntAttributeMetadata>("filesizeinbytes", AttributeTypeCode.BigInt),
-                CreateAttributeMetadata<StringAttributeMetadata>("mimetype", AttributeTypeCode.String),
-                CreateAttributeMetadata<StringAttributeMetadata>("objecttypecode", AttributeTypeCode.String),
-                CreateAttributeMetadata<StringAttributeMetadata>("regardingfieldname", AttributeTypeCode.String),
-                CreateAttributeMetadata<LookupAttributeMetadata>("objectid", AttributeTypeCode.Lookup)
-            };
-
-            SetMetadataProperty(entityMetadata, "Attributes", attributes);
-            db.RegisterEntityMetadata(entityMetadata);
-        }
-
-        private static void SetMetadataProperty(object metadata, string propertyName, object value)
-        {
-            var property = metadata.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-            if (property != null && property.CanWrite)
-            {
-                property.SetValue(metadata, value);
-                return;
-            }
-
-            var field = metadata.GetType().GetField($"_{char.ToLower(propertyName[0])}{propertyName.Substring(1)}",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            field?.SetValue(metadata, value);
-        }
-
-        private static T CreateAttributeMetadata<T>(string logicalName, AttributeTypeCode typeCode) where T : AttributeMetadata, new()
-        {
-            var attribute = new T();
-            SetMetadataProperty(attribute, "LogicalName", logicalName);
-            SetMetadataProperty(attribute, "AttributeType", typeCode);
-            return attribute;
         }
 
         public void TriggerExtension(IOrganizationService service, OrganizationRequest request, Entity currentEntity,

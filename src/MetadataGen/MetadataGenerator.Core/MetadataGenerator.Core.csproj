@@ -1,12 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <RootNamespace>XrmMockup.MetadataGenerator.Core</RootNamespace>
     <AssemblyName>XrmMockup.MetadataGenerator.Core</AssemblyName>
-    <!-- Version set by CI from CHANGELOG.md -->
-    <Version>0.0.0</Version>
     <!-- Internal library, not published as NuGet -->
     <IsPackable>false</IsPackable>
   </PropertyGroup>
@@ -15,7 +10,7 @@
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="DataverseConnection" Version="1.1.1" />
+    <PackageReference Include="DataverseConnection" Version="1.2.5" />
     <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />

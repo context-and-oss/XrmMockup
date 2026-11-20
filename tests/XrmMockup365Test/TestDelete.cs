@@ -1,5 +1,4 @@
 ﻿using System;
-using DG.XrmContext;
 using System.ServiceModel;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
 using Xunit;

@@ -4,14 +4,13 @@ using Microsoft.Xrm.Sdk.Query;
 
 namespace XrmMockup.MetadataGenerator.Tool.Context;
 
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 public static class TableAttributeHelpers
 {
     /// <summary>
     /// Gets the logical column name for a property on the entity, using the AttributeLogicalNameAttribute if present.
     /// </summary>
     /// <typeparam name="T">Type of Entity</typeparam>
-    /// <param name="entity">Entity to get the column from</param>
     /// <param name="lambda">Expression to pick the column</param>
     /// <returns>Name of column</returns>
     /// <exception cref="ArgumentNullException">If no expression is provided</exception>

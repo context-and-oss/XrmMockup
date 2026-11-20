@@ -40,13 +40,14 @@ namespace DG.XrmMockupTest
             var evaluator = new FormulaFieldEvaluator(serviceFactory);
 
             var adminUserId = Guid.Parse("3b961284-cd7a-4fa3-af7e-89802e88dd5c");
-            var animal = Create(new dg_animal { dg_name = "Fluffy", OwnerId = new EntityReference(SystemUser.EntityLogicalName, adminUserId) });
-            var animalFood = Create(new dg_animalfood { dg_AnimalId = new EntityReference(dg_animal.EntityLogicalName, animal.Id), dg_name = "Meatballs" });
+            var parent = Create(new ctx_parent { ctx_Name = "Fluffy", OwnerId = new EntityReference(SystemUser.EntityLogicalName, adminUserId) });
+            var child = Create(new ctx_child { ctx_ParentId = new EntityReference(ctx_parent.EntityLogicalName, parent.Id), ctx_Name = "Meatballs" });
 
-            var result = await evaluator.Evaluate("\"Test: \" & dg_animalowner", animal, TimeSpan.Zero);
-            Assert.Equal("Test: Fluffy is a very good animal, and Admin loves them very much", result);
+            // ctx_TrimLeft is a Power Fx formula column defined as Mid(ctx_name, 3).
+            var result = await evaluator.Evaluate("\"Test: \" & Mid(ctx_name, 3)", parent, TimeSpan.Zero);
+            Assert.Equal("Test: uffy", result);
 
-            result = await evaluator.Evaluate("If(dg_AnimalId.dg_name = \"Fluffy\", \"Test: \" & dg_AnimalId.dg_name & \" eats \" & dg_name, \"New telegraph, who dis?\")", animalFood, TimeSpan.Zero);
+            result = await evaluator.Evaluate("If(ctx_ParentId.ctx_name = \"Fluffy\", \"Test: \" & ctx_ParentId.ctx_name & \" eats \" & ctx_name, \"New telegraph, who dis?\")", child, TimeSpan.Zero);
             Assert.Equal("Test: Fluffy eats Meatballs", result);
         }
 
@@ -54,28 +55,45 @@ namespace DG.XrmMockupTest
         [ClassData(typeof(FunctionCases))]
         public async TTask CanEvaluateFunction(string formula, object expected)
         {
-            var evaluator = new FormulaFieldEvaluator(serviceFactory);
-            var result = await evaluator.Evaluate(formula, new Account(), TimeSpan.Zero);
+            var previousCulture = CultureInfo.CurrentCulture;
+            var previousUiCulture = CultureInfo.CurrentUICulture;
 
-            if (result is ErrorValue error && expected is string errorString)
+            try
             {
-                var errorMessage = string.Join("\n", error.Errors.Select(e => e.Message));
-                Assert.Contains(errorString, errorMessage);
+                var culture = CultureInfo.GetCultureInfo("en-US");
+                CultureInfo.CurrentCulture = culture;
+                CultureInfo.CurrentUICulture = culture;
+                {
+                    var evaluator = new FormulaFieldEvaluator(serviceFactory);
+                    var result = await evaluator.Evaluate(formula, new Account(), TimeSpan.Zero);
+
+                    if (result is ErrorValue error && expected is string errorString)
+                    {
+                        var errorMessage = string.Join("\n", error.Errors.Select(e => e.Message));
+                        Assert.Contains(errorString, errorMessage);
+                    }
+                    else if (result is DateTime resultDateTime)
+                    {
+                        var expectedDateTime = (expected is DateTime dt)
+                            ? dt
+                            : (expected is "DateTime.Now")
+                                ? DateTime.Now
+                                : throw new InvalidOperationException("Expected value is not a DateTime or 'DateTime.Now'");
+                        Assert.Equal(expectedDateTime, resultDateTime, TimeSpan.FromSeconds(1));
+                    }
+                    else
+                    {
+                        Assert.Equal(expected, result);
+                    }
+                }
             }
-            else if (result is DateTime resultDateTime)
+            finally
             {
-                var expectedDateTime = (expected is DateTime dt)
-                    ? dt
-                    : (expected is "DateTime.Now")
-                        ? DateTime.Now
-                        : throw new InvalidOperationException("Expected value is not a DateTime or 'DateTime.Now'");
-                    Assert.Equal(expectedDateTime, resultDateTime, TimeSpan.FromSeconds(1));
-            }
-            else
-            {
-                Assert.Equal(expected, result);
+                CultureInfo.CurrentCulture = previousCulture;
+                CultureInfo.CurrentUICulture = previousUiCulture;
             }
         }
+
 
         [Theory]
         [ClassData(typeof(TextFunctionCases))]

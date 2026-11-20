@@ -25,6 +25,7 @@ public class OnlineMetadataSourceTests
     private readonly IOptionSetReader _optionSetReader;
     private readonly ICurrencyReader _currencyReader;
     private readonly IOrganizationReader _organizationReader;
+    private readonly IPrivilegeReader _privilegeReader;
     private readonly ILogger<OnlineMetadataSource> _logger;
 
     public OnlineMetadataSourceTests()
@@ -36,6 +37,7 @@ public class OnlineMetadataSourceTests
         _optionSetReader = Substitute.For<IOptionSetReader>();
         _currencyReader = Substitute.For<ICurrencyReader>();
         _organizationReader = Substitute.For<IOrganizationReader>();
+        _privilegeReader = Substitute.For<IPrivilegeReader>();
         _logger = Substitute.For<ILogger<OnlineMetadataSource>>();
 
         // Setup default mock returns
@@ -45,7 +47,7 @@ public class OnlineMetadataSourceTests
             .Returns([]);
         _workflowReader.GetWorkflowsAsync(Arg.Any<CancellationToken>())
             .Returns([]);
-        _securityRoleReader.GetSecurityRolesAsync(Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        _securityRoleReader.GetSecurityRolesAsync(Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<string[]?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns([]);
         _optionSetReader.GetOptionSetsAsync(Arg.Any<CancellationToken>())
             .Returns([]);
@@ -69,6 +71,7 @@ public class OnlineMetadataSourceTests
             _optionSetReader,
             _currencyReader,
             _organizationReader,
+            _privilegeReader,
             Options.Create(options),
             _logger);
     }
@@ -200,7 +203,7 @@ public class OnlineMetadataSourceTests
     [Fact]
     public async Task GetMetadataAsync_ReturnsMetadataSkeletonWithAllReaderResults()
     {
-        var entityMetadata = new Dictionary<string, EntityMetadata>
+        var entityMetadata = new SortedDictionary<string, EntityMetadata>
         {
             { "account", new EntityMetadata { LogicalName = "account" } }
         };
@@ -264,7 +267,7 @@ public class OnlineMetadataSourceTests
     {
         var rootBuId = Guid.NewGuid();
         var roles = new Dictionary<Guid, SecurityRole>();
-        _securityRoleReader.GetSecurityRolesAsync(Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+        _securityRoleReader.GetSecurityRolesAsync(Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<string[]?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(roles);
 
         var options = new GeneratorOptions { OutputDirectory = "/test", Solutions = [], Entities = [] };
@@ -276,7 +279,8 @@ public class OnlineMetadataSourceTests
         await _securityRoleReader.Received(1).GetSecurityRolesAsync(
             Arg.Is<Guid>(id => id == rootBuId),
             Arg.Any<string[]>(),
-            Arg.Any<string[]>(),
+            Arg.Any<string[]?>(),
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -298,7 +302,8 @@ public class OnlineMetadataSourceTests
         await _securityRoleReader.Received(1).GetSecurityRolesAsync(
             Arg.Any<Guid>(),
             Arg.Is<string[]>(s => s.SequenceEqual(solutions)),
-            Arg.Any<string[]>(),
+            Arg.Any<string[]?>(),
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -321,7 +326,8 @@ public class OnlineMetadataSourceTests
         await _securityRoleReader.Received(1).GetSecurityRolesAsync(
             Arg.Any<Guid>(),
             Arg.Any<string[]>(),
-            Arg.Is<string[]>(r => r.SequenceEqual(securityRoles)),
+            Arg.Is<string[]?>(r => r != null && r.SequenceEqual(securityRoles)),
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -345,7 +351,8 @@ public class OnlineMetadataSourceTests
         await _securityRoleReader.Received(1).GetSecurityRolesAsync(
             Arg.Is<Guid>(id => id == rootBuId),
             Arg.Is<string[]>(s => s.SequenceEqual(solutions)),
-            Arg.Is<string[]>(r => r.SequenceEqual(securityRoles)),
+            Arg.Is<string[]?>(r => r != null && r.SequenceEqual(securityRoles)),
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -367,7 +374,8 @@ public class OnlineMetadataSourceTests
         await _securityRoleReader.Received(1).GetSecurityRolesAsync(
             Arg.Is<Guid>(id => id == rootBuId),
             Arg.Is<string[]>(s => s.Length == 0),
-            Arg.Is<string[]>(r => r.Length == 0),
+            Arg.Is<string[]?>(r => r != null && r.Length == 0),
+            Arg.Any<bool>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -384,5 +392,17 @@ public class OnlineMetadataSourceTests
             Arg.Any<string[]>(),
             Arg.Any<string[]>(),
             Arg.Is<CancellationToken>(ct => ct == cts.Token));
+    }
+
+    [Fact]
+    public async Task GetPrivilegeCatalogAsync_ReturnsCatalogFromReader()
+    {
+        var catalog = new PrivilegeCatalog { Privileges = [], CustomApis = [] };
+        _privilegeReader.GetPrivilegeCatalogAsync(Arg.Any<CancellationToken>()).Returns(catalog);
+        var source = CreateSource(new GeneratorOptions { OutputDirectory = "/test", Solutions = [], Entities = [] });
+
+        var result = await source.GetPrivilegeCatalogAsync();
+
+        Assert.Same(catalog, result);
     }
 }

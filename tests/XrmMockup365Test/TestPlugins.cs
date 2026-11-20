@@ -6,6 +6,7 @@ using DG.Tools.XrmMockup;
 using Microsoft.Xrm.Sdk;
 using Xunit;
 using TestPluginAssembly365.Plugins.LegacyDaxif;
+using DG.Some.Namespace;
 
 namespace DG.XrmMockupTest
 {
@@ -16,8 +17,8 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestImpersonatingUserIds()
         {
-            var user1 = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, SecurityRoles.Salesperson); 
-            var user2 = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, SecurityRoles.Salesperson);
+            var user1 = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestUser); 
+            var user2 = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestUser);
 
             var user1Service = crm.CreateOrganizationService(user1.Id);
 
@@ -113,6 +114,58 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
+        public void TestSystemFieldsAbsentFromPreStageTargetOnCreate()
+        {
+            // Matches Dataverse: system-managed fields the caller did not set must not appear in the
+            // Target during the PreValidation/PreOperation stages.
+            var contact = new Contact { FirstName = ContactSystemFieldsProbePlugin.Marker };
+            contact.Id = orgAdminService.Create(contact);
+
+            var probed = Contact.Retrieve(orgAdminService, contact.Id,
+                x => x.Address1_Line1, x => x.Address1_Line2);
+
+            // Empty flag strings are normalised to null on create, confirming no system fields were present.
+            Assert.True(string.IsNullOrEmpty(probed.Address1_Line1)); // PreValidation Target
+            Assert.True(string.IsNullOrEmpty(probed.Address1_Line2)); // PreOperation Target
+        }
+
+        [Fact]
+        public void TestCallerSetOwnerVisibleInPreStageTargetOnCreate()
+        {
+            // A system field the caller DID set stays visible in the pre-stage Target.
+            var contact = new Contact
+            {
+                FirstName = ContactSystemFieldsProbePlugin.Marker,
+                OwnerId = testUser1.ToEntityReference(),
+            };
+            contact.Id = orgAdminService.Create(contact);
+
+            var probed = Contact.Retrieve(orgAdminService, contact.Id,
+                x => x.Address1_Line1, x => x.Address1_Line2);
+
+            Assert.Contains("ownerid", probed.Address1_Line1);         // PreValidation Target
+            Assert.Contains("ownerid", probed.Address1_Line2);         // PreOperation Target
+            Assert.DoesNotContain("createdon", probed.Address1_Line1); // still resolved later
+        }
+
+        [Fact]
+        public void TestSystemFieldsPresentInPostImageAndPostTargetOnCreate()
+        {
+            var contact = new Contact { FirstName = ContactSystemFieldsProbePlugin.Marker };
+            contact.Id = orgAdminService.Create(contact);
+
+            var probed = Contact.Retrieve(orgAdminService, contact.Id,
+                x => x.Address1_Line3, x => x.Address1_City);
+
+            foreach (var field in new[]
+                { "ownerid", "createdon", "createdby", "modifiedon", "modifiedby", "statecode", "statuscode" })
+            {
+                Assert.Contains(field, probed.Address1_Line3); // post-image
+                Assert.Contains(field, probed.Address1_City);  // post-operation Target
+            }
+        }
+
+        [Fact]
         public void TestPluginTrigger()
         {
             using (var context = new Xrm(orgAdminUIService))
@@ -120,8 +173,9 @@ namespace DG.XrmMockupTest
                 var acc = new Account();
                 orgAdminUIService.Create(acc);
 
-                var leads = context.LeadSet.ToList();
-                Assert.True(leads.Count > 0);
+                // AccountPostPlugin / LegacyAccountPlugin create ctx_parent records (migrated from Lead).
+                var created = context.ctx_parentSet.ToList();
+                Assert.True(created.Count > 0);
             }
         }
 
@@ -183,11 +237,12 @@ namespace DG.XrmMockupTest
             var createdAccount = Account.Retrieve(orgAdminUIService, id);
             Assert.Equal("TestAccount", createdAccount.Name);
 
-            // Check if the plugin executed
+            // Check if the plugin executed (LegacyAccountPlugin creates a ctx_parent, migrated from Lead;
+            // ParentAccountId -> ctx_AccountId, Subject -> ctx_Name).
             using (var xrm = new Xrm(orgAdminService))
             {
-                var createdLead = xrm.LeadSet.Single(l => l.ParentAccountId != null && l.ParentAccountId.Id == id && l.Subject.StartsWith(nameof(LegacyAccountPlugin)));
-                Assert.StartsWith(nameof(LegacyAccountPlugin) + " Create: Some new lead ", createdLead.Subject);
+                var createdParent = xrm.ctx_parentSet.Single(p => p.ctx_AccountId != null && p.ctx_AccountId.Id == id && p.ctx_Name.StartsWith(nameof(LegacyAccountPlugin)));
+                Assert.StartsWith(nameof(LegacyAccountPlugin) + " Create: Some new lead ", createdParent.ctx_Name);
             }
         }
 
@@ -205,20 +260,66 @@ namespace DG.XrmMockupTest
             var updatedAccount = Account.Retrieve(orgAdminUIService, id);
             Assert.Equal("UpdatedAccount", updatedAccount.Name);
 
-            // Check if the plugin executed
+            // Check if the plugin executed (LegacyAccountPlugin now creates Email records, migrated from
+            // Lead): one on Create and one on Update, both regarding the account.
             using (var xrm = new Xrm(orgAdminService))
             {
-                var createdLead = xrm.LeadSet
-                    .Where(l => l.ParentAccountId != null
-                        && l.ParentAccountId.Id == id
-                        && l.Subject.StartsWith(nameof(LegacyAccountPlugin)))
+                var createdParents = xrm.ctx_parentSet
+                    .Where(p => p.ctx_AccountId != null
+                        && p.ctx_AccountId.Id == id
+                        && p.ctx_Name.StartsWith(nameof(LegacyAccountPlugin)))
                     .ToList();
 
-                Assert.Collection(createdLead,
-                    lead => Assert.StartsWith(nameof(LegacyAccountPlugin) + " Create: Some new lead ", lead.Subject),
-                    lead => Assert.StartsWith(nameof(LegacyAccountPlugin) + " Update: Some new lead ", lead.Subject)
+                Assert.Collection(createdParents,
+                    p => Assert.StartsWith(nameof(LegacyAccountPlugin) + " Create: Some new lead ", p.ctx_Name),
+                    p => Assert.StartsWith(nameof(LegacyAccountPlugin) + " Update: Some new lead ", p.ctx_Name)
                 );
             }
+        }
+
+        [Fact]
+        public void TestDeleteTargetInPostUpdatePlugin()
+        {
+            crm.DisableRegisteredPlugins(true);
+            crm.RegisterAdditionalPlugins(DG.Tools.XrmMockup.PluginRegistrationScope.Temporary, typeof(DG.Some.Namespace.AccountDeleteInPostPlugin));
+
+            var account = new Account { Name = "DeleteMe" };
+            account.Id = orgAdminService.Create(account);
+
+            // Update triggers AccountDeleteInPostPlugin which deletes the account — should not throw
+            var update = new Account { Id = account.Id, Name = "Updated" };
+            orgAdminService.Update(update);
+
+            // Verify the account was actually deleted by the plugin
+            var retrieved = orgAdminService.RetrieveMultiple(
+                new QueryExpression(Account.EntityLogicalName)
+                {
+                    Criteria = new FilterExpression
+                    {
+                        Conditions =
+                        {
+                            new ConditionExpression("accountid", ConditionOperator.Equal, account.Id)
+                        }
+                    }
+                });
+            Assert.Empty(retrieved.Entities);
+        }
+
+        [Fact]
+        public void TestTagIsSharedVariableInAllStages()
+        {
+            crm.RegisterAdditionalPlugins(PluginRegistrationScope.Temporary, typeof(AccountTagPlugin));
+            crm.ClearTraceLog();
+
+            orgAdminService.Execute(new Microsoft.Xrm.Sdk.Messages.CreateRequest
+            {
+                Target = new Account { Name = "Tagged" },
+                ["tag"] = "my tag",
+            });
+
+            Assert.Contains("Stage 10: tag=my tag, inInputParameters=False", crm.TraceLog);
+            Assert.Contains("Stage 20: tag=my tag, inInputParameters=False", crm.TraceLog);
+            Assert.Contains("Stage 40: tag=my tag, inInputParameters=False", crm.TraceLog);
         }
     }
 }

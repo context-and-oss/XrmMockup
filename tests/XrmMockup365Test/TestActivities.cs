@@ -21,8 +21,8 @@ namespace DG.XrmMockupTest
             {
                 Subject = "subject",
                 Description = "description",
-                From = senderList,
-                To = receivingList
+                from = senderList,
+                to = receivingList
             };
             Guid emailId = orgAdminService.Create(email);
             Assert.NotEqual(Guid.Empty, emailId);
@@ -37,8 +37,8 @@ namespace DG.XrmMockupTest
             {
                 Subject = "subject",
                 Description = "description",
-                From = senderList,
-                To = receivingList
+                from = senderList,
+                to = receivingList
             };
             email.Id = orgAdminService.Create(email);
 
@@ -66,17 +66,12 @@ namespace DG.XrmMockupTest
         }
 
         [Theory]
-        [InlineData("appointment", 4201)]
+        // Trimmed to the activity entities present in the regenerated metadata. The others
+        // (appointment, incidentresolution, letter, opportunityclose, phonecall, serviceappointment,
+        // campaignresponse, campaignactivity) are not available in the environment.
         [InlineData("email", 4202)]
         [InlineData("fax", 4204)]
-        [InlineData("incidentresolution", 4206)]
-        [InlineData("letter", 4207)]
-        [InlineData("opportunityclose", 4208)]
-        [InlineData("phonecall", 4210)]
         [InlineData("task", 4212)]
-        [InlineData("serviceappointment", 4214)]
-        [InlineData("campaignresponse", 4401)]
-        [InlineData("campaignactivity", 4402)]
         public void TestActivityPointer_Create_SystemActivities(string entityName, int activityTypeCode)
         {
             var entity = new Entity(entityName)
@@ -96,17 +91,12 @@ namespace DG.XrmMockupTest
         }
 
         [Theory]
-        [InlineData("appointment", 4201)]
+        // Trimmed to the activity entities present in the regenerated metadata. The others
+        // (appointment, incidentresolution, letter, opportunityclose, phonecall, serviceappointment,
+        // campaignresponse, campaignactivity) are not available in the environment.
         [InlineData("email", 4202)]
         [InlineData("fax", 4204)]
-        [InlineData("incidentresolution", 4206)]
-        [InlineData("letter", 4207)]
-        [InlineData("opportunityclose", 4208)]
-        [InlineData("phonecall", 4210)]
         [InlineData("task", 4212)]
-        [InlineData("serviceappointment", 4214)]
-        [InlineData("campaignresponse", 4401)]
-        [InlineData("campaignactivity", 4402)]
         public void TestActivityPointer_Update_SystemActivities(string entityName, int activityTypeCode)
         {
             var entity = new Entity(entityName)

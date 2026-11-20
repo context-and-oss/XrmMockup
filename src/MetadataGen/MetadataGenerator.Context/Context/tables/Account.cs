@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Business that represents a customer or potential customer. The company that is billed in business transactions.</para>
 /// <para>Display Name: Account</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("account")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -67,9 +67,9 @@ public partial class Account : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("accountid")]
     [DisplayName("Account")]
-    public Guid AccountId
+    public Guid? AccountId
     {
-        get => GetAttributeValue<Guid>("accountid");
+        get => GetAttributeValue<Guid?>("accountid");
         set => SetId("accountid", value);
     }
 
@@ -1924,6 +1924,14 @@ public partial class Account : ExtendedEntity
     {
         get => GetRelatedEntities<Contact>("contact_customer_accounts", null);
         set => SetRelatedEntities("contact_customer_accounts", null, value);
+    }
+
+    [RelationshipSchemaName("ctx_account_contact")]
+    [RelationshipMetadata("ManyToMany", "accountid", "contact", "contactid", "Entity1")]
+    public IEnumerable<Contact> ctx_account_contact
+    {
+        get => GetRelatedEntities<Contact>("ctx_account_contact", null);
+        set => SetRelatedEntities("ctx_account_contact", null, value);
     }
 
     [AttributeLogicalName("createdby")]

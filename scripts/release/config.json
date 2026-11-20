@@ -1,0 +1,36 @@
+{
+  "historyBaseline": "6e689d959b9013e2318320e9c317449d0de02c2d",
+  "products": {
+    "core": {
+      "packageId": "XrmMockup365",
+      "project": "src/XrmMockup365/XrmMockup365.csproj",
+      "changelog": "RELEASE_NOTES.md",
+      "versionProperty": "CoreReleaseVersion",
+      "notesProperty": "CoreReleaseNotesPath",
+      "baselineVersion": "1.20.2"
+    },
+    "metadata": {
+      "packageId": "XrmMockup.MetadataGenerator",
+      "project": "src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj",
+      "changelog": "src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md",
+      "versionProperty": "MetadataReleaseVersion",
+      "notesProperty": "MetadataReleaseNotesPath",
+      "baselineVersion": "1.2.0"
+    },
+    "permissions": {
+      "packageId": "XrmMockup.PermissionAnalyzer",
+      "project": "src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj",
+      "changelog": "src/PermissionAnalyzer/PermissionAnalyzer.Tool/CHANGELOG.md",
+      "versionProperty": "PermissionsReleaseVersion",
+      "notesProperty": "PermissionsReleaseNotesPath",
+      "baselineVersion": "1.0.0-rc.1"
+    }
+  },
+  "categories": {
+    "change:feature": "Add",
+    "change:fix": "Fix",
+    "change:change": "Change",
+    "change:breaking": "Breaking",
+    "change:chore": "Chore"
+  }
+}

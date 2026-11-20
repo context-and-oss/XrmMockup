@@ -73,8 +73,8 @@ namespace DG.Tools.XrmMockup {
                 {
                     // Create a new cache entry using the existing instance's data
                     cache = new StaticMetadataCache(
-                        xrmMockup.Metadata, 
-                        xrmMockup.Workflows, 
+                        xrmMockup.Metadata,
+                        xrmMockup.Workflows,
                         xrmMockup.SecurityRoles,
                         new Dictionary<string, Type>(), // Will be rebuilt if needed
                         xrmMockup.BaseCurrency,

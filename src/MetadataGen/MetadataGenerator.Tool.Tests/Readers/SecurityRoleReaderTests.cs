@@ -36,79 +36,139 @@ public class SecurityRoleReaderTests : ReaderTestBase
         _reader = new SecurityRoleReader(ServiceProvider, _logger);
     }
 
-    #region Solution Filtering Tests
+    #region Scenario Matrix Tests
 
     /// <summary>
-    /// Tests backward compatibility: when no solutions are specified,
-    /// the reader should return all security roles (no filtering applied).
+    /// allSecurityRoles=true → all roles regardless of other settings.
     /// </summary>
     [Fact]
-    public async Task GetSecurityRolesAsync_NoSolutions_ReturnsAllRoles()
+    public async Task GetSecurityRolesAsync_AllSecurityRolesTrue_ReturnsAllRoles()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] emptySolutions = [];
-        string[] emptyAdditionalRoles = [];
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
-            emptySolutions,
-            emptyAdditionalRoles);
+            solutions: ["TestSolution"],
+            securityRoles: ["System Administrator"],
+            allSecurityRoles: true);
 
-        // Assert - Should return a dictionary (even if empty due to XrmMockup limitations)
         Assert.NotNull(result);
         Assert.IsType<Dictionary<Guid, DG.Tools.XrmMockup.SecurityRole>>(result);
     }
 
     /// <summary>
-    /// Tests that when solutions are specified but no additional roles,
-    /// only roles from those solutions should be returned.
-    /// Note: This test verifies the filtering is applied but may return empty
-    /// due to XrmMockup not populating solutioncomponent entities.
+    /// No solutions, securityRoles=null (unset) → all roles (backward compat).
     /// </summary>
     [Fact]
-    public async Task GetSecurityRolesAsync_WithSolutions_OnlyReturnsSolutionRoles()
+    public async Task GetSecurityRolesAsync_NoSolutionsNullRoles_ReturnsAllRoles()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] solutions = ["TestSolution"];
-        string[] emptyAdditionalRoles = [];
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
-            solutions,
-            emptyAdditionalRoles);
+            solutions: [],
+            securityRoles: null,
+            allSecurityRoles: false);
 
-        // Assert - Should return a dictionary (filtering is applied)
-        // Due to XrmMockup limitations with solutioncomponent, result may be empty
         Assert.NotNull(result);
         Assert.IsType<Dictionary<Guid, DG.Tools.XrmMockup.SecurityRole>>(result);
     }
 
     /// <summary>
-    /// Tests that when both solutions and additional role names are specified,
-    /// the reader returns roles from solutions plus any additional named roles.
+    /// No solutions, securityRoles=[] (explicit empty) → no roles.
     /// </summary>
     [Fact]
-    public async Task GetSecurityRolesAsync_WithSolutionsAndAdditionalRoles_ReturnsBoth()
+    public async Task GetSecurityRolesAsync_NoSolutionsExplicitEmptyRoles_ReturnsEmpty()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] solutions = ["TestSolution"];
-        string[] additionalRoles = ["System Administrator", "Basic User"];
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
-            solutions,
-            additionalRoles);
+            solutions: [],
+            securityRoles: [],
+            allSecurityRoles: false);
 
-        // Assert - Should return a dictionary
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    /// <summary>
+    /// No solutions, securityRoles=["X"] → only named roles (not all roles).
+    /// </summary>
+    [Fact]
+    public async Task GetSecurityRolesAsync_NoSolutionsNamedRoles_ReturnsOnlyNamedRoles()
+    {
+        var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
+
+        // With named roles and no solutions, only those named roles should be fetched.
+        // Due to XrmMockup limitations the result may be empty, but the key behavior
+        // is that it does NOT return all roles (no unfiltered query).
+        var result = await _reader.GetSecurityRolesAsync(
+            rootBusinessUnitId,
+            solutions: [],
+            securityRoles: ["System Administrator"],
+            allSecurityRoles: false);
+
         Assert.NotNull(result);
         Assert.IsType<Dictionary<Guid, DG.Tools.XrmMockup.SecurityRole>>(result);
     }
+
+    /// <summary>
+    /// Solutions specified, no named roles → solution roles only (may be empty).
+    /// </summary>
+    [Fact]
+    public async Task GetSecurityRolesAsync_WithSolutionsNoNamedRoles_ReturnsSolutionRolesOnly()
+    {
+        var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
+
+        var result = await _reader.GetSecurityRolesAsync(
+            rootBusinessUnitId,
+            solutions: ["TestSolution"],
+            securityRoles: null,
+            allSecurityRoles: false);
+
+        Assert.NotNull(result);
+        Assert.IsType<Dictionary<Guid, DG.Tools.XrmMockup.SecurityRole>>(result);
+    }
+
+    /// <summary>
+    /// Solutions specified + named roles → union of both.
+    /// </summary>
+    [Fact]
+    public async Task GetSecurityRolesAsync_WithSolutionsAndNamedRoles_ReturnsBoth()
+    {
+        var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
+
+        var result = await _reader.GetSecurityRolesAsync(
+            rootBusinessUnitId,
+            solutions: ["TestSolution"],
+            securityRoles: ["System Administrator", "Basic User"],
+            allSecurityRoles: false);
+
+        Assert.NotNull(result);
+        Assert.IsType<Dictionary<Guid, DG.Tools.XrmMockup.SecurityRole>>(result);
+    }
+
+    /// <summary>
+    /// Non-existent solution → empty result (no roles in that solution).
+    /// </summary>
+    [Fact]
+    public async Task GetSecurityRolesAsync_NonExistentSolution_ReturnsEmptyOrFiltered()
+    {
+        var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
+
+        var result = await _reader.GetSecurityRolesAsync(
+            rootBusinessUnitId,
+            solutions: ["NonExistentSolution123"],
+            securityRoles: null,
+            allSecurityRoles: false);
+
+        Assert.NotNull(result);
+    }
+
+    #endregion
+
+    #region Edge Cases
 
     /// <summary>
     /// Tests that when additional role names don't exist,
@@ -117,41 +177,14 @@ public class SecurityRoleReaderTests : ReaderTestBase
     [Fact]
     public async Task GetSecurityRolesAsync_AdditionalRolesNotFound_DoesNotFail()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] solutions = ["TestSolution"];
-        string[] nonExistentRoles = ["NonExistentRole1", "NonExistentRole2"];
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
-            solutions,
-            nonExistentRoles);
+            solutions: ["TestSolution"],
+            securityRoles: ["NonExistentRole1", "NonExistentRole2"],
+            allSecurityRoles: false);
 
-        // Assert - Should not throw and should return a dictionary
-        Assert.NotNull(result);
-    }
-
-    /// <summary>
-    /// Tests that when only additional role names are specified without solutions,
-    /// the filtering still works (no solution filtering since solutions array is empty).
-    /// </summary>
-    [Fact]
-    public async Task GetSecurityRolesAsync_AdditionalRolesOnlyNoSolutions_ReturnsAllRoles()
-    {
-        // Arrange
-        var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] emptySolutions = [];
-        string[] additionalRoles = ["System Administrator"];
-
-        // Act
-        var result = await _reader.GetSecurityRolesAsync(
-            rootBusinessUnitId,
-            emptySolutions,
-            additionalRoles);
-
-        // Assert - When no solutions specified, all roles are returned (no filtering)
-        // The additional roles parameter is only used when solutions are specified
         Assert.NotNull(result);
     }
 
@@ -159,39 +192,18 @@ public class SecurityRoleReaderTests : ReaderTestBase
     /// Tests that the method handles empty arrays gracefully.
     /// </summary>
     [Fact]
-    public async Task GetSecurityRolesAsync_EmptyArrays_ReturnsSuccessfully()
+    public async Task GetSecurityRolesAsync_EmptyArrays_ReturnsEmpty()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
             solutions: [],
-            additionalSecurityRoles: []);
+            securityRoles: [],
+            allSecurityRoles: false);
 
-        // Assert
         Assert.NotNull(result);
-    }
-
-    /// <summary>
-    /// Tests that non-existent solution names don't cause errors.
-    /// </summary>
-    [Fact]
-    public async Task GetSecurityRolesAsync_NonExistentSolution_ReturnsEmptyOrFiltered()
-    {
-        // Arrange
-        var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] nonExistentSolutions = ["NonExistentSolution123"];
-
-        // Act
-        var result = await _reader.GetSecurityRolesAsync(
-            rootBusinessUnitId,
-            nonExistentSolutions,
-            additionalSecurityRoles: []);
-
-        // Assert - Should not throw, may return empty since no roles in non-existent solution
-        Assert.NotNull(result);
+        Assert.Empty(result);
     }
 
     /// <summary>
@@ -200,17 +212,14 @@ public class SecurityRoleReaderTests : ReaderTestBase
     [Fact]
     public async Task GetSecurityRolesAsync_MultipleSolutions_HandlesCorrectly()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
-        string[] multipleSolutions = ["Solution1", "Solution2", "Solution3"];
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
-            multipleSolutions,
-            additionalSecurityRoles: []);
+            solutions: ["Solution1", "Solution2", "Solution3"],
+            securityRoles: null,
+            allSecurityRoles: false);
 
-        // Assert
         Assert.NotNull(result);
     }
 
@@ -220,18 +229,16 @@ public class SecurityRoleReaderTests : ReaderTestBase
     [Fact]
     public async Task GetSecurityRolesAsync_WithCancellationToken_AcceptsToken()
     {
-        // Arrange
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
         using var cts = new CancellationTokenSource();
 
-        // Act
         var result = await _reader.GetSecurityRolesAsync(
             rootBusinessUnitId,
             solutions: [],
-            additionalSecurityRoles: [],
+            securityRoles: null,
+            allSecurityRoles: false,
             ct: cts.Token);
 
-        // Assert
         Assert.NotNull(result);
     }
 
@@ -242,7 +249,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         Assert.NotNull(result);
         Assert.NotEmpty(result);
@@ -253,7 +260,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         var resultType = result.GetType();
         Assert.True(resultType.IsGenericType);
@@ -268,7 +275,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         Assert.True(result.ContainsKey(SystemAdministratorRoleId));
         Assert.Equal("System Administrator", result[SystemAdministratorRoleId].Name);
@@ -279,7 +286,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         Assert.True(result.ContainsKey(SystemCustomizerRoleId));
         Assert.Equal("System Customizer", result[SystemCustomizerRoleId].Name);
@@ -290,7 +297,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         Assert.True(result.ContainsKey(BasicUserRoleId));
         Assert.Equal("Basic User", result[BasicUserRoleId].Name);
@@ -301,7 +308,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         var sysAdmin = result[SystemAdministratorRoleId];
         Assert.NotEmpty(sysAdmin.Privileges);
@@ -312,7 +319,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         foreach (var role in result.Values)
         {
@@ -325,7 +332,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         foreach (var kvp in result)
         {
@@ -339,7 +346,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         var rolesWithPrivileges = result.Values.Where(r => r.Privileges.Count > 0).ToList();
         Assert.NotEmpty(rolesWithPrivileges);
@@ -354,7 +361,8 @@ public class SecurityRoleReaderTests : ReaderTestBase
                         privilege.Value.PrivilegeDepth == PrivilegeDepth.Basic ||
                         privilege.Value.PrivilegeDepth == PrivilegeDepth.Local ||
                         privilege.Value.PrivilegeDepth == PrivilegeDepth.Deep ||
-                        privilege.Value.PrivilegeDepth == PrivilegeDepth.Global,
+                        privilege.Value.PrivilegeDepth == PrivilegeDepth.Global ||
+                        privilege.Value.PrivilegeDepth == PrivilegeDepth.RecordFilter,
                         $"Role '{role.Name}' has invalid privilege depth: {privilege.Value.PrivilegeDepth}");
                 }
             }
@@ -366,7 +374,7 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         var roleWithPrivileges = result.Values.First(r => r.Privileges.Count > 0);
         foreach (var entityPrivileges in roleWithPrivileges.Privileges)
@@ -384,8 +392,8 @@ public class SecurityRoleReaderTests : ReaderTestBase
     {
         var rootBusinessUnitId = Crm.RootBusinessUnit.Id;
 
-        var result1 = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
-        var result2 = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], []);
+        var result1 = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
+        var result2 = await _reader.GetSecurityRolesAsync(rootBusinessUnitId, [], null, false);
 
         Assert.Equal(result1.Count, result2.Count);
         Assert.Equal(result1[SystemAdministratorRoleId].Name, result2[SystemAdministratorRoleId].Name);

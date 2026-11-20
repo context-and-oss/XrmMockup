@@ -1,17 +1,20 @@
-# Local pack script for XrmMockup packages
-# Sets versions from changelogs and creates NuGet packages locally
+param(
+    [string]$Output = './nupkg',
+    [string]$Configuration = 'Release',
+    [string]$CoreVersion = '0.0.0-dev',
+    [string]$MetadataVersion = '0.0.0-dev',
+    [string]$PermissionsVersion = '0.0.0-dev'
+)
 
-# Set XrmMockup365 version from RELEASE_NOTES.md
-./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./RELEASE_NOTES.md -CsprojPath ./src/XrmMockup365/XrmMockup365.csproj
+# Local packaging is a preview only: no changelog writes, release state, or credentials.
+$ErrorActionPreference = 'Stop'
+$versionArgs = @("-p:CoreReleaseVersion=$CoreVersion", "-p:MetadataReleaseVersion=$MetadataVersion", "-p:PermissionsReleaseVersion=$PermissionsVersion")
+dotnet build --configuration $Configuration @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Set MetadataGenerator versions from CHANGELOG.md
-./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -CsprojPath ./src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj
-./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -CsprojPath ./src/MetadataGen/MetadataGenerator.Core/MetadataGenerator.Core.csproj
-./scripts/Set-VersionFromChangelog.ps1 -ChangelogPath ./src/MetadataGen/MetadataGenerator.Tool/CHANGELOG.md -CsprojPath ./src/MetadataGen/MetadataGenerator.Context/MetadataGenerator.Context.csproj
-
-# Build
-dotnet build --configuration Release
-
-# Pack specific projects (not the entire solution to avoid legacy project errors)
-dotnet pack ./src/XrmMockup365/XrmMockup365.csproj --configuration Release --no-build --output ./nupkg
-dotnet pack ./src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj --configuration Release --no-build --output ./nupkg
+dotnet pack './src/XrmMockup365/XrmMockup365.csproj' --configuration $Configuration --no-build --output $Output @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+dotnet pack './src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj' --configuration $Configuration --no-build --output $Output @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+dotnet pack './src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj' --configuration $Configuration --no-build --output $Output @versionArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

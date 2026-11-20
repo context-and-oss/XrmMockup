@@ -19,6 +19,18 @@ namespace DG.Tools.XrmMockup
         internal override OrganizationResponse Execute(OrganizationRequest orgRequest, EntityReference userRef)
         {
             var request = MakeRequest<UpsertMultipleRequest>(orgRequest);
+
+            if (string.IsNullOrEmpty(request.Targets.EntityName))
+            {
+                throw new FaultException("The required field 'EntityName' is missing.");
+            }
+
+            var mismatchedEntity = request.Targets.Entities.FirstOrDefault(e => e.LogicalName != request.Targets.EntityName);
+            if (mismatchedEntity != null)
+            {
+                throw new FaultException($"The entity logical name '{mismatchedEntity.LogicalName}' does not match the expected entity logical name '{request.Targets.EntityName}'.");
+            }
+
             var seenIds = new HashSet<Guid>();
 
             var results = request.Targets.Entities.Select(entity =>

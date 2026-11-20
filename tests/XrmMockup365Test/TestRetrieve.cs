@@ -76,10 +76,13 @@ namespace DG.XrmMockupTest
                 entity = (Account)orgAdminUIService.Retrieve(Account.EntityLogicalName, _accountId, new ColumnSet("name"));
                 Assert.Equal(_accountId, entity.Id);
 
-                var calId = orgAdminUIService.Create(new Entity("calendar"));
-                var cal = orgAdminUIService.Retrieve("calendar", calId, new ColumnSet(true));
+                // Substituted calendar (not in the leaned environment) with ctx_parent: same check —
+                // an entity created with no attributes, retrieved with ColumnSet(true) and with a
+                // single lookup-only column, still has its Id populated on the returned entity.
+                var calId = orgAdminUIService.Create(new Entity("ctx_parent"));
+                var cal = orgAdminUIService.Retrieve("ctx_parent", calId, new ColumnSet(true));
                 Assert.Equal(calId, cal.Id);
-                cal = orgAdminUIService.Retrieve("calendar", calId, new ColumnSet("createdby"));
+                cal = orgAdminUIService.Retrieve("ctx_parent", calId, new ColumnSet("createdby"));
                 Assert.Equal(calId, cal.Id);
 
             }
@@ -205,20 +208,22 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                var invoice = new Invoice()
+                // Migrated from Invoice -> Account (Invoice not available); Invoice.TotalAmount -> Account.Revenue.
+                // Exercises retrieving a money attribute with/without its transactioncurrencyid column.
+                var invoice = new Account()
                 {
                     Name = "test",
-                    TotalAmount = 10m,
+                    Revenue = 10m,
                 };
                 invoice.Id = orgGodService.Create(invoice);
 
-                var retrievedSucceeds = orgAdminService.Retrieve(Invoice.EntityLogicalName, invoice.Id, new ColumnSet("totalamount", "transactioncurrencyid")) as Invoice;
-                Assert.NotNull(retrievedSucceeds.TotalAmount);
-                Assert.Equal(10m, retrievedSucceeds.TotalAmount.Value);
+                var retrievedSucceeds = orgAdminService.Retrieve(Account.EntityLogicalName, invoice.Id, new ColumnSet("revenue", "transactioncurrencyid")) as Account;
+                Assert.NotNull(retrievedSucceeds.Revenue);
+                Assert.Equal(10m, retrievedSucceeds.Revenue.Value);
 
-                var retrievedFails = orgAdminService.Retrieve(Invoice.EntityLogicalName, invoice.Id, new ColumnSet("totalamount")) as Invoice;
-                Assert.NotNull(retrievedSucceeds.TotalAmount);
-                Assert.Equal(10m, retrievedSucceeds.TotalAmount.Value);
+                var retrievedFails = orgAdminService.Retrieve(Account.EntityLogicalName, invoice.Id, new ColumnSet("revenue")) as Account;
+                Assert.NotNull(retrievedSucceeds.Revenue);
+                Assert.Equal(10m, retrievedSucceeds.Revenue.Value);
             }
         }
 
@@ -227,30 +232,34 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                var invoice = new Invoice()
+                // Migrated from Invoice -> Account (Invoice not available); Invoice.PriorityCode ->
+                // Account.AccountRatingCode (its DefaultValue option is labelled "Default Value").
+                var invoice = new Account()
                 {
                     Name = "test",
-                    PriorityCode = Invoice_PriorityCode.DefaultValue,
+                    AccountRatingCode = account_accountratingcode.DefaultValue,
                 };
                 invoice.Id = orgAdminUIService.Create(invoice);
 
-                var retrieved = context.InvoiceSet.FirstOrDefault();
-                Assert.Equal("Default Value", retrieved.FormattedValues["prioritycode"]);
+                var retrieved = context.AccountSet.FirstOrDefault();
+                Assert.Equal("Default Value", retrieved.FormattedValues["accountratingcode"]);
             }
         }
 
         [Fact]
         public void TestFormattedValuesRetrieve()
         {
-            var invoice = new Invoice()
+            // Migrated from Invoice -> Account (Invoice not available); Invoice.PriorityCode ->
+            // Account.AccountRatingCode (its DefaultValue option is labelled "Default Value").
+            var invoice = new Account()
             {
                 Name = "test",
-                PriorityCode = Invoice_PriorityCode.DefaultValue,
+                AccountRatingCode = account_accountratingcode.DefaultValue,
             };
             invoice.Id = orgAdminUIService.Create(invoice);
 
-            var retrieved = orgAdminUIService.Retrieve(Invoice.EntityLogicalName, invoice.Id, new ColumnSet(true));
-            Assert.Equal("Default Value", retrieved.FormattedValues["prioritycode"]);
+            var retrieved = orgAdminUIService.Retrieve(Account.EntityLogicalName, invoice.Id, new ColumnSet(true));
+            Assert.Equal("Default Value", retrieved.FormattedValues["accountratingcode"]);
         }
 
         [Fact]
@@ -281,8 +290,8 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminUIService))
             {
-                var id1 = this.orgAdminUIService.Create(new dg_animal());
-                dg_animal.Retrieve(orgAdminService, id1, x => x.dg_EmptyCalculatedField);
+                var id1 = this.orgAdminUIService.Create(new ctx_parent());
+                ctx_parent.Retrieve(orgAdminService, id1, x => x.ctx_AmountCalc);
             }
         }
 
@@ -290,16 +299,19 @@ namespace DG.XrmMockupTest
         public void TestFormulaFields()
         {
             var adminUserId = Guid.Parse("3b961284-cd7a-4fa3-af7e-89802e88dd5c");
-            var animalId = orgAdminService.Create(new dg_animal
+            var parentId = orgAdminService.Create(new ctx_parent
             {
-                dg_name = "Fluffy",
+                ctx_Name = "Fluffy",
+                ctx_Amount = 5m,
                 OwnerId = new EntityReference(SystemUser.EntityLogicalName, adminUserId)
             });
 
-            var userName = SystemUser.Retrieve(orgAdminService, adminUserId, x => x.FirstName).FirstName;
-
-            var animal = dg_animal.Retrieve(orgAdminService, animalId, x => x.dg_AnimalOwner);
-            Assert.Equal($"Fluffy is a very good animal, and {userName} loves them very much", animal.dg_AnimalOwner);
+            // Power Fx formula columns must be evaluated on Retrieve:
+            // ctx_TrimLeft = Mid(ctx_name, 3)  => ctx_Name without the first 2 chars
+            // ctx_AmountCalc = ctx_amount * 20
+            var parent = ctx_parent.Retrieve(orgAdminService, parentId, x => x.ctx_TrimLeft, x => x.ctx_AmountCalc);
+            Assert.Equal("Fluffy".Substring(2), parent.ctx_TrimLeft);
+            Assert.Equal(5m * 20, parent.ctx_AmountCalc);
         }
 
         [Fact]
@@ -308,7 +320,7 @@ namespace DG.XrmMockupTest
             var user = new Entity("systemuser");
             user["businessunitid"] = crm.RootBusinessUnit;
             user["firstname"] = "Matt";
-            crm.CreateUser(orgAdminService, user, SecurityRoles.CEOBusinessManager);
+            crm.CreateUser(orgAdminService, user, SecurityRoles.XrmMockupTestReadOnly);
 
             var q = new QueryExpression("systemuser");
             q.Criteria.AddCondition("fullname", ConditionOperator.Equal, "Matt");
@@ -323,8 +335,8 @@ namespace DG.XrmMockupTest
 
             orgAdminUIService.Update(new Contact(accountId)
             {
-                StateCode = ContactState.Inactive,
-                StatusCode = Contact_StatusCode.Inactive
+                StateCode = contact_statecode.Inactive,
+                StatusCode = contact_statuscode.Inactive
             });
 
             Assert.Throws<InvalidPluginExecutionException>(() => Contact.Retrieve(orgAdminService, accountId, x => x.LastName));

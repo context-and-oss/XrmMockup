@@ -1,5 +1,4 @@
 ﻿using DG.XrmFramework.BusinessDomain.ServiceContext;
-using DG.XrmContext;
 using Xunit;
 using Microsoft.Xrm.Sdk.Query;
 using System.Linq;
@@ -14,10 +13,12 @@ namespace DG.XrmMockupTest
         [Fact]
         public void UpdatingAttributeWithEmptyStringShouldReturnNull()
         {
-            var id = orgAdminUIService.Create(new Lead { Subject = "nonemptystring" });
-            orgAdminUIService.Update(new Lead { Id = id, Subject = string.Empty });
-            var lead = orgAdminService.Retrieve<Lead>(id);
-            Assert.Null(lead.Subject);
+            // Migrated from Lead.Subject -> Contact.Description (Lead removed from environment); this is
+            // generic platform behaviour (empty string attribute is stored as null) on any string field.
+            var id = orgAdminUIService.Create(new Contact { Description = "nonemptystring" });
+            orgAdminUIService.Update(new Contact { Id = id, Description = string.Empty });
+            var contact = orgAdminService.Retrieve<Contact>(id);
+            Assert.Null(contact.Description);
         }
 
 
@@ -38,16 +39,16 @@ namespace DG.XrmMockupTest
             account.contact_customer_accounts = new[] { new Contact(createdContactId) };
             orgAdminService.Update(account);
             var query = new QueryExpression(Account.EntityLogicalName) { ColumnSet = new ColumnSet(true), Criteria = new FilterExpression() };
-            query.Criteria.AddCondition(new ConditionExpression(Account.GetColumnName<Account>(a => a.AccountId), ConditionOperator.Equal, createdAccountId));
+            query.Criteria.AddCondition(new ConditionExpression(Account.GetColumnName(a => a.AccountId), ConditionOperator.Equal, createdAccountId));
             query.LinkEntities.Add(new LinkEntity
             {
                 Columns = new ColumnSet(true),
-                EntityAlias = Account.GetColumnName<Account>(a => a.contact_customer_accounts),
+                EntityAlias = Account.GetColumnName(a => a.contact_customer_accounts),
                 JoinOperator = JoinOperator.LeftOuter,
                 LinkFromEntityName = Account.EntityLogicalName,
                 LinkToEntityName = Contact.EntityLogicalName,
-                LinkFromAttributeName = Account.GetColumnName<Account>(a => a.AccountId),
-                LinkToAttributeName = Contact.GetColumnName<Contact>(c => c.contact_customer_accounts)
+                LinkFromAttributeName = Account.GetColumnName(a => a.AccountId),
+                LinkToAttributeName = Contact.GetColumnName(c => c.contact_customer_accounts)
             });
             var retrievedAccount = orgAdminService.RetrieveMultiple(query).Entities.FirstOrDefault();
             var retrievedContact = Contact.Retrieve(orgAdminService, createdContactId);
@@ -55,7 +56,7 @@ namespace DG.XrmMockupTest
             // Assert
             Assert.NotNull(retrievedAccount);
             Assert.Equal(createdAccountId, retrievedContact.ParentCustomerId.Id);
-            Assert.Contains(retrievedAccount.Attributes, attr => attr.Key.Contains(Account.GetColumnName<Account>(a => a.contact_customer_accounts)));
+            Assert.Contains(retrievedAccount.Attributes, attr => attr.Key.Contains(Account.GetColumnName(a => a.contact_customer_accounts)));
         }
 
         [Fact]

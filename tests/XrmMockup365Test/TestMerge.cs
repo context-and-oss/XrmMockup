@@ -56,8 +56,8 @@ namespace DG.XrmMockupTest
                     (Account)orgAdminUIService.Retrieve(Account.EntityLogicalName,
                     _account2Id, new ColumnSet(true));
 
-                Assert.True(mergeeAccount.StateCode.Equals(AccountState.Inactive));
-                Assert.True(mergeeAccount.StatusCode.Equals(Account_StatusCode.Inactive));
+                Assert.True(mergeeAccount.StateCode.Equals(account_statecode.Inactive));
+                Assert.True(mergeeAccount.StatusCode.Equals(account_statuscode.Inactive));
                 Assert.True(mergeeAccount.Merged.Value);
 
                 Account mergedAccount =

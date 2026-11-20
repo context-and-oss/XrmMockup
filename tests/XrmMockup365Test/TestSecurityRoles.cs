@@ -47,12 +47,13 @@ namespace DG.XrmMockupTest
                 businessunit["name"] = "business unit name 1";
                 businessunit.Id = orgAdminUIService.Create(businessunit);
 
-                var scheduler = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Scheduler);
+                var scheduler = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestUser);
                 var schedulerService = crm.CreateOrganizationService(scheduler.Id);
 
                 try
                 {
-                    schedulerService.Create(new Lead());
+                    // XrmMockupTestUser has no account-create privilege (originally tested with Lead, now removed).
+                    schedulerService.Create(new Account());
                     throw new XunitException();
                 }
                 catch (Exception e)
@@ -91,7 +92,7 @@ namespace DG.XrmMockupTest
                 var contact = new Contact();
                 contact.Id = service.Create(contact);
 
-                var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Scheduler);
+                var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestUser);
                 service = crm.CreateOrganizationService(user.Id);
 
                 var req = new AssignRequest();
@@ -127,7 +128,7 @@ namespace DG.XrmMockupTest
                 var contact = new Contact();
                 contact.Id = service.Create(contact);
 
-                var team = crm.CreateTeam(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Cannotreadcontact);
+                var team = crm.CreateTeam(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
 
                 var req = new AssignRequest();
                 try
@@ -160,15 +161,15 @@ namespace DG.XrmMockupTest
                 businessunit.Id = orgAdminUIService.Create(businessunit);
                 var orgUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.SystemAdministrator);
                 var service = crm.CreateOrganizationService(orgUser.Id);
-                var bus = new dg_bus();
+                var bus = new ctx_parent();
                 bus.Id = service.Create(bus);
 
-                var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Scheduler);
+                var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestUser);
                 service = crm.CreateOrganizationService(user.Id);
 
                 try
                 {
-                    bus.dg_name = "new sadas";
+                    bus.ctx_Name = "new sadas";
                     service.Update(bus);
                     throw new XunitException();
                 }
@@ -177,9 +178,9 @@ namespace DG.XrmMockupTest
                     Assert.IsType<FaultException>(e);
                 }
 
-                var usersBus = new dg_bus();
+                var usersBus = new ctx_parent();
                 usersBus.Id = service.Create(usersBus);
-                usersBus.dg_name = "sadsa";
+                usersBus.ctx_Name = "sadsa";
                 service.Update(usersBus);
             }
         }
@@ -194,10 +195,10 @@ namespace DG.XrmMockupTest
                 businessunit.Id = orgAdminUIService.Create(businessunit);
                 var orgUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.SystemAdministrator);
                 var service = crm.CreateOrganizationService(orgUser.Id);
-                var bus = new dg_bus();
+                var bus = new ctx_parent();
                 bus.Id = service.Create(bus);
 
-                var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Scheduler);
+                var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestUser);
                 service = crm.CreateOrganizationService(user.Id);
 
                 try
@@ -210,7 +211,7 @@ namespace DG.XrmMockupTest
                     Assert.IsType<FaultException>(e);
                 }
 
-                var usersBus = new dg_bus();
+                var usersBus = new ctx_parent();
                 usersBus.Id = service.Create(usersBus);
                 service.Delete(usersBus.LogicalName, usersBus.Id);
             }
@@ -224,18 +225,18 @@ namespace DG.XrmMockupTest
                 var businessunit = new BusinessUnit();
                 businessunit["name"] = "business unit name 6";
                 businessunit.Id = orgAdminUIService.Create(businessunit);
-                var parentUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Scheduler);
+                var parentUser = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestUser);
                 var service = crm.CreateOrganizationService(parentUser.Id);
-                var bus = new dg_bus();
+                var bus = new ctx_parent();
                 bus.Id = service.Create(bus);
 
-                var parentChild = new dg_child
+                var parentChild = new ctx_child
                 {
-                    dg_parentBusId = bus.ToEntityReference()
+                    ctx_ParentId = bus.ToEntityReference()
                 };
                 parentChild.Id = service.Create(parentChild);
 
-                var otherChild = new dg_child();
+                var otherChild = new ctx_child();
                 otherChild.Id = orgAdminUIService.Create(otherChild);
 
                 try
@@ -248,13 +249,24 @@ namespace DG.XrmMockupTest
                     Assert.IsType<FaultException>(e);
                 }
 
-                otherChild.dg_parentBusId = bus.ToEntityReference();
+                otherChild.ctx_ParentId = bus.ToEntityReference();
                 orgAdminUIService.Update(otherChild);
 
                 service.Retrieve(otherChild.LogicalName, otherChild.Id, new ColumnSet(true));
             }
         }
 
+        [Fact]
+        public void TestCreateUserWithNonExistentSecurityRoleThrowsMockupException()
+        {
+            var nonExistentRoleId = Guid.NewGuid();
+
+            var ex = Assert.Throws<MockupException>(() =>
+                crm.CreateUser(orgAdminUIService, crm.RootBusinessUnit, nonExistentRoleId));
+
+            Assert.Contains(nonExistentRoleId.ToString(), ex.Message);
+            Assert.Contains("was not found", ex.Message);
+        }
     }
 
 }

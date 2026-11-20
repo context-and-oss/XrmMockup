@@ -13,8 +13,8 @@ namespace DG.XrmMockupTest
         string accountName;
         Guid _contact1Id;
         Guid _contact2Id;
-        Guid _opportunity1Id;
-        Guid _opportunity2Id;
+        Guid _childAccount1Id;
+        Guid _childAccount2Id;
 
         public TestFetchXmlToQueryExpression(XrmMockupFixture fixture) : base(fixture)
         {
@@ -52,21 +52,24 @@ namespace DG.XrmMockupTest
                     ParentCustomerId = acc.ToEntityReference()
                 });
 
-            // Create two opportunities.
-            _opportunity1Id = orgAdminUIService.Create(
-                new Opportunity()
+            // Migrated from Opportunity -> child Account (Opportunity removed). The two "child" accounts
+            // reference the main account via ParentAccountId (replacing Opportunity.CustomerId) and carry a
+            // settable date in LastOnHoldTime (replacing EstimatedCloseDate). The nested-link query below
+            // walks child account -> parent account -> contact, exercising the same FetchXML features.
+            _childAccount1Id = orgAdminUIService.Create(
+                new Account()
                 {
                     Name = "Litware, Inc. Opportunity 1",
-                    EstimatedCloseDate = DateTime.Now.AddMonths(6),
-                    CustomerId = acc.ToEntityReference()
+                    LastOnHoldTime = DateTime.Now.AddMonths(6),
+                    ParentAccountId = acc.ToEntityReference()
                 });
 
-            _opportunity2Id = orgAdminUIService.Create(
-                new Opportunity()
+            _childAccount2Id = orgAdminUIService.Create(
+                new Account()
                 {
                     Name = "Litware, Inc. Opportunity 2",
-                    EstimatedCloseDate = DateTime.Now.AddYears(4),
-                    CustomerId = acc.ToEntityReference()
+                    LastOnHoldTime = DateTime.Now.AddYears(4),
+                    ParentAccountId = acc.ToEntityReference()
                 });
         }
 
@@ -78,13 +81,13 @@ namespace DG.XrmMockupTest
                 // Create a Fetch query that we will convert into a query expression.
                 var fetchXml =
                     @"<fetch mapping='logical' version='1.0'>
-                    <entity name='opportunity'>
+                    <entity name='account'>
                         <attribute name='name' />
                         <filter>
-                            <condition attribute='estimatedclosedate' operator='next-x-years' value='3' />
-                            <condition attribute='estimatedclosedate' operator='gt' value='2000-01-01 00:00:00' />
+                            <condition attribute='lastonholdtime' operator='next-x-years' value='3' />
+                            <condition attribute='lastonholdtime' operator='gt' value='2000-01-01 00:00:00' />
                         </filter>
-                        <link-entity name='account' from='accountid' to='customerid'>
+                        <link-entity name='account' from='accountid' to='parentaccountid'>
                             <link-entity name='contact' from='parentcustomerid' to='accountid'>
                                 <attribute name='firstname' />
                                 <filter>
@@ -108,8 +111,8 @@ namespace DG.XrmMockupTest
                 Assert.Single(result.Entities);
                 var entity = result.Entities.First();
 
-                Assert.True(entity.Attributes.ContainsKey("opportunityid"));
-                Assert.Equal(_opportunity1Id, entity.Attributes["opportunityid"]);
+                Assert.True(entity.Attributes.ContainsKey("accountid"));
+                Assert.Equal(_childAccount1Id, entity.Attributes["accountid"]);
 
                 Assert.True(entity.Attributes.ContainsKey("name"));
                 Assert.Equal("Litware, Inc. Opportunity 1", entity.Attributes["name"]);
@@ -128,13 +131,13 @@ namespace DG.XrmMockupTest
                 // Create a Fetch Expression
                 var fetchXml =
                     @"<fetch mapping='logical' version='1.0'>
-                    <entity name='opportunity'>
+                    <entity name='account'>
                         <attribute name='name' />
                         <filter>
-                            <condition attribute='estimatedclosedate' operator='next-x-years' value='3' />
-                            <condition attribute='estimatedclosedate' operator='gt' value='2000-01-01 00:00:00' />
+                            <condition attribute='lastonholdtime' operator='next-x-years' value='3' />
+                            <condition attribute='lastonholdtime' operator='gt' value='2000-01-01 00:00:00' />
                         </filter>
-                        <link-entity name='account' from='accountid' to='customerid'>
+                        <link-entity name='account' from='accountid' to='parentaccountid'>
                             <link-entity name='contact' from='parentcustomerid' to='accountid'>
                                 <attribute name='firstname' />
                                 <filter>
@@ -153,8 +156,8 @@ namespace DG.XrmMockupTest
                 Assert.Single(result.Entities);
                 var entity = result.Entities.First();
 
-                Assert.True(entity.Attributes.ContainsKey("opportunityid"));
-                Assert.Equal(_opportunity1Id, entity.Attributes["opportunityid"]);
+                Assert.True(entity.Attributes.ContainsKey("accountid"));
+                Assert.Equal(_childAccount1Id, entity.Attributes["accountid"]);
 
                 Assert.True(entity.Attributes.ContainsKey("name"));
                 Assert.Equal("Litware, Inc. Opportunity 1", entity.Attributes["name"]);

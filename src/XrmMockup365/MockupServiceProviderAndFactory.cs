@@ -38,7 +38,13 @@ namespace DG.Tools.XrmMockup {
         /// <param name="serviceType"></param>
         /// <returns></returns>
         public object GetService(Type serviceType) {
-            if (serviceType == typeof(IPluginExecutionContext)) return this.pluginContext;
+            if (serviceType == typeof(IPluginExecutionContext)
+                || serviceType == typeof(IPluginExecutionContext2)
+                || serviceType == typeof(IPluginExecutionContext3)
+                || serviceType == typeof(IPluginExecutionContext4)
+                || serviceType == typeof(IPluginExecutionContext5)
+                || serviceType == typeof(IPluginExecutionContext6)
+                || serviceType == typeof(IPluginExecutionContext7)) return this.pluginContext;
             if (serviceType == typeof(ITracingService)) return this.tracingService;
             if (serviceType == typeof(IOrganizationServiceFactory)) return this;
             if (serviceType == typeof(IManagedIdentityService)) return new DummyManagedIdentityService();

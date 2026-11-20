@@ -15,7 +15,7 @@ namespace DG.XrmMockupTest
 
         public TestCascade(XrmMockupFixture fixture) : base(fixture)
         {
-            user1 = crm.CreateUser(orgGodService, crm.RootBusinessUnit, SecurityRoles.Salesperson).ToEntity<SystemUser>();
+            user1 = crm.CreateUser(orgGodService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestUser).ToEntity<SystemUser>();
 
             acc1 = new Account()
             {

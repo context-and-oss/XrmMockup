@@ -26,7 +26,7 @@
     - Valid Azure/Dataverse authentication (will prompt for interactive login if needed)
 
     The appsettings.json file in this directory configures:
-    - DATAVERSE_URL: The Dataverse environment to connect to
+    - DataverseUrl: The Dataverse environment to connect to
     - XrmMockup.Metadata.OutputDirectory: Where to store metadata (./TestMetadata)
     - XrmMockup.Metadata.Entities: List of entities to include in metadata
     - XrmContext: Configuration for XrmContext code generation
@@ -62,7 +62,7 @@ if (-not $ContextOnly) {
     # Show config
     Write-Host "Configuration:" -ForegroundColor Yellow
     $config = Get-Content $configPath | ConvertFrom-Json
-    Write-Host "  Dataverse URL: $($config.DATAVERSE_URL)"
+    Write-Host "  Dataverse URL: $($config.DataverseUrl)"
     Write-Host "  Output Directory: $($config.XrmMockup.Metadata.OutputDirectory)"
     Write-Host "  Entities: $($config.XrmMockup.Metadata.Entities.Count) entities"
     Write-Host ""

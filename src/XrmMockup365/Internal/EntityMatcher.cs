@@ -80,6 +80,8 @@ namespace DG.Tools.XrmMockup.Internal
                     return IsEqual(attr, values);
 
                 case ConditionOperator.NotEqual:
+                    // Dataverse excludes null-valued records for "not" conditions (NULL <> value is unknown).
+                    if (attr == null) return false;
                     return !Matches(attr, ConditionOperator.Equal, values);
 
                 case ConditionOperator.GreaterThan:
@@ -113,22 +115,51 @@ namespace DG.Tools.XrmMockup.Internal
                         throw new NotImplementedException($"The like matching for '{pattern}' has not been implemented yet");
                     }
 
+                case ConditionOperator.Last7Days:
+                case ConditionOperator.LastMonth:
+                case ConditionOperator.LastWeek:
+                case ConditionOperator.LastXDays:
+                case ConditionOperator.LastXHours:
+                case ConditionOperator.LastXMonths:
+                case ConditionOperator.LastXWeeks:
+                case ConditionOperator.LastXYears:
+                case ConditionOperator.LastYear:
+                case ConditionOperator.Next7Days:
+                case ConditionOperator.NextMonth:
+                case ConditionOperator.NextWeek:
+                case ConditionOperator.NextXDays:
+                case ConditionOperator.NextXHours:
+                case ConditionOperator.NextXMonths:
+                case ConditionOperator.NextXWeeks:
                 case ConditionOperator.NextXYears:
-                case ConditionOperator.OlderThanXYears:
-                case ConditionOperator.OlderThanXWeeks:
-                case ConditionOperator.OlderThanXMonths:
+                case ConditionOperator.NextYear:
                 case ConditionOperator.OlderThanXDays:
                 case ConditionOperator.OlderThanXHours:
                 case ConditionOperator.OlderThanXMinutes:
-                case ConditionOperator.Yesterday:
+                case ConditionOperator.OlderThanXMonths:
+                case ConditionOperator.OlderThanXWeeks:
+                case ConditionOperator.OlderThanXYears:
+                case ConditionOperator.On:
+                case ConditionOperator.OnOrAfter:
+                case ConditionOperator.OnOrBefore:
+                case ConditionOperator.ThisMonth:
+                case ConditionOperator.ThisWeek:
+                case ConditionOperator.ThisYear:
                 case ConditionOperator.Today:
                 case ConditionOperator.Tomorrow:
+                case ConditionOperator.Yesterday:
                     return DateTimeCompareNow(attr, op, values);
 
                 case ConditionOperator.In:
+                    if (values != null && attr is OptionSetValueCollection optionSetValueCollection)
+                    {
+                        return string.Join(",", values.OrderBy(v => v)) == string.Join(",", optionSetValueCollection.Select(v => v.Value).OrderBy(v => v));
+                    }
                     return values.Contains(ValueConverter.ConvertTo(attr, values.FirstOrDefault()?.GetType()));
 
                 case ConditionOperator.NotIn:
+                    // Only exclude nulls when there are values to compare; an empty NotIn matches all rows.
+                    if (attr == null && values.Any()) return false;
                     return !Matches(attr, ConditionOperator.In, values);
 
                 case ConditionOperator.BeginsWith:
@@ -144,6 +175,7 @@ namespace DG.Tools.XrmMockup.Internal
                     }
 
                 case ConditionOperator.DoesNotBeginWith:
+                    if (attr == null) return false;
                     return !Matches(attr, ConditionOperator.BeginsWith, values);
 
                 case ConditionOperator.EndsWith:
@@ -169,21 +201,7 @@ namespace DG.Tools.XrmMockup.Internal
         {
             if (attr == null) return false;
 
-            if (attr is string attrStr)
-            {
-                var valueString = (string)ValueConverter.ConvertTo(values.First(), attr?.GetType());
-                return attrStr.Equals(valueString, StringComparison.OrdinalIgnoreCase);
-            }
-            else if (attr is DateTime attrDate)
-            {
-                var valueDate = (DateTime)ValueConverter.ConvertTo(values.First(), attr?.GetType());
-                return DateTime.Equals(valueDate.ToUniversalTime(), attrDate.ToUniversalTime());
-            }
-            else
-            {
-                var converted = ValueConverter.ConvertTo(values.First(), attr?.GetType());
-                return Equals(converted, attr);
-            }
+            return ValueConverter.AreEqual(attr, values.First());
         }
 
         private static bool DateTimeCompareNow(object attr, ConditionOperator op, IEnumerable<object> values)
@@ -194,27 +212,81 @@ namespace DG.Tools.XrmMockup.Internal
 
             switch (op)
             {
+                case ConditionOperator.Last7Days:
+                    return date < now && date.Date >= nowDate.AddDays(-7);
+                case ConditionOperator.LastMonth:
+                    return date.Date.Month == nowDate.AddMonths(-1).Month && date.Date.Year == nowDate.AddMonths(-1).Year;
+                case ConditionOperator.LastWeek:
+                    {
+                        DateTime thisWeekStart = nowDate.AddDays(-(int)nowDate.DayOfWeek).Date;
+                        return date.Date >= thisWeekStart.AddDays(-7) && date.Date < thisWeekStart;
+                    }
+                case ConditionOperator.LastXDays:
+                    return date < now && date.Date >= nowDate.AddDays(-int.Parse((string)values.First()));
+                case ConditionOperator.LastXHours:
+                    return date < now && date >= now.AddHours(-int.Parse((string)values.First()));
+                case ConditionOperator.LastXMonths:
+                    return date < now && date.Date >= nowDate.AddMonths(-int.Parse((string)values.First()));
+                case ConditionOperator.LastXWeeks:
+                    return date < now && date.Date >= nowDate.AddDays(-7 * int.Parse((string)values.First()));
+                case ConditionOperator.LastXYears:
+                    return date < now && date.Date >= nowDate.AddYears(-int.Parse((string)values.First()));
+                case ConditionOperator.LastYear:
+                    return date.Date.Year == nowDate.AddYears(-1).Year;
+                case ConditionOperator.Next7Days:
+                    return date > now && date.Date <= nowDate.AddDays(7);
+                case ConditionOperator.NextMonth:
+                    return date.Date.Month == nowDate.AddMonths(1).Month && date.Date.Year == nowDate.AddMonths(1).Year;
+                case ConditionOperator.NextWeek:
+                    {
+                        DateTime nextWeekStart = nowDate.AddDays(-(int)nowDate.DayOfWeek).Date.AddDays(7);
+                        return date.Date >= nextWeekStart && date.Date < nextWeekStart.AddDays(7);
+                    }
+                case ConditionOperator.NextXDays:
+                    return date > now && date.Date <= nowDate.AddDays(int.Parse((string)values.First()));
+                case ConditionOperator.NextXHours:
+                    return date > now && date <= now.AddHours(int.Parse((string)values.First()));
+                case ConditionOperator.NextXMonths:
+                    return date > now && date.Date <= nowDate.AddMonths(int.Parse((string)values.First()));
+                case ConditionOperator.NextXWeeks:
+                    return date > now && date.Date <= nowDate.AddDays(7 * int.Parse((string)values.First()));
                 case ConditionOperator.NextXYears:
-                    return now.Date <= date.Date && date.Date <= now.AddYears(int.Parse((string)values.First())).Date;
-                case ConditionOperator.OlderThanXYears:
-                    return date <= now.AddYears(-int.Parse((string)values.First()));
-                case ConditionOperator.OlderThanXWeeks:
-                    return date <= now.AddDays(-7 * int.Parse((string)values.First()));
-                case ConditionOperator.OlderThanXMonths:
-                    return date <= now.AddMonths(-int.Parse((string)values.First()));
+                    return date > now && date.Date <= nowDate.AddYears(int.Parse((string)values.First()));
+                case ConditionOperator.NextYear:
+                    return date.Date.Year == now.Date.AddYears(1).Year;
                 case ConditionOperator.OlderThanXDays:
                     return date <= now.AddDays(-int.Parse((string)values.First()));
                 case ConditionOperator.OlderThanXHours:
                     return date <= now.AddHours(-int.Parse((string)values.First()));
                 case ConditionOperator.OlderThanXMinutes:
                     return date <= now.AddMinutes(-int.Parse((string)values.First()));
-                case ConditionOperator.Yesterday:
-                    return date.Date == nowDate.AddDays(-1).Date;
+                case ConditionOperator.OlderThanXMonths:
+                    return date <= now.AddMonths(-int.Parse((string)values.First()));
+                case ConditionOperator.OlderThanXWeeks:
+                    return date <= now.AddDays(-7 * int.Parse((string)values.First()));
+                case ConditionOperator.OlderThanXYears:
+                    return date <= now.AddYears(-int.Parse((string)values.First()));
+                case ConditionOperator.On:
+                    return date.Ticks == DateTimeOffset.Parse((string)values.First()).Ticks;
+                case ConditionOperator.OnOrAfter:
+                    return date.Ticks >= DateTimeOffset.Parse((string)values.First()).Ticks;
+                case ConditionOperator.OnOrBefore:
+                    return date.Ticks <= DateTimeOffset.Parse((string)values.First()).Ticks;
+                case ConditionOperator.ThisMonth:
+                    return date.Year == nowDate.Year && date.Month == nowDate.Month;
+                case ConditionOperator.ThisWeek:
+                    {
+                        DateTime thisWeekStart = nowDate.AddDays(-(int)nowDate.DayOfWeek).Date;
+                        return date.Date >= thisWeekStart && date.Date < thisWeekStart.AddDays(7);
+                    }
+                case ConditionOperator.ThisYear:
+                    return date.Year == nowDate.Year;
                 case ConditionOperator.Today:
                     return date.Date == nowDate;
                 case ConditionOperator.Tomorrow:
                     return date.Date == nowDate.AddDays(1).Date;
-
+                case ConditionOperator.Yesterday:
+                    return date.Date == nowDate.AddDays(-1).Date;
                 default:
                     throw new MockupException("Invalid operator: " + op);
             }

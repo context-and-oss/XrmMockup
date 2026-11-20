@@ -25,8 +25,6 @@ namespace DG.XrmMockupTest
                  );
                 Assert.Equal("Account 1", context.AccountSet.First().Name);
 
-                var bla = Account.Retrieve_dg_name(orgAdminUIService, "Account 2");
-
                 context.ClearChanges();
                 var req = new UpsertRequest
                 {

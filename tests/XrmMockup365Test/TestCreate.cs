@@ -6,7 +6,6 @@ using Microsoft.Xrm.Sdk.Query;
 using System.ServiceModel;
 using Microsoft.Xrm.Sdk.Messages;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
-using DG.XrmContext;
 using Xunit;
 using Xunit.Sdk;
 using System.Threading;
@@ -113,15 +112,17 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestCreateWithUpdate()
         {
-            var child = new dg_child()
+            // Migrated from dg_child -> Contact (dg_name -> LastName). UpdateIdInCreatePlugin is gated
+            // on the sentinel LastName "Donald Duck" and overwrites it with "Micky Mouse" post-create.
+            var child = new Contact()
             {
-                dg_name = "Donald Duck"
+                LastName = "Donald Duck"
             };
 
             child.Id = orgAdminUIService.Create(child);
 
-            var resp = dg_child.Retrieve(orgAdminService, child.Id);
-            Assert.Equal("Micky Mouse", resp.dg_name);
+            var resp = Contact.Retrieve(orgAdminService, child.Id);
+            Assert.Equal("Micky Mouse", resp.LastName);
         }
 
 
@@ -262,33 +263,35 @@ namespace DG.XrmMockupTest
         [Fact]
         public void CreatingAttributeWithEmptyStringShouldReturnNull()
         {
-            var id = orgAdminUIService.Create(new Lead { Subject = string.Empty });
-            var lead = orgAdminService.Retrieve<Lead>(id);
-            Assert.Null(lead.Subject);
+            // Migrated from Lead.Subject -> Contact.Description (Lead removed from environment).
+            var id = orgAdminUIService.Create(new Contact { Description = string.Empty });
+            var contact = orgAdminService.Retrieve<Contact>(id);
+            Assert.Null(contact.Description);
         }
 
         [Fact]
         public void CreatingEntityWithSdkModeShouldInitializeBooleanAttributes()
         {
-            var id = orgAdminService.Create(new Lead());
-            var lead = orgAdminService.Retrieve<Lead>(id);
-            Assert.NotNull(lead.DoNotBulkEMail);
-            Assert.NotNull(lead.DoNotEMail);
-            Assert.NotNull(lead.DoNotFax);
-            Assert.NotNull(lead.DoNotPhone);
-            Assert.NotNull(lead.DoNotPostalMail);
-            Assert.NotNull(lead.DoNotSendMM);
+            // Migrated from Lead -> Contact (Lead removed). Contact exposes the same boolean "do not"
+            // attributes (each defaulting to false in metadata) except DoNotSendMM, which is dropped.
+            var id = orgAdminService.Create(new Contact());
+            var contact = orgAdminService.Retrieve<Contact>(id);
+            Assert.NotNull(contact.DoNotBulkEMail);
+            Assert.NotNull(contact.DoNotEMail);
+            Assert.NotNull(contact.DoNotFax);
+            Assert.NotNull(contact.DoNotPhone);
+            Assert.NotNull(contact.DoNotPostalMail);
         }
 
         [Fact]
         public void CreatingEntityWithSdkModeShouldInitializePicklistAttributes()
         {
-            var id = orgAdminService.Create(new Lead());
-            var lead = orgAdminService.Retrieve<Lead>(id);
-            Assert.NotNull(lead.LeadQualityCode);
-            Assert.NotNull(lead.PreferredContactMethodCode);
-            Assert.NotNull(lead.PriorityCode);
-            Assert.NotNull(lead.SalesStageCode);
+            // Migrated from Lead -> Contact (Lead removed). PreferredContactMethodCode carries a metadata
+            // default on contact, so it is initialised on SDK-mode create. The Lead-only picklists
+            // (LeadQualityCode, SalesStageCode) and PriorityCode (not present on contact here) are dropped.
+            var id = orgAdminService.Create(new Contact());
+            var contact = orgAdminService.Retrieve<Contact>(id);
+            Assert.NotNull(contact.PreferredContactMethodCode);
         }
 
 
@@ -304,22 +307,22 @@ namespace DG.XrmMockupTest
             // Act (create & retrieve)
             var createdAccountId = orgAdminService.Create(account);
             var query = new QueryExpression(Account.EntityLogicalName) { ColumnSet = new ColumnSet(true), Criteria = new FilterExpression() };
-            query.Criteria.AddCondition(new ConditionExpression(Account.GetColumnName<Account>(a => a.AccountId), ConditionOperator.Equal, createdAccountId));
+            query.Criteria.AddCondition(new ConditionExpression(Account.GetColumnName(a => a.AccountId), ConditionOperator.Equal, createdAccountId));
             query.LinkEntities.Add(new LinkEntity
             {
                 Columns = new ColumnSet(true),
-                EntityAlias = Account.GetColumnName<Account>(a => a.contact_customer_accounts),
+                EntityAlias = Account.GetColumnName(a => a.contact_customer_accounts),
                 JoinOperator = JoinOperator.LeftOuter,
                 LinkFromEntityName = Account.EntityLogicalName,
                 LinkToEntityName = Contact.EntityLogicalName,
-                LinkFromAttributeName = Account.GetColumnName<Account>(a => a.AccountId),
-                LinkToAttributeName = Contact.GetColumnName<Contact>(c => c.contact_customer_accounts)
+                LinkFromAttributeName = Account.GetColumnName(a => a.AccountId),
+                LinkToAttributeName = Contact.GetColumnName(c => c.contact_customer_accounts)
             });
             var retrievedAccount = orgAdminService.RetrieveMultiple(query).Entities.FirstOrDefault();
 
             // Assert
             Assert.NotNull(retrievedAccount);
-            Assert.Contains(retrievedAccount.Attributes, attr => attr.Key.Contains(Account.GetColumnName<Account>(a => a.contact_customer_accounts)));
+            Assert.Contains(retrievedAccount.Attributes, attr => attr.Key.Contains(Account.GetColumnName(a => a.contact_customer_accounts)));
         }
     }
 }

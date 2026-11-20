@@ -33,6 +33,7 @@ namespace DG.Some.Namespace {
                 as IOrganizationService;
 
             var accRef = name.Get(executionContext);
+            traceService.Trace("AccountWorkflowActivity executing for {0}", accRef.Id);
             var account = orgService.Retrieve(Account.EntityLogicalName, accRef.Id, new ColumnSet("name")) as Account;
             account.Name += "setFromCodeActivity";
             orgService.Update(account);

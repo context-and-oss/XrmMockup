@@ -47,23 +47,23 @@ namespace DG.XrmMockupTest
             {
                 Name = "Team 1",
                 BusinessUnitId = businessUnit1.ToEntityReference(),
-                TeamType = Team_TeamType.Owner
+                TeamType = team_type.Owner
             };
-            team1 = crm.CreateTeam(orgAdminService, team1, SecurityRoles.SystemCustomizer).ToEntity<Team>();
+            team1 = crm.CreateTeam(orgAdminService, team1, SecurityRoles.XrmMockupTestNoContactAccess).ToEntity<Team>();
 
             team2 = new Team
             {
                 Name = "Team 2",
                 BusinessUnitId = businessUnit1.ToEntityReference(),
-                TeamType = Team_TeamType.Owner
+                TeamType = team_type.Owner
             };
-            team2 = crm.CreateTeam(orgAdminService, team2, SecurityRoles.SystemCustomizer).ToEntity<Team>();
+            team2 = crm.CreateTeam(orgAdminService, team2, SecurityRoles.XrmMockupTestNoContactAccess).ToEntity<Team>();
 
             team3 = new Team
             {
                 Name = "Team 3",
                 BusinessUnitId = businessUnit1.ToEntityReference(),
-                TeamType = Team_TeamType.Owner
+                TeamType = team_type.Owner
             };
             team3 = crm.CreateTeam(orgAdminService, team3, SecurityRoles.SystemAdministrator).ToEntity<Team>();
 
@@ -71,15 +71,15 @@ namespace DG.XrmMockupTest
             {
                 Name = "Team 4",
                 BusinessUnitId = businessUnit1.ToEntityReference(),
-                TeamType = Team_TeamType.Owner
+                TeamType = team_type.Owner
             };
             team4 = crm.CreateTeam(orgAdminService, team4, SecurityRoles.SystemAdministrator).ToEntity<Team>();
 
             // SystemCustomizer - read account - user level, write account - user level
-            user11 = crm.CreateUser(orgAdminService, businessUnit1.ToEntityReference(), SecurityRoles.SystemCustomizer) as SystemUser;
-            user12 = crm.CreateUser(orgAdminService, businessUnit1.ToEntityReference(), SecurityRoles.SystemCustomizer) as SystemUser;
-            user21 = crm.CreateUser(orgAdminService, businessUnit2.ToEntityReference(), SecurityRoles.SystemCustomizer) as SystemUser;
-            user22 = crm.CreateUser(orgAdminService, businessUnit2.ToEntityReference(), SecurityRoles.SystemCustomizer) as SystemUser;
+            user11 = crm.CreateUser(orgAdminService, businessUnit1.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess) as SystemUser;
+            user12 = crm.CreateUser(orgAdminService, businessUnit1.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess) as SystemUser;
+            user21 = crm.CreateUser(orgAdminService, businessUnit2.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess) as SystemUser;
+            user22 = crm.CreateUser(orgAdminService, businessUnit2.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess) as SystemUser;
 
             parent1 = new EntityReference(Account.EntityLogicalName, orgAdminService.Create(new Account { Name = "Parent 1" }));
             parent2 = new EntityReference(Account.EntityLogicalName, orgAdminService.Create(new Account { Name = "Parent 2" }));
@@ -97,12 +97,12 @@ namespace DG.XrmMockupTest
         [Fact]
         public void CreateTeam()
         {
-            var team = crm.CreateTeam(orgAdminService, crm.RootBusinessUnit, SecurityRoles.SystemCustomizer);
+            var team = crm.CreateTeam(orgAdminService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestNoContactAccess);
             using (var context = new Xrm(orgAdminUIService))
             {
                 var fetchedTeam = context.TeamSet.FirstOrDefault(x => x.Id == team.Id);
                 Assert.NotNull(fetchedTeam);
-                Assert.Equal(Team_TeamType.Owner, fetchedTeam.TeamType);
+                Assert.Equal(team_type.Owner, fetchedTeam.TeamType);
             }
         }
 
@@ -114,10 +114,10 @@ namespace DG.XrmMockupTest
             bu1.Id = orgAdminService.Create(bu1);
             var bu2 = new BusinessUnit() { Name = "bu2", ParentBusinessUnitId = crm.RootBusinessUnit };
             bu2.Id = orgAdminService.Create(bu2);
-            var user1 = crm.CreateUser(orgAdminService, bu1.ToEntityReference(), SecurityRoles.SystemCustomizer);
-            var user2 = crm.CreateUser(orgAdminService, bu2.ToEntityReference(), SecurityRoles.SystemCustomizer);
+            var user1 = crm.CreateUser(orgAdminService, bu1.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
+            var user2 = crm.CreateUser(orgAdminService, bu2.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
 
-            var team = crm.CreateTeam(orgAdminService, crm.RootBusinessUnit, SecurityRoles.SystemCustomizer);
+            var team = crm.CreateTeam(orgAdminService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestNoContactAccess);
             crm.AddUsersToTeam(team.ToEntityReference(), user1.ToEntityReference(), user2.ToEntityReference());
 
             using (var context = new Xrm(orgAdminUIService))
@@ -138,10 +138,10 @@ namespace DG.XrmMockupTest
             bu1.Id = orgAdminService.Create(bu1);
             var bu2 = new BusinessUnit() { Name = "bu2", ParentBusinessUnitId = crm.RootBusinessUnit };
             bu2.Id = orgAdminService.Create(bu2);
-            var user1 = crm.CreateUser(orgAdminService, bu1.ToEntityReference(), SecurityRoles.SystemCustomizer);
-            var user2 = crm.CreateUser(orgAdminService, bu2.ToEntityReference(), SecurityRoles.SystemCustomizer);
+            var user1 = crm.CreateUser(orgAdminService, bu1.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
+            var user2 = crm.CreateUser(orgAdminService, bu2.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
 
-            var team = crm.CreateTeam(orgAdminService, crm.RootBusinessUnit, SecurityRoles.SystemCustomizer);
+            var team = crm.CreateTeam(orgAdminService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestNoContactAccess);
             crm.AddUsersToTeam(team.ToEntityReference(), user1.ToEntityReference(), user2.ToEntityReference());
 
             using (var context = new Xrm(orgAdminUIService))

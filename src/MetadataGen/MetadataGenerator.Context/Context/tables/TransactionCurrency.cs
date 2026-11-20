@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Currency in which a financial transaction is carried out.</para>
 /// <para>Display Name: Currency</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("transactioncurrency")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -264,9 +264,9 @@ public partial class TransactionCurrency : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("transactioncurrencyid")]
     [DisplayName("Transaction Currency")]
-    public Guid TransactionCurrencyId
+    public Guid? TransactionCurrencyId
     {
-        get => GetAttributeValue<Guid>("transactioncurrencyid");
+        get => GetAttributeValue<Guid?>("transactioncurrencyid");
         set => SetId("transactioncurrencyid", value);
     }
 

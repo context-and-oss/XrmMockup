@@ -1,4 +1,4 @@
-﻿using DG.Tools.XrmMockup.Internal;
+using DG.Tools.XrmMockup.Internal;
 using Microsoft.Xrm.Sdk;
 using System;
 using System.Collections.Generic;
@@ -7,7 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace DG.Tools.XrmMockup {
-    internal class PluginContext : IPluginExecutionContext {
+    internal class PluginContext : IPluginExecutionContext7 {
 
         private ParameterCollection _propertyBag = new ParameterCollection();
 
@@ -18,6 +18,9 @@ namespace DG.Tools.XrmMockup {
         private EntityImageCollection _preEntityImages = new EntityImageCollection();
         private EntityImageCollection _postEntityImages = new EntityImageCollection();
 
+        private EntityImageCollection[] _preEntityImagesCollection = Array.Empty<EntityImageCollection>();
+        private EntityImageCollection[] _postEntityImagesCollection = Array.Empty<EntityImageCollection>();
+
         public int? ExtensionDepth;
 
         public PluginContext() {
@@ -26,41 +29,41 @@ namespace DG.Tools.XrmMockup {
 
         public Guid BusinessUnitId {
             get {
-                _propertyBag.TryGetValue("BusinessUnitId", out object BusinessUnitId);
-                return (Guid)BusinessUnitId;
+                _propertyBag.TryGetValue(nameof(BusinessUnitId), out object val);
+                return (Guid)val;
             }
             set {
-                _propertyBag["BusinessUnitId"] = value;
+                _propertyBag[nameof(BusinessUnitId)] = value;
             }
         }
 
         public Guid CorrelationId {
             get {
-                _propertyBag.TryGetValue("CorrelationId", out object CorrelationId);
-                return (Guid)CorrelationId;
+                _propertyBag.TryGetValue(nameof(CorrelationId), out object val);
+                return (Guid)val;
             }
             set {
-                _propertyBag["CorrelationId"] = value;
+                _propertyBag[nameof(CorrelationId)] = value;
             }
         }
 
         public int Depth {
             get {
-                _propertyBag.TryGetValue("Depth", out object Depth);
-                return (int)Depth;
+                _propertyBag.TryGetValue(nameof(Depth), out object val);
+                return (int)val;
             }
             set {
-                _propertyBag["Depth"] = value;
+                _propertyBag[nameof(Depth)] = value;
             }
         }
 
         public Guid InitiatingUserId {
             get {
-                _propertyBag.TryGetValue("InitiatingUserId", out object InitiatingUserId);
-                return (Guid)InitiatingUserId;
+                _propertyBag.TryGetValue(nameof(InitiatingUserId), out object val);
+                return (Guid)val;
             }
             set {
-                _propertyBag["InitiatingUserId"] = value;
+                _propertyBag[nameof(InitiatingUserId)] = value;
             }
         }
 
@@ -72,101 +75,101 @@ namespace DG.Tools.XrmMockup {
 
         public bool IsExecutingOffline {
             get {
-                _propertyBag.TryGetValue("IsExecutingOffline", out object IsExecutingOffline);
-                return (bool)IsExecutingOffline;
+                _propertyBag.TryGetValue(nameof(IsExecutingOffline), out object val);
+                return (bool)val;
             }
             set {
-                _propertyBag["IsExecutingOffline"] = value;
+                _propertyBag[nameof(IsExecutingOffline)] = value;
             }
         }
 
         public bool IsInTransaction {
             get {
-                _propertyBag.TryGetValue("IsInTransaction", out object IsInTransaction);
-                return (bool)IsInTransaction;
+                _propertyBag.TryGetValue(nameof(IsInTransaction), out object val);
+                return (bool)val;
             }
             set {
-                _propertyBag["IsInTransaction"] = value;
+                _propertyBag[nameof(IsInTransaction)] = value;
             }
         }
 
         public bool IsOfflinePlayback {
             get {
-                _propertyBag.TryGetValue("IsOfflinePlayback", out object IsOfflinePlayback);
-                return (bool)IsOfflinePlayback;
+                _propertyBag.TryGetValue(nameof(IsOfflinePlayback), out object val);
+                return (bool)val;
             }
             set {
-                _propertyBag["IsOfflinePlayback"] = value;
+                _propertyBag[nameof(IsOfflinePlayback)] = value;
             }
         }
 
         public int IsolationMode {
             get {
-                _propertyBag.TryGetValue("IsolationMode", out object IsolationMode);
-                return (int)IsolationMode;
+                _propertyBag.TryGetValue(nameof(IsolationMode), out object val);
+                return (int)val;
             }
             set {
-                _propertyBag["IsolationMode"] = value;
+                _propertyBag[nameof(IsolationMode)] = value;
             }
         }
 
         public string MessageName {
             get {
-                _propertyBag.TryGetValue("MessageName", out object MessageName);
-                return (string)MessageName;
+                _propertyBag.TryGetValue(nameof(MessageName), out object val);
+                return (string)val;
             }
             set {
-                _propertyBag["MessageName"] = value;
+                _propertyBag[nameof(MessageName)] = value;
             }
         }
 
         public int Mode {
             get {
-                _propertyBag.TryGetValue("Mode", out object Mode);
-                return (int)Mode;
+                _propertyBag.TryGetValue(nameof(Mode), out object val);
+                return (int)val;
             }
             set {
-                _propertyBag["Mode"] = value;
+                _propertyBag[nameof(Mode)] = value;
             }
         }
 
         public DateTime OperationCreatedOn {
             get {
-                _propertyBag.TryGetValue("OperationCreatedOn", out object OperationCreatedOn);
-                return (DateTime)OperationCreatedOn;
+                _propertyBag.TryGetValue(nameof(OperationCreatedOn), out object val);
+                return (DateTime)val;
             }
             set {
-                _propertyBag["OperationCreatedOn"] = value;
+                _propertyBag[nameof(OperationCreatedOn)] = value;
             }
         }
 
         public Guid OperationId {
             get {
-                _propertyBag.TryGetValue("OperationId", out object OperationId);
-                return (Guid)OperationId;
+                _propertyBag.TryGetValue(nameof(OperationId), out object val);
+                return (Guid)val;
             }
             set {
-                _propertyBag["OperationId"] = value;
+                _propertyBag[nameof(OperationId)] = value;
             }
         }
 
         public Guid OrganizationId {
             get {
-                _propertyBag.TryGetValue("OrganizationId", out object OrganizationId);
-                return (Guid)OrganizationId;
+                _propertyBag.TryGetValue(nameof(OrganizationId), out object val);
+                return (Guid)val;
             }
             set {
-                _propertyBag["OrganizationId"] = value;
+                _propertyBag[nameof(OrganizationId)] = value;
             }
         }
 
         public string OrganizationName {
             get {
-                _propertyBag.TryGetValue("OrganizationName", out object OrganizationName);
-                return (string)OrganizationName;
+                _propertyBag.TryGetValue(nameof(OrganizationName), out object val);
+                return (string)val;
             }
             set {
-                _propertyBag["OrganizationName"] = value;
+                _propertyBag[nameof(OrganizationName)] = value;
             }
         }
 
@@ -178,21 +181,21 @@ namespace DG.Tools.XrmMockup {
 
         public EntityReference OwningExtension {
             get {
-                _propertyBag.TryGetValue("OwningExtension", out object OwningExtension);
-                return (EntityReference)OwningExtension;
+                _propertyBag.TryGetValue(nameof(OwningExtension), out object val);
+                return (EntityReference)val;
             }
             set {
-                _propertyBag["OwningExtension"] = value;
+                _propertyBag[nameof(OwningExtension)] = value;
             }
         }
 
         public IPluginExecutionContext ParentContext {
             get {
-                _propertyBag.TryGetValue("ParentContext", out object ParentContext);
-                return (IPluginExecutionContext)ParentContext;
+                _propertyBag.TryGetValue(nameof(ParentContext), out object val);
+                return (IPluginExecutionContext)val;
             }
             set {
-                _propertyBag["ParentContext"] = value;
+                _propertyBag[nameof(ParentContext)] = value;
             }
         }
 
@@ -210,44 +213,44 @@ namespace DG.Tools.XrmMockup {
 
         public Guid PrimaryEntityId {
             get {
-                _propertyBag.TryGetValue("PrimaryEntityId", out object PrimaryEntityId);
+                _propertyBag.TryGetValue(nameof(PrimaryEntityId), out object val);
 
-                return (PrimaryEntityId is Guid guid)
+                return (val is Guid guid)
                     ? guid
                     : Guid.Empty;
             }
             set {
-                _propertyBag["PrimaryEntityId"] = value;
+                _propertyBag[nameof(PrimaryEntityId)] = value;
             }
         }
 
         public string PrimaryEntityName {
             get {
-                _propertyBag.TryGetValue("PrimaryEntityName", out object PrimaryEntityName);
-                return (string)PrimaryEntityName;
+                _propertyBag.TryGetValue(nameof(PrimaryEntityName), out object val);
+                return (string)val;
             }
             set {
-                _propertyBag["PrimaryEntityName"] = value;
+                _propertyBag[nameof(PrimaryEntityName)] = value;
             }
         }
 
         public Guid? RequestId {
             get {
-                _propertyBag.TryGetValue("RequestId", out object RequestId);
-                return (Guid?)RequestId;
+                _propertyBag.TryGetValue(nameof(RequestId), out object val);
+                return (Guid?)val;
             }
             set {
-                _propertyBag["RequestId"] = value;
+                _propertyBag[nameof(RequestId)] = value;
             }
         }
 
         public string SecondaryEntityName {
             get {
-                _propertyBag.TryGetValue("SecondaryEntityName", out object SecondaryEntityName);
-                return (string)SecondaryEntityName;
+                _propertyBag.TryGetValue(nameof(SecondaryEntityName), out object val);
+                return (string)val;
             }
             set {
-                _propertyBag["SecondaryEntityName"] = value;
+                _propertyBag[nameof(SecondaryEntityName)] = value;
             }
         }
 
@@ -259,22 +262,116 @@ namespace DG.Tools.XrmMockup {
 
         public int Stage {
             get {
-                _propertyBag.TryGetValue("Stage", out object Stage);
-                return (int)Stage;
+                _propertyBag.TryGetValue(nameof(Stage), out object val);
+                return (int)val;
             }
             set {
-                _propertyBag["Stage"] = value;
+                _propertyBag[nameof(Stage)] = value;
             }
         }
 
         public Guid UserId {
             get {
-                _propertyBag.TryGetValue("UserId", out object UserId);
-                return (Guid)UserId;
+                _propertyBag.TryGetValue(nameof(UserId), out object val);
+                return (Guid)val;
             }
             set {
-                _propertyBag["UserId"] = value;
+                _propertyBag[nameof(UserId)] = value;
             }
+        }
+
+        // IPluginExecutionContext2
+        public Guid UserAzureActiveDirectoryObjectId {
+            get {
+                return _propertyBag.TryGetValue(nameof(UserAzureActiveDirectoryObjectId), out object val) && val is Guid guid
+                    ? guid : Guid.Empty;
+            }
+            set { _propertyBag[nameof(UserAzureActiveDirectoryObjectId)] = value; }
+        }
+
+        public Guid InitiatingUserAzureActiveDirectoryObjectId {
+            get {
+                return _propertyBag.TryGetValue(nameof(InitiatingUserAzureActiveDirectoryObjectId), out object val) && val is Guid guid
+                    ? guid : Guid.Empty;
+            }
+            set { _propertyBag[nameof(InitiatingUserAzureActiveDirectoryObjectId)] = value; }
+        }
+
+        public Guid InitiatingUserApplicationId {
+            get {
+                return _propertyBag.TryGetValue(nameof(InitiatingUserApplicationId), out object val) && val is Guid guid
+                    ? guid : Guid.Empty;
+            }
+            set { _propertyBag[nameof(InitiatingUserApplicationId)] = value; }
+        }
+
+        public Guid PortalsContactId {
+            get {
+                return _propertyBag.TryGetValue(nameof(PortalsContactId), out object val) && val is Guid guid
+                    ? guid : Guid.Empty;
+            }
+            set { _propertyBag[nameof(PortalsContactId)] = value; }
+        }
+
+        public bool IsPortalsClientCall {
+            get {
+                return _propertyBag.TryGetValue(nameof(IsPortalsClientCall), out object val) && val is bool b && b;
+            }
+            set { _propertyBag[nameof(IsPortalsClientCall)] = value; }
+        }
+
+        // IPluginExecutionContext3
+        public Guid AuthenticatedUserId {
+            get {
+                return _propertyBag.TryGetValue(nameof(AuthenticatedUserId), out object val) && val is Guid guid
+                    ? guid : Guid.Empty;
+            }
+            set { _propertyBag[nameof(AuthenticatedUserId)] = value; }
+        }
+
+        // IPluginExecutionContext4
+        public EntityImageCollection[] PreEntityImagesCollection {
+            get { return _preEntityImagesCollection; }
+            internal set { _preEntityImagesCollection = value ?? Array.Empty<EntityImageCollection>(); }
+        }
+
+        public EntityImageCollection[] PostEntityImagesCollection {
+            get { return _postEntityImagesCollection; }
+            internal set { _postEntityImagesCollection = value ?? Array.Empty<EntityImageCollection>(); }
+        }
+
+        // IPluginExecutionContext5
+        public string InitiatingUserAgent {
+            get {
+                _propertyBag.TryGetValue(nameof(InitiatingUserAgent), out object val);
+                return val as string;
+            }
+            set { _propertyBag[nameof(InitiatingUserAgent)] = value; }
+        }
+
+        // IPluginExecutionContext6
+        public string EnvironmentId {
+            get {
+                _propertyBag.TryGetValue(nameof(EnvironmentId), out object val);
+                return val as string;
+            }
+            set { _propertyBag[nameof(EnvironmentId)] = value; }
+        }
+
+        public Guid TenantId {
+            get {
+                return _propertyBag.TryGetValue(nameof(TenantId), out object val) && val is Guid guid
+                    ? guid : Guid.Empty;
+            }
+            set { _propertyBag[nameof(TenantId)] = value; }
+        }
+
+        // IPluginExecutionContext7
+        public bool IsApplicationUser {
+            get {
+                return _propertyBag.TryGetValue(nameof(IsApplicationUser), out object val) && val is bool b && b;
+            }
+            set { _propertyBag[nameof(IsApplicationUser)] = value; }
         }
 
         public PluginContext Clone() {
@@ -286,6 +383,14 @@ namespace DG.Tools.XrmMockup {
 
             CloneDataCollection(this._postEntityImages, clone._postEntityImages, x => x.CloneEntity());
             CloneDataCollection(this._preEntityImages, clone._preEntityImages, x => x.CloneEntity());
+
+            clone._preEntityImagesCollection = this._preEntityImagesCollection
+                .Select(c => { var cl = new EntityImageCollection(); CloneDataCollection(c, cl, x => x.CloneEntity()); return cl; })
+                .ToArray();
+            clone._postEntityImagesCollection = this._postEntityImagesCollection
+                .Select(c => { var cl = new EntityImageCollection(); CloneDataCollection(c, cl, x => x.CloneEntity()); return cl; })
+                .ToArray();
+
             return clone;
         }
 

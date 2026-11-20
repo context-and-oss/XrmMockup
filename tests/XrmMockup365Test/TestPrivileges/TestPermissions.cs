@@ -19,7 +19,7 @@ namespace DG.XrmMockupTest
             businessunit["name"] = "Business unit name";
             businessunit.Id = orgAdminUIService.Create(businessunit);
             // Create a user which does not have read access to Contact
-            var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.Cannotreadcontact);
+            var user = crm.CreateUser(orgAdminUIService, businessunit.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
             // Create a service with the user
             var userService = crm.CreateOrganizationService(user.Id);
             // Create a Team that does have write access to Contact
@@ -27,12 +27,14 @@ namespace DG.XrmMockupTest
             {
                 BusinessUnitId = businessunit.ToEntityReference()
             };
-            var team1 = crm.CreateTeam(orgAdminUIService, createTeam1, SecurityRoles.Salesperson);
+            // Access-team role: BU-level contact write, so a member of team2 can update a contact
+            // owned by team1 (XrmMockupTestUser's contact write is only user-level/Basic).
+            var team1 = crm.CreateTeam(orgAdminUIService, createTeam1, SecurityRoles.XrmMockupTestAccessTeam);
             var createTeam2 = new Team
             {
                 BusinessUnitId = businessunit.ToEntityReference()
             };
-            var team2 = crm.CreateTeam(orgAdminUIService, createTeam2, SecurityRoles.Salesperson);
+            var team2 = crm.CreateTeam(orgAdminUIService, createTeam2, SecurityRoles.XrmMockupTestAccessTeam);
             // Create a Contact with Team as owner
             var contact = new Contact
             {

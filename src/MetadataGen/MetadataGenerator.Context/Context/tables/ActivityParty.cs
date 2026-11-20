@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Person or group associated with an activity. An activity can have multiple activity parties.</para>
 /// <para>Display Name: Activity Party</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("activityparty")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -55,9 +55,9 @@ public partial class ActivityParty : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("activitypartyid")]
     [DisplayName("Activity Party")]
-    public Guid ActivityPartyId
+    public Guid? ActivityPartyId
     {
-        get => GetAttributeValue<Guid>("activitypartyid");
+        get => GetAttributeValue<Guid?>("activitypartyid");
         set => SetId("activitypartyid", value);
     }
 

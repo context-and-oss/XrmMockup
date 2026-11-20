@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <!-- Deliberately single-targeted: tests must load a plugin compiled for 4.6.2. -->
+    <TargetFramework>net462</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Each test target supplies its own SDK; do not flow the legacy SDK into .NET 10. -->
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.59" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

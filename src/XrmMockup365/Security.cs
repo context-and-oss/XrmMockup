@@ -159,6 +159,18 @@ namespace DG.Tools.XrmMockup
                 Shares[target].Remove(revokee);
             }
         }
+        internal PrincipalAccess[] GetSharedPrincipalsAndAccess(EntityReference target)
+        {
+            // Return only explicit shares, not ownership, team membership or role-derived rights.
+            var entity = db.GetEntity(target);
+            if (!Shares.TryGetValue(entity.ToEntityReference(), out var shares)) return Array.Empty<PrincipalAccess>();
+            return shares.Select(share => new PrincipalAccess
+            {
+                Principal = new EntityReference(share.Key.LogicalName, share.Key.Id),
+                AccessMask = share.Value
+            }).ToArray();
+        }
+
         internal AccessRights GetAccessRights(EntityReference target, EntityReference userRef)
         {
             var entity = Core.GetDbRow(target);
@@ -341,7 +353,7 @@ namespace DG.Tools.XrmMockup
             PrinciplePrivilages.Add(principleId, currentPrivileges);
         } 
 
-        private void AddPrinciplePrivlieges(Guid principleId, Guid[] roles)
+        private void AddPrinciplePrivileges(Guid principleId, Guid[] roles)
         {
             if (!roles.Any())
             {
@@ -358,9 +370,14 @@ namespace DG.Tools.XrmMockup
             // Combine users current privilege with the securityRoles
             foreach (var roleId in roles)
             {
-                var securityRolePrivilages = SecurityRoles[roleId].Privileges;
+                if (!SecurityRoles.TryGetValue(roleId, out var securityRole))
+                {
+                    throw new MockupException(
+                        $"Security role with id '{roleId}' was not found. " +
+                        $"Ensure the security role exists in the metadata or has been added via AddSecurityRole.");
+                }
 
-                currentPrivileges = JoinPrivileges(currentPrivileges, securityRolePrivilages);
+                currentPrivileges = JoinPrivileges(currentPrivileges, securityRole.Privileges);
             }
 
             // Update the principles privileges;
@@ -378,11 +395,7 @@ namespace DG.Tools.XrmMockup
                 return;
             }
 
-            AddPrinciplePrivlieges(entRef.Id, secRoles);
-            if (secRoles.Any(s => !SecurityRoles.ContainsKey(s)))
-            {
-                throw new MockupException($"Unknown security role");
-            }
+            AddPrinciplePrivileges(entRef.Id, secRoles);
             var user = Core.GetDbRow(entRef).ToEntity();
             var relationship = entRef.LogicalName == LogicalNames.SystemUser ? new Relationship("systemuserroles_association") : new Relationship("teamroles_association");
             var roles = secRoles
@@ -419,6 +432,38 @@ namespace DG.Tools.XrmMockup
             return securityRoles;
         }
 
+        // Permission analysis reads local rows only: no requests, online retrieval, related-entity
+        // expansion or privilege-cache mutation (GetSecurityRoles(caller) can expand related entities).
+        internal bool HasLocalUser(Guid userId) => PermissionCheckRows("systemuser").Any(u => u.Id == userId);
+
+        private IEnumerable<DbRow> PermissionCheckRows(string table) => db.HasTable(table)
+            ? db[table].ToList() : Enumerable.Empty<DbRow>();
+
+        internal IReadOnlyList<SecurityRole> GetPermissionCheckRoles(Guid userId)
+        {
+            var result = new HashSet<SecurityRole>(PermissionCheckPrincipalRoles("systemuser", userId, "systemuserroles_association"));
+            var teams = PermissionCheckRows("teammembership").Where(m => m.GetColumn<Guid>("systemuserid") == userId)
+                .Select(m => m.GetColumn<Guid>("teamid")).Distinct();
+            foreach (var team in teams) result.UnionWith(PermissionCheckPrincipalRoles("team", team, "teamroles_association"));
+            return result.ToList();
+        }
+
+        private IEnumerable<SecurityRole> PermissionCheckPrincipalRoles(string principal, Guid id, string schema)
+        {
+            if (!Metadata.EntityMetadata.TryGetValue(principal, out var entity)) yield break;
+            var relation = (entity.ManyToManyRelationships ?? new ManyToManyRelationshipMetadata[0]).FirstOrDefault(r => r.SchemaName == schema);
+            if (relation == null) yield break;
+            var principalAttribute = relation.Entity1LogicalName == principal ? relation.Entity1IntersectAttribute : relation.Entity2IntersectAttribute;
+            var roleAttribute = relation.Entity1LogicalName == "role" ? relation.Entity1IntersectAttribute : relation.Entity2IntersectAttribute;
+            foreach (var row in PermissionCheckRows(relation.IntersectEntityName).Where(r => r.GetColumn<Guid>(principalAttribute) == id))
+            {
+                var assignedRole = row.GetColumn<Guid>(roleAttribute);
+                if (!SecurityRoleMapping.TryGetValue(assignedRole, out var roleId) || !SecurityRoles.TryGetValue(roleId, out var role))
+                    throw new ArgumentException($"Unknown assigned security role ID: {assignedRole}.");
+                yield return role;
+            }
+        }
+
         private bool IsMemberOfTeam(EntityReference team, EntityReference user)
         {
             return Core.GetDbTable(LogicalNames.TeamMembership)
@@ -451,15 +496,22 @@ namespace DG.Tools.XrmMockup
 
         internal bool HasTeamMemberPermission(Entity entity, AccessRights access, EntityReference caller)
         {
-            if (!entity.Attributes.ContainsKey("ownerid") || caller.LogicalName != LogicalNames.SystemUser)
+            if (caller.LogicalName != LogicalNames.SystemUser)
                 return false;
 
-            var owner = entity.GetAttributeValue<EntityReference>("ownerid");
-
-            // Check if owner is a team, and if user is member of that team, then check access for that team
-            if (owner.LogicalName == LogicalNames.Team && IsMemberOfTeam(owner, caller))
+            // Owner-team check only applies to owned entities. Business-owned and
+            // organization-owned entities (e.g. systemuser) have no ownerid, but the caller
+            // may still be granted access through a security role assigned to one of their
+            // teams, so we must still enumerate team memberships below.
+            if (entity.Attributes.ContainsKey("ownerid"))
             {
-                return HasPermission(entity, access, owner);
+                var owner = entity.GetAttributeValue<EntityReference>("ownerid");
+
+                // Check if owner is a team, and if user is member of that team, then check access for that team
+                if (owner.LogicalName == LogicalNames.Team && IsMemberOfTeam(owner, caller))
+                {
+                    return HasPermission(entity, access, owner);
+                }
             }
 
             // Check if any teams that the user is a member of have access 
@@ -490,13 +542,24 @@ namespace DG.Tools.XrmMockup
             // if max privelege depth is global, then caller can access all entities
             if (maxRole == PrivilegeDepth.Global) return true;
 
+            // RecordFilter privilege depth is not properly handled, and are instead handled as Global
+            if (maxRole == PrivilegeDepth.RecordFilter) return true;
+
             // sets owner of entity to caller if there is no owner already
             if (access == AccessRights.CreateAccess && !entity.Attributes.ContainsKey("ownerid"))
             {
                 entity["ownerid"] = caller;
             }
 
-            if (!entity.Attributes.ContainsKey("ownerid")) return false;
+            if (!entity.Attributes.ContainsKey("ownerid"))
+            {
+                // User/team-owned records always carry an ownerid. Records without one are
+                // business-owned or organization-owned (e.g. systemuser, team, businessunit),
+                // whose access is scoped by the owning business unit rather than an owner.
+                // Without this, holding a non-global privilege (e.g. AppendTo on systemuser)
+                // would always be denied because the ownerid-based checks below cannot apply.
+                return HasBusinessScopedPermission(entity, maxRole, caller);
+            }
 
             var owner = entity.GetAttributeValue<EntityReference>("ownerid");
 
@@ -520,6 +583,102 @@ namespace DG.Tools.XrmMockup
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Determines access for entities that have no ownerid (business-owned or
+        /// organization-owned entities). Organization-owned entities have a single
+        /// (organization) privilege scope, so any granted privilege applies to every
+        /// record. Business-owned entities are scoped by their owning business unit.
+        /// </summary>
+        private bool HasBusinessScopedPermission(Entity entity, PrivilegeDepth maxRole, EntityReference caller)
+        {
+            var ownershipType = Metadata.EntityMetadata.GetMetadata(entity.LogicalName).OwnershipType;
+
+            // Organization-owned entities have a single (organization) privilege scope,
+            // so holding the privilege at any depth grants access to every record.
+            if (ownershipType.HasValue && ownershipType.Value.HasFlag(OwnershipTypes.OrganizationOwned))
+                return true;
+
+            // User (Basic) access is ownership-based: per Dataverse it grants records the user
+            // owns plus records shared with them. Business-owned records (systemuser, team,
+            // businessunit) have no user owner, so the only such record a caller "owns" is their
+            // own (e.g. their own systemuser record). Shares are handled by HasSharePermission.
+            if (maxRole == PrivilegeDepth.Basic)
+                return entity.Id == caller.Id;
+
+            var recordBu = GetOwningBusinessUnit(entity);
+
+            // Fail closed: a business-owned record whose owning business unit can't be resolved
+            // must not be widened to every caller. In practice this is always resolvable (the
+            // record, or its stored row, carries a business unit); denying here only guards
+            // against a malformed record or an unexpectedly ownerless business-owned table.
+            if (recordBu == null) return false;
+
+            var callerRow = Core.GetDbRowOrNull(caller);
+            if (callerRow == null) return false;
+
+            var callerBu = callerRow.GetColumn<DbRow>("businessunitid")?.Id;
+            if (callerBu == null) return false;
+
+            switch (maxRole)
+            {
+                // Business Unit (Local): records whose owning business unit is the caller's.
+                case PrivilegeDepth.Local:
+                    return recordBu.Value == callerBu.Value;
+
+                // Parent: Child (Deep): the caller's business unit and all subordinate units.
+                case PrivilegeDepth.Deep:
+                    return IsBusinessUnitInTree(recordBu.Value, callerBu.Value);
+
+                default:
+                    return false;
+            }
+        }
+
+        private Guid? GetOwningBusinessUnit(Entity entity)
+        {
+            if (entity.LogicalName == LogicalNames.BusinessUnit)
+                return entity.Id;
+
+            var bu = entity.GetAttributeValue<EntityReference>("businessunitid")
+                     ?? entity.GetAttributeValue<EntityReference>("owningbusinessunit");
+            if (bu != null) return bu.Id;
+
+            // The supplied entity may be a partial projection (e.g. a RetrieveMultiple result
+            // that didn't select the business unit column), so resolve from the stored record
+            // rather than trusting the instance - a missing column must not silently widen access.
+            if (entity.Id == Guid.Empty) return null;
+
+            var row = Core.GetDbRowOrNull(entity.ToEntityReference());
+            if (row == null) return null;
+
+            return GetBusinessUnitColumnId(row, "businessunitid")
+                   ?? GetBusinessUnitColumnId(row, "owningbusinessunit");
+        }
+
+        private static Guid? GetBusinessUnitColumnId(DbRow row, string attribute)
+        {
+            // DbRow's indexer throws for attributes absent from the table's metadata, so guard first.
+            if (!row.AttributeMetadata.ContainsKey(attribute)) return null;
+
+            switch (row[attribute])
+            {
+                case DbRow dbRow: return dbRow.Id;
+                case EntityReference reference: return reference.Id;
+                default: return null;
+            }
+        }
+
+        private bool IsBusinessUnitInTree(Guid businessUnitId, Guid rootBusinessUnitId)
+        {
+            if (businessUnitId == rootBusinessUnitId) return true;
+
+            var childBusinessUnits = Core.GetDbTable(LogicalNames.BusinessUnit)
+                .Select(x => x.ToEntity())
+                .Where(b => b.GetAttributeValue<EntityReference>("parentbusinessunitid")?.Id == rootBusinessUnitId);
+
+            return childBusinessUnits.Any(b => IsBusinessUnitInTree(businessUnitId, b.Id));
         }
 
         internal bool HasSharePermission(Entity entity, AccessRights access, EntityReference caller)
@@ -570,7 +729,10 @@ namespace DG.Tools.XrmMockup
                     var refEntity = Core.GetDbRowOrNull(new EntityReference(pcr.ReferencedEntity, Utility.GetGuidFromReference(entity[pcr.ReferencingAttribute])));
                     if (refEntity != null)
                     {
-                        if (refEntity.GetColumn<DbRow>("ownerid").Id == caller.Id)
+                        // Business-owned / organization-owned parents (e.g. systemuser) have no
+                        // ownerid, so there is no owner to match the caller against.
+                        var refOwner = refEntity.GetColumn<DbRow>("ownerid");
+                        if (refOwner != null && refOwner.Id == caller.Id)
                         {
                             return true;
                         }

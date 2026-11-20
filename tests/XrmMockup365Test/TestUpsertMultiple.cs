@@ -85,5 +85,36 @@ namespace DG.XrmMockupTest
             var exception = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(req));
             Assert.Equal($"Duplicate Ids are not allowed in the Target list of an UpsertMultipleRequest: {_account1id}.", exception.Message);
         }
+
+        [Fact]
+        public void TestUpsertMultipleThrowsWhenEntityNameMissing()
+        {
+            var req = new UpsertMultipleRequest
+            {
+                Targets = new EntityCollection
+                {
+                    Entities = { new Account { Name = "Acme" } }
+                }
+            };
+
+            var exception = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(req));
+            Assert.Equal("The required field 'EntityName' is missing.", exception.Message);
+        }
+
+        [Fact]
+        public void TestUpsertMultipleThrowsWhenEntityLogicalNameMismatch()
+        {
+            var req = new UpsertMultipleRequest
+            {
+                Targets = new EntityCollection
+                {
+                    EntityName = Account.EntityLogicalName,
+                    Entities = { new Contact { FirstName = "John" } }
+                }
+            };
+
+            var exception = Assert.Throws<FaultException>(() => orgAdminUIService.Execute(req));
+            Assert.Equal($"The entity logical name '{Contact.EntityLogicalName}' does not match the expected entity logical name '{Account.EntityLogicalName}'.", exception.Message);
+        }
     }
 }

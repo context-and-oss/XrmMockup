@@ -57,7 +57,7 @@ namespace DG.Tools.XrmMockup.Metadata
             var skeleton = new MetadataSkeleton();
 
             Console.WriteLine($"Getting entity metadata");
-            skeleton.EntityMetadata = GetEntityMetadata(this.SolutionNames, this.EntityLogicalNames.ToArray()).ToDictionary(m => m.LogicalName, m => m);
+            skeleton.EntityMetadata = new SortedDictionary<string, EntityMetadata>(GetEntityMetadata(this.SolutionNames, this.EntityLogicalNames.ToArray()).ToDictionary(m => m.LogicalName, m => m));
 
             Console.WriteLine("Getting currencies");
             skeleton.Currencies = GetCurrencies();
@@ -548,6 +548,7 @@ namespace DG.Tools.XrmMockup.Metadata
                 case 2: return PrivilegeDepth.Local;
                 case 4: return PrivilegeDepth.Deep;
                 case 8: return PrivilegeDepth.Global;
+                case 16: return PrivilegeDepth.RecordFilter;
                 default:
                     throw new NotImplementedException($"Unknown privilege depth mask: {privilegeDepth}");
             }

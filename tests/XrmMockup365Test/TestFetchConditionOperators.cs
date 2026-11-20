@@ -27,19 +27,21 @@ namespace DG.XrmMockupTest
         [InlineData("olderthan-x-minutes", 1, 3, false)]
         public void TestFetchConditionOperatorsTheoryOlderThanX(string conditionOperator, int minutes, int x, bool hasHit)
         {
+            // Migrated from Opportunity.EstimatedCloseDate -> Account.LastOnHoldTime (Opportunity removed);
+            // this exercises generic FetchXML date condition operators on any settable datetime field.
             orgAdminUIService.Create(
-                new Opportunity()
+                new Account()
                 {
-                    EstimatedCloseDate = DateTime.UtcNow.AddMinutes(-(2 * minutes))
+                    LastOnHoldTime = DateTime.UtcNow.AddMinutes(-(2 * minutes))
                 });
 
             using (var context = new Xrm(orgAdminUIService))
             {
                 var fetchXml1 =
                     $@"<fetch mapping='logical' version='1.0'>
-                        <entity name='opportunity'>
+                        <entity name='account'>
                             <filter>
-                                <condition attribute='estimatedclosedate' operator='{conditionOperator}' value='{x}' />
+                                <condition attribute='lastonholdtime' operator='{conditionOperator}' value='{x}' />
                             </filter>
                         </entity>
                     </fetch>";
@@ -67,19 +69,20 @@ namespace DG.XrmMockupTest
         [InlineData("tomorrow", 2, false)]
         public void TestFetchConditionOperatorsTheoryYesterdayTodayTomorrowX(string conditionOperator, int days, bool hasHit)
         {
+            // Migrated from Opportunity.EstimatedCloseDate -> Account.LastOnHoldTime (Opportunity removed).
             orgAdminUIService.Create(
-                new Opportunity()
+                new Account()
                 {
-                    EstimatedCloseDate = DateTime.UtcNow.AddDays(days)
+                    LastOnHoldTime = DateTime.UtcNow.AddDays(days)
                 });
 
             using (var context = new Xrm(orgAdminUIService))
             {
                 var fetchXml1 =
                     $@"<fetch mapping='logical' version='1.0'>
-                        <entity name='opportunity'>
+                        <entity name='account'>
                             <filter>
-                                <condition attribute='estimatedclosedate' operator='{conditionOperator}' />
+                                <condition attribute='lastonholdtime' operator='{conditionOperator}' />
                             </filter>
                         </entity>
                     </fetch>";

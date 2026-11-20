@@ -7,13 +7,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
+using PowerFxDataverseConnection = Microsoft.PowerFx.Dataverse.DataverseConnection;
 
 namespace DG.Tools.XrmMockup
 {
     internal class FormulaFieldEvaluator
     {
         private readonly IOrganizationService _organizationService;
-        private readonly DataverseConnection _dataverseConnection;
+        private readonly PowerFxDataverseConnection _dataverseConnection;
 
         public FormulaFieldEvaluator(IOrganizationServiceFactory serviceFactory)
         {

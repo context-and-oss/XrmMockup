@@ -126,7 +126,7 @@ namespace DG.XrmMockupTest
                     new EntityReference(Contact.EntityLogicalName, contact2.Id)
                 };
 
-                Relationship relationship = new Relationship(dg_account_contact.EntityLogicalName);
+                Relationship relationship = new Relationship("ctx_account_contact");
 
                 orgAdminUIService.Associate(Contact.EntityLogicalName, contact1.Id, relationship, relatedAccounts);
 
@@ -207,7 +207,7 @@ namespace DG.XrmMockupTest
                     new EntityReference(Contact.EntityLogicalName, contact2.Id)
                 };
 
-                Relationship relationship = new Relationship(dg_account_contact.EntityLogicalName);
+                Relationship relationship = new Relationship("ctx_account_contact");
 
                 orgAdminUIService.Associate(Account.EntityLogicalName, account1.Id, relationship, relatedContacts);
                 var relationQuery = new RelationshipQueryCollection();
@@ -295,11 +295,11 @@ namespace DG.XrmMockupTest
                     new EntityReference(Account.EntityLogicalName, account3.Id)
                 };
 
-                Relationship relationship1 = new Relationship(dg_account_contact.EntityLogicalName);
+                Relationship relationship1 = new Relationship("ctx_account_contact");
 
                 orgAdminUIService.Associate(Contact.EntityLogicalName, contact1.Id, relationship1, relatedAccounts); //contact 1 associated to all accounts
 
-                Relationship relationship2 = new Relationship(dg_account_contact.EntityLogicalName);
+                Relationship relationship2 = new Relationship("ctx_account_contact");
 
                 try
                 {
@@ -320,20 +320,20 @@ namespace DG.XrmMockupTest
             {
                 EntityReferenceCollection relatedEntities = new EntityReferenceCollection();
 
-                dg_bus bus = new dg_bus { dg_Ticketprice = 1 };
+                ctx_parent bus = new ctx_parent { ctx_Amount = 1 };
                 bus.Id = orgAdminService.Create(bus);
 
-                dg_child child = new dg_child { dg_name = "Margrethe" };
+                ctx_child child = new ctx_child { ctx_Name = "Margrethe" };
                 child.Id = orgAdminService.Create(child);
 
-                relatedEntities.Add(new EntityReference(dg_child.EntityLogicalName, child.Id));
-                Relationship relationship = new Relationship("dg_bus_parental");
+                relatedEntities.Add(new EntityReference(ctx_child.EntityLogicalName, child.Id));
+                Relationship relationship = new Relationship("ctx_parent_child");
 
-                orgAdminUIService.Associate(dg_bus.EntityLogicalName, bus.Id, relationship,
+                orgAdminUIService.Associate(ctx_parent.EntityLogicalName, bus.Id, relationship,
                     relatedEntities);
 
-                var retrievedBus = dg_bus.Retrieve(orgAdminService, bus.Id, x => x.dg_Ticketprice);
-                Assert.Equal(25, retrievedBus.dg_Ticketprice);
+                var retrievedBus = ctx_parent.Retrieve(orgAdminService, bus.Id, x => x.ctx_Amount);
+                Assert.Equal(25, retrievedBus.ctx_Amount);
             }
         }
 
@@ -344,20 +344,24 @@ namespace DG.XrmMockupTest
             {
                 EntityReferenceCollection relatedEntities = new EntityReferenceCollection();
 
-                dg_bus bus = new dg_bus { dg_Ticketprice = 1 };
+                ctx_parent bus = new ctx_parent { ctx_Amount = 1 };
                 bus.Id = orgAdminService.Create(bus);
 
-                dg_child child = new dg_child { dg_name = "Margrethe", dg_parentBusId = bus.ToEntityReference() };
+                ctx_child child = new ctx_child { ctx_Name = "Margrethe" };
                 child.Id = orgAdminService.Create(child);
 
-                relatedEntities.Add(new EntityReference(dg_child.EntityLogicalName, child.Id));
-                Relationship relationship = new Relationship("dg_bus_parental");
+                relatedEntities.Add(new EntityReference(ctx_child.EntityLogicalName, child.Id));
+                Relationship relationship = new Relationship("ctx_parent_child");
 
-                orgAdminUIService.Disassociate(dg_bus.EntityLogicalName, bus.Id, relationship,
+                // Associate over the N:N first so there is a link to remove (BusTicketSync stamps 25),
+                // then disassociate it (BusTicketSync stamps 26 — the value under test).
+                orgAdminUIService.Associate(ctx_parent.EntityLogicalName, bus.Id, relationship,
+                    relatedEntities);
+                orgAdminUIService.Disassociate(ctx_parent.EntityLogicalName, bus.Id, relationship,
                     relatedEntities);
 
-                var retrievedBus = dg_bus.Retrieve(orgAdminService, bus.Id, x => x.dg_Ticketprice);
-                Assert.Equal(26, retrievedBus.dg_Ticketprice);
+                var retrievedBus = ctx_parent.Retrieve(orgAdminService, bus.Id, x => x.ctx_Amount);
+                Assert.Equal(26, retrievedBus.ctx_Amount);
             }
         }
     }

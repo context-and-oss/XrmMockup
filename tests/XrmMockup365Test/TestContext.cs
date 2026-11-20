@@ -1,5 +1,6 @@
 ﻿using System.Linq;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
 using Xunit;
 
@@ -12,11 +13,13 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAddObject()
         {
+            // Migrated from Lead -> Contact (Lead removed from environment); this is a generic
+            // context add/SaveChanges test, so any available entity works.
             using (var context = new Xrm(orgAdminUIService))
             {
-                context.AddObject(new Lead());
+                context.AddObject(new Contact());
                 context.SaveChanges();
-                Assert.NotNull(context.LeadSet.FirstOrDefault());
+                Assert.NotNull(context.ContactSet.FirstOrDefault());
                 context.ClearChanges();
             }
         }
@@ -38,11 +41,22 @@ namespace DG.XrmMockupTest
                     new EntityReference(Account.EntityLogicalName, acc3)
                 };
 
-                Relationship relationship = new Relationship(dg_account_contact.EntityLogicalName);
+                Relationship relationship = new Relationship("ctx_account_contact");
 
                 orgAdminUIService.Associate(Contact.EntityLogicalName, con, relationship, relatedAccounts);
 
-                Assert.Equal(3, context.dg_account_contactSet.Where(x => x.contactid == con).ToList().Count());
+                // There is no early-bound intersect-entity set for ctx_account_contact, so assert the
+                // association via a QueryExpression over account with a LinkEntity to the intersect entity
+                // filtering on the contact id.
+                var query = new QueryExpression(Account.EntityLogicalName)
+                {
+                    ColumnSet = new ColumnSet(false)
+                };
+                var link = query.AddLink("ctx_account_contact", "accountid", "accountid");
+                link.LinkCriteria.AddCondition("contactid", ConditionOperator.Equal, con);
+
+                var associatedAccounts = orgAdminUIService.RetrieveMultiple(query);
+                Assert.Equal(3, associatedAccounts.Entities.Count);
             }
         }
 
@@ -50,25 +64,26 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestUpdateObject()
         {
+            // Migrated from Lead -> Contact (Lead removed from environment); generic update-via-context test.
             using (var context = new Xrm(orgAdminUIService))
             {
-                var lead = new Lead
+                var contact = new Contact
                 {
                     FirstName = "Before"
                 };
-                orgAdminUIService.Create(lead);
-                var leadFromContext = context.LeadSet.First();
-                leadFromContext.FirstName = "After";
+                orgAdminUIService.Create(contact);
+                var contactFromContext = context.ContactSet.First();
+                contactFromContext.FirstName = "After";
                 context.SaveChanges();
 
-                Assert.Equal(lead.FirstName, context.LeadSet.First().FirstName);
+                Assert.Equal(contact.FirstName, context.ContactSet.First().FirstName);
                 context.ClearChanges();
 
-                context.Attach(leadFromContext);
-                context.UpdateObject(leadFromContext);
+                context.Attach(contactFromContext);
+                context.UpdateObject(contactFromContext);
                 context.SaveChanges();
 
-                Assert.Equal(leadFromContext.FirstName, context.LeadSet.First().FirstName);
+                Assert.Equal(contactFromContext.FirstName, context.ContactSet.First().FirstName);
                 context.ClearChanges();
             }
         }

@@ -51,9 +51,10 @@ namespace TestPluginAssembly365.Plugins.LegacyDaxif {
             }
 
             var rand = new Random();
-            service.Create(new Lead() {
-                Subject = nameof(LegacyAccountPlugin) + " " + localContext.PluginExecutionContext.MessageName + ": Some new lead " + rand.Next(0, 1000),
-                ParentAccountId = new Account(localContext.PluginExecutionContext.PrimaryEntityId).ToEntityReference()
+            // Migrated from Lead -> ctx_parent (see AccountPostPlugin for rationale).
+            service.Create(new ctx_parent() {
+                ctx_Name = nameof(LegacyAccountPlugin) + " " + localContext.PluginExecutionContext.MessageName + ": Some new lead " + rand.Next(0, 1000),
+                ctx_AccountId = new Account(localContext.PluginExecutionContext.PrimaryEntityId).ToEntityReference()
             });
         }
     }

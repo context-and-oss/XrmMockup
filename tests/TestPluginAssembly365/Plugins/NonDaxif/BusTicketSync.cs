@@ -17,22 +17,25 @@ namespace DG.NotAKeyWord.SSPOnBoarding.Plugins
 
         public override void Execute(IServiceProvider serviceProvider)
         {
+            // Migrated from dg_bus / dg_bus_parental to ctx_parent / the ctx_parent_child N:N. Fires on
+            // Associate/Disassociate of that relationship and stamps ctx_Amount (25 on associate, 26 on
+            // disassociate) so TestAssocDissoc can verify the plugin ran on those messages.
             var context = new LocalPluginContext(serviceProvider);
 
             var relationship = context.PluginExecutionContext.InputParameters["Relationship"] as Relationship;
-            if (relationship.SchemaName != "dg_bus_parental") return;
+            if (relationship.SchemaName != "ctx_parent_child") return;
 
-            if (context.PluginExecutionContext.Depth > 1)  return;
+            if (context.PluginExecutionContext.Depth > 1) return;
 
             var service = context.OrganizationService;
             var id = context.PluginExecutionContext.PrimaryEntityId;
 
-            var snapshotChild = dg_bus.Retrieve(service, id, x => x.dg_Ticketprice);
+            var snapshotChild = ctx_parent.Retrieve(service, id, x => x.ctx_Amount);
 
             if (snapshotChild != null)
-                service.Update(new dg_bus(id)
+                service.Update(new ctx_parent(id)
                 {
-                    dg_Ticketprice = context.PluginExecutionContext.MessageName == "Associate" ? 25 : 26  
+                    ctx_Amount = context.PluginExecutionContext.MessageName == "Associate" ? 25 : 26
                 });
         }
     }

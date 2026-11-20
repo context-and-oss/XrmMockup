@@ -1,249 +1,284 @@
-﻿using Microsoft.Xrm.Sdk;
+using System;
+using System.Linq;
+using System.ServiceModel;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Crm.Sdk.Messages;
-using DG.XrmFramework.BusinessDomain.ServiceContext;
 using Xunit;
+using Xunit.Sdk;
+using DG.XrmFramework.BusinessDomain.ServiceContext;
 using DG.Tools.XrmMockup;
 
 namespace DG.XrmMockupTest
 {
+    // Late-bound tests for the Win/Close/Revise quote request handlers; Quote/QuoteClose/QuoteDetail
+    // metadata is supplied by RemovedEntitiesMetadata.xml (entities not in the environment).
     public class TestQuote : UnitTestBase
     {
         public TestQuote(XrmMockupFixture fixture) : base(fixture) { }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void TestRetrieveCalculatedDecimalMarginFromMoneyFields(bool retrieveMultiple)
+        {
+            // The supplemental quote metadata defines the classic decimal calculation
+            // ((msdyn_totalamount - msdyn_estimatedcost) / msdyn_totalamount) * 100.
+            // Seed the Money operands directly to isolate the decimal calculation from
+            // the separate calculation of msdyn_totalamount (which is not requested here).
+            var quote = new Entity("quote")
+            {
+                ["msdyn_totalamount"] = new Money(150m),
+                ["msdyn_estimatedcost"] = new Money(112.5m),
+            };
+            crm.PopulateWith(quote);
+
+            Entity retrieved;
+            if (retrieveMultiple)
+            {
+                var query = new QueryExpression("quote")
+                {
+                    ColumnSet = new ColumnSet("msdyn_estimatedquotemargin"),
+                };
+                query.Criteria.AddCondition("quoteid", ConditionOperator.Equal, quote.Id);
+                retrieved = Assert.Single(orgAdminService.RetrieveMultiple(query).Entities);
+            }
+            else
+            {
+                retrieved = orgAdminService.Retrieve("quote", quote.Id,
+                    new ColumnSet("msdyn_estimatedquotemargin"));
+            }
+
+            Assert.Equal(25m, Assert.IsType<decimal>(retrieved["msdyn_estimatedquotemargin"]));
+        }
+
         [Fact]
         public void TestWinQuoteUsingStandardStatus()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+
+            var winReq = new WinQuoteRequest()
             {
-                var quote = new Quote();
-                quote.Id = orgAdminUIService.Create(quote);
-
-                var winReq = new WinQuoteRequest()
+                QuoteClose = new Entity("quoteclose")
                 {
-                    QuoteClose = new QuoteClose()
-                    {
-                        QuoteId = quote.ToEntityReference(),
-                        Subject = "Quote won"
-                    },
-                    Status = new OptionSetValue(-1) // default to Won
-                };
+                    ["quoteid"] = quote.ToEntityReference(),
+                    ["subject"] = "Quote won"
+                },
+                Status = new OptionSetValue(-1) // default to Won
+            };
 
-                orgAdminUIService.Execute(winReq);
+            orgAdminUIService.Execute(winReq);
 
-                var retrieved = orgAdminUIService.Retrieve(Quote.EntityLogicalName, quote.Id, new ColumnSet(true)) as Quote;
+            var retrieved = orgAdminUIService.Retrieve("quote", quote.Id, new ColumnSet(true));
 
-                Assert.Equal(QuoteState.Won, retrieved.StateCode);
-                Assert.Equal(Quote_StatusCode.Won, retrieved.StatusCode);
-            }
+            Assert.Equal(2, retrieved.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(4, retrieved.GetAttributeValue<OptionSetValue>("statuscode").Value);
         }
 
         [Fact]
         public void TestWinQuote()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+
+            var winReq = new WinQuoteRequest()
             {
-                var quote = new Quote();
-                quote.Id = orgAdminUIService.Create(quote);
-
-                var winReq = new WinQuoteRequest()
+                QuoteClose = new Entity("quoteclose")
                 {
-                    QuoteClose = new QuoteClose()
-                    {
-                        QuoteId = quote.ToEntityReference(),
-                        Subject = "Quote won"
-                    },
-                    Status = new OptionSetValue((int)Quote_StatusCode.Won)
-                };
+                    ["quoteid"] = quote.ToEntityReference(),
+                    ["subject"] = "Quote won"
+                },
+                Status = new OptionSetValue(4)
+            };
 
-                orgAdminUIService.Execute(winReq);
+            orgAdminUIService.Execute(winReq);
 
-                var retrieved = orgAdminUIService.Retrieve(Quote.EntityLogicalName, quote.Id, new ColumnSet(true)) as Quote;
+            var retrieved = orgAdminUIService.Retrieve("quote", quote.Id, new ColumnSet(true));
 
-                Assert.Equal(QuoteState.Won, retrieved.StateCode);
-                Assert.Equal(Quote_StatusCode.Won, retrieved.StatusCode);
-            }
+            Assert.Equal(2, retrieved.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(4, retrieved.GetAttributeValue<OptionSetValue>("statuscode").Value);
         }
 
         [Fact]
         public void TestCloseQuoteUsingStandardStatus()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+
+            var winReq = new CloseQuoteRequest()
             {
-                var quote = new Quote();
-                quote.Id = orgAdminUIService.Create(quote);
-
-                var winReq = new CloseQuoteRequest()
+                QuoteClose = new Entity("quoteclose")
                 {
-                    QuoteClose = new QuoteClose()
-                    {
-                        QuoteId = quote.ToEntityReference(),
-                        Subject = "Quote closed"
-                    },
-                    Status = new OptionSetValue(-1) // default to Lost
-                };
+                    ["quoteid"] = quote.ToEntityReference(),
+                    ["subject"] = "Quote closed"
+                },
+                Status = new OptionSetValue(-1) // default to Lost
+            };
 
-                orgAdminUIService.Execute(winReq);
+            orgAdminUIService.Execute(winReq);
 
-                var retrieved = orgAdminUIService.Retrieve(Quote.EntityLogicalName, quote.Id, new ColumnSet(true)) as Quote;
+            var retrieved = orgAdminUIService.Retrieve("quote", quote.Id, new ColumnSet(true));
 
-                Assert.Equal(QuoteState.Closed, retrieved.StateCode);
-                Assert.Equal(Quote_StatusCode.Lost, retrieved.StatusCode);
-            }
+            Assert.Equal(3, retrieved.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(5, retrieved.GetAttributeValue<OptionSetValue>("statuscode").Value);
         }
 
         [Fact]
         public void TestCloseQuote()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+
+            var winReq = new CloseQuoteRequest()
             {
-                var quote = new Quote();
-                quote.Id = orgAdminUIService.Create(quote);
-
-                var winReq = new CloseQuoteRequest()
+                QuoteClose = new Entity("quoteclose")
                 {
-                    QuoteClose = new QuoteClose()
-                    {
-                        QuoteId = quote.ToEntityReference(),
-                        Subject = "Quote closed"
-                    },
-                    Status = new OptionSetValue((int)Quote_StatusCode.Lost)
-                };
+                    ["quoteid"] = quote.ToEntityReference(),
+                    ["subject"] = "Quote closed"
+                },
+                Status = new OptionSetValue(5)
+            };
 
-                orgAdminUIService.Execute(winReq);
+            orgAdminUIService.Execute(winReq);
 
-                var retrieved = orgAdminUIService.Retrieve(Quote.EntityLogicalName, quote.Id, new ColumnSet(true)) as Quote;
+            var retrieved = orgAdminUIService.Retrieve("quote", quote.Id, new ColumnSet(true));
 
-                Assert.Equal(QuoteState.Closed, retrieved.StateCode);
-                Assert.Equal(Quote_StatusCode.Lost, retrieved.StatusCode);
-            }
+            Assert.Equal(3, retrieved.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(5, retrieved.GetAttributeValue<OptionSetValue>("statuscode").Value);
         }
 
         [Fact]
         public void ReviseDraftQuote_Fails()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            // Arrange
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+
+            var reviseReq = new ReviseQuoteRequest()
             {
-                // Arrange
-                var quote = new Quote();
-                quote.Id = orgAdminUIService.Create(quote);
+                QuoteId = quote.Id,
+                ColumnSet = new ColumnSet(true)
+            };
 
-                var reviseReq = new ReviseQuoteRequest()
-                {
-                    QuoteId = quote.Id,
-                    ColumnSet = new ColumnSet(true)
-                };
-
-                // Act & Assert
-                var ex = Assert.Throws<MockupException>(() => orgAdminUIService.Execute(reviseReq));
-                Assert.Equal("Only quotes in the closed state can be revised.", ex.Message);
-            }
+            // Act & Assert
+            var ex = Assert.Throws<MockupException>(() => orgAdminUIService.Execute(reviseReq));
+            Assert.Equal("Only quotes in the closed state can be revised.", ex.Message);
         }
 
         [Fact]
         public void ReviseActiveQuote_Fails()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            // Arrange
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+            orgAdminUIService.Execute(new SetStateRequest
             {
-                // Arrange
-                var quote = new Quote();
-                orgAdminUIService.Execute(quote.MakeCreateRequest());
-                orgAdminUIService.Execute(quote.MakeSetStateRequest(QuoteState.Active, Quote_StatusCode.InProgress_2));
+                EntityMoniker = quote.ToEntityReference(),
+                State = new OptionSetValue(1),
+                Status = new OptionSetValue(2)
+            });
 
-                var reviseReq = new ReviseQuoteRequest()
-                {
-                    QuoteId = quote.Id,
-                    ColumnSet = new ColumnSet(true)
-                };
+            var reviseReq = new ReviseQuoteRequest()
+            {
+                QuoteId = quote.Id,
+                ColumnSet = new ColumnSet(true)
+            };
 
-                // Act & Assert
-                var ex = Assert.Throws<MockupException>(() => orgAdminUIService.Execute(reviseReq));
-                Assert.Equal("Only quotes in the closed state can be revised.", ex.Message);
-            }
+            // Act & Assert
+            var ex = Assert.Throws<MockupException>(() => orgAdminUIService.Execute(reviseReq));
+            Assert.Equal("Only quotes in the closed state can be revised.", ex.Message);
         }
 
         [Fact]
         public void ReviseWonQuote_Fails()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            // Arrange
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+            orgAdminUIService.Execute(new SetStateRequest
             {
-                // Arrange
-                var quote = new Quote();
-                orgAdminUIService.Execute(quote.MakeCreateRequest());
-                orgAdminUIService.Execute(quote.MakeSetStateRequest(QuoteState.Won, Quote_StatusCode.Won));
+                EntityMoniker = quote.ToEntityReference(),
+                State = new OptionSetValue(2),
+                Status = new OptionSetValue(4)
+            });
 
-                var reviseReq = new ReviseQuoteRequest()
-                {
-                    QuoteId = quote.Id,
-                    ColumnSet = new ColumnSet(true)
-                };
+            var reviseReq = new ReviseQuoteRequest()
+            {
+                QuoteId = quote.Id,
+                ColumnSet = new ColumnSet(true)
+            };
 
-                // Act & Assert
-                var ex = Assert.Throws<MockupException>(() => orgAdminUIService.Execute(reviseReq));
-                Assert.Equal("Only quotes in the closed state can be revised.", ex.Message);
-            }
+            // Act & Assert
+            var ex = Assert.Throws<MockupException>(() => orgAdminUIService.Execute(reviseReq));
+            Assert.Equal("Only quotes in the closed state can be revised.", ex.Message);
         }
 
         [Fact]
         public void ReviseClosedQuote()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            // Arrange
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+            orgAdminUIService.Execute(new SetStateRequest
             {
-                // Arrange
-                var quote = new Quote();
-                orgAdminUIService.Execute(quote.MakeCreateRequest());
-                orgAdminUIService.Execute(quote.MakeSetStateRequest(QuoteState.Closed, Quote_StatusCode.Revised));
+                EntityMoniker = quote.ToEntityReference(),
+                State = new OptionSetValue(3),
+                Status = new OptionSetValue(7)
+            });
 
-                var reviseReq = new ReviseQuoteRequest()
-                {
-                    QuoteId = quote.Id,
-                    ColumnSet = new ColumnSet(true)
-                };
+            var reviseReq = new ReviseQuoteRequest()
+            {
+                QuoteId = quote.Id,
+                ColumnSet = new ColumnSet(true)
+            };
 
-                // Act
-                var resp = (ReviseQuoteResponse)orgAdminUIService.Execute(reviseReq);
+            // Act
+            var resp = (ReviseQuoteResponse)orgAdminUIService.Execute(reviseReq);
 
-                // Assert
-                Assert.NotNull(resp.Entity);
-                var revisedQuote = orgAdminUIService.Retrieve(Quote.EntityLogicalName, resp.Entity.Id, new ColumnSet(true)) as Quote;
-                Assert.Equal(1, revisedQuote.RevisionNumber);
-                Assert.Equal(QuoteState.Draft, revisedQuote.StateCode);
-                Assert.Equal(Quote_StatusCode.InProgress_2, revisedQuote.StatusCode);
-            }
+            // Assert
+            Assert.NotNull(resp.Entity);
+            var revisedQuote = orgAdminUIService.Retrieve("quote", resp.Entity.Id, new ColumnSet(true));
+            Assert.Equal(1, revisedQuote.GetAttributeValue<int>("revisionnumber"));
+            Assert.Equal(0, revisedQuote.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(1, revisedQuote.GetAttributeValue<OptionSetValue>("statuscode").Value); // InProgress_2 (draft default)
         }
 
         [Fact]
         public void ReviseClosedWithQuoteDetailsQuote()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            // Arrange
+            var quote = new Entity("quote");
+            quote.Id = orgAdminUIService.Create(quote);
+            orgAdminUIService.Execute(new SetStateRequest
             {
-                // Arrange
-                var quote = new Quote();
-                quote.Id = orgAdminUIService.Create(quote);
-                orgAdminUIService.Execute(quote.MakeSetStateRequest(QuoteState.Closed, Quote_StatusCode.Revised));
-                var quoteLine = new QuoteDetail() { QuoteId = quote.ToEntityReference() };
-                orgAdminUIService.Execute(quoteLine.MakeCreateRequest());
+                EntityMoniker = quote.ToEntityReference(),
+                State = new OptionSetValue(3),
+                Status = new OptionSetValue(7)
+            });
+            var quoteLine = new Entity("quotedetail") { ["quoteid"] = quote.ToEntityReference() };
+            quoteLine.Id = orgAdminUIService.Create(quoteLine);
 
-                var reviseReq = new ReviseQuoteRequest()
-                {
-                    QuoteId = quote.Id,
-                    ColumnSet = new ColumnSet(true)
-                };
+            var reviseReq = new ReviseQuoteRequest()
+            {
+                QuoteId = quote.Id,
+                ColumnSet = new ColumnSet(true)
+            };
 
-                // Act
-                var resp = (ReviseQuoteResponse)orgAdminUIService.Execute(reviseReq);
+            // Act
+            var resp = (ReviseQuoteResponse)orgAdminUIService.Execute(reviseReq);
 
-                // Assert
-                Assert.NotNull(resp.Entity);
-                var revisedQuote = orgAdminUIService.Retrieve(Quote.EntityLogicalName, resp.Entity.Id, new ColumnSet(true)) as Quote;
-                Assert.Equal(1, revisedQuote.RevisionNumber);
-                Assert.Equal(QuoteState.Draft, revisedQuote.StateCode);
-                Assert.Equal(Quote_StatusCode.InProgress_2, revisedQuote.StatusCode);
-                var query = new QueryExpression(QuoteDetail.EntityLogicalName);
-                query.Criteria.AddCondition("quoteid", ConditionOperator.Equal, revisedQuote.Id);
-                var relatedQuoteLines = orgAdminUIService.RetrieveMultiple(query).Entities;
-                Assert.Single(relatedQuoteLines);
-            }
+            // Assert
+            Assert.NotNull(resp.Entity);
+            var revisedQuote = orgAdminUIService.Retrieve("quote", resp.Entity.Id, new ColumnSet(true));
+            Assert.Equal(1, revisedQuote.GetAttributeValue<int>("revisionnumber"));
+            Assert.Equal(0, revisedQuote.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(1, revisedQuote.GetAttributeValue<OptionSetValue>("statuscode").Value); // InProgress_2 (draft default)
+            var query = new QueryExpression("quotedetail");
+            query.ColumnSet = new ColumnSet(true);
+            query.Criteria.AddCondition("quoteid", ConditionOperator.Equal, revisedQuote.Id);
+            var relatedQuoteLines = orgAdminUIService.RetrieveMultiple(query).Entities;
+            Assert.Single(relatedQuoteLines);
         }
     }
 }

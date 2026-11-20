@@ -10,7 +10,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Tests.Models;
 public class GeneratorOptionsTests
 {
     [Fact]
-    public void SecurityRoles_DefaultsToEmptyArray()
+    public void SecurityRoles_DefaultsToNull()
     {
         // Arrange & Act
         var options = new GeneratorOptions
@@ -19,8 +19,7 @@ public class GeneratorOptionsTests
         };
 
         // Assert
-        Assert.NotNull(options.SecurityRoles);
-        Assert.Empty(options.SecurityRoles);
+        Assert.Null(options.SecurityRoles);
     }
 
     [Fact]

@@ -29,14 +29,14 @@ namespace DG.Tools.XrmMockup
         internal int Order { get; }
         internal Guid? ImpersonatingUserId { get; }
 
-        readonly Dictionary<string, EntityMetadata> Metadata;
+        readonly SortedDictionary<string, EntityMetadata> Metadata;
         readonly HashSet<string> Attributes;
         readonly IEnumerable<IImageSpecification> Images;
 
         private string DebuggerDisplay => $"{Stage} {Operation} {EntityName} [{string.Join(", ", Attributes)}]";
 
-        public PluginTrigger(string operation, ExecutionStage stage,
-                Action<MockupServiceProviderAndFactory> pluginExecute, IPluginStepConfig pluginRegistration, Dictionary<string, EntityMetadata> metadata)
+        public  PluginTrigger(string operation, ExecutionStage stage,
+                Action<MockupServiceProviderAndFactory> pluginExecute, IPluginStepConfig pluginRegistration, SortedDictionary<string, EntityMetadata> metadata)
         {
             PluginExecute = pluginExecute;
             EntityName = pluginRegistration.EntityLogicalName;
@@ -63,7 +63,8 @@ namespace DG.Tools.XrmMockup
         }
 
         // Saves "execution" for Async plugins to be executed after sync plugins.
-        public PluginExecutionProvider ToPluginExecution(object entityObject, Entity preImage, Entity postImage, PluginContext pluginContext, Core core)
+        public PluginExecutionProvider ToPluginExecution(object entityObject, Entity preImage, Entity postImage, PluginContext pluginContext, ICoreOperations core,
+            ISet<string> systemInjectedAttributes = null)
         {
             var entity = entityObject as Entity;
             var entityRef = entityObject as EntityReference;
@@ -71,17 +72,25 @@ namespace DG.Tools.XrmMockup
             var guid = (entity != null) ? entity.Id : entityRef.Id;
             var logicalName = (entity != null) ? entity.LogicalName : entityRef.LogicalName;
 
-            if (VerifyPluginTrigger(entity, logicalName, guid, preImage, postImage, pluginContext))
+            if (VerifyPluginTrigger(entity, logicalName, guid, preImage, postImage, pluginContext, systemInjectedAttributes))
             {
                 // Create the plugin context
                 var thisPluginContext = CreatePluginContext(pluginContext, guid, logicalName, preImage, postImage);
-                return new PluginExecutionProvider(PluginExecute, new MockupServiceProviderAndFactory(core, thisPluginContext, core.TracingServiceFactory));
+                // Capture the async job's creation time when staging, rather than when it executes.
+                thisPluginContext.OperationCreatedOn = DateTime.UtcNow.Add(core.TimeOffset);
+                var provider = core.CreateServiceProviderAndFactory(thisPluginContext);
+                // Preserve async exception semantics (no TargetInvocationException unwrapping), but
+                // still time the execution and capture its trace messages into the grouped trace log.
+                return new PluginExecutionProvider(
+                    p => ExecuteAndRecord(p, thisPluginContext, core, unwrapTargetInvocation: false, record: true),
+                    provider);
             }
 
             return null;
         }
 
-        public void ExecuteIfMatch(object entityObject, Entity preImage, Entity postImage, PluginContext pluginContext, Core core)
+        public void ExecuteIfMatch(object entityObject, Entity preImage, Entity postImage, PluginContext pluginContext, ICoreOperations core, bool recordTrace = true,
+            ISet<string> systemInjectedAttributes = null)
         {
             // Check if it is supposed to execute. Returns preemptively, if it should not.
             var entity = entityObject as Entity;
@@ -101,26 +110,40 @@ namespace DG.Tools.XrmMockup
                 ? entityRef.LogicalName
                 : entityCollection.EntityName;
 
-            if (VerifyPluginTrigger(entity, logicalName, guid, preImage, postImage, pluginContext))
+            if (VerifyPluginTrigger(entity, logicalName, guid, preImage, postImage, pluginContext, systemInjectedAttributes))
             {
                 var thisPluginContext = CreatePluginContext(pluginContext, guid, logicalName, preImage, postImage);
 
                 //Create Serviceprovider, and execute plugin
-                MockupServiceProviderAndFactory provider = new MockupServiceProviderAndFactory(core, thisPluginContext, core.TracingServiceFactory);
-                try
-                {
-                    PluginExecute(provider);
-                }
-                catch (TargetInvocationException e)
-                {
-                    ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                }
+                MockupServiceProviderAndFactory provider = core.CreateServiceProviderAndFactory(thisPluginContext);
+                ExecuteAndRecord(provider, thisPluginContext, core, unwrapTargetInvocation: true, record: recordTrace);
 
                 foreach (var parameter in thisPluginContext.SharedVariables)
                 {
                     pluginContext.SharedVariables[parameter.Key] = parameter.Value;
                 }
             }
+        }
+
+        /// <summary>
+        /// Executes the plugin while timing it and capturing any thrown exception, then (when
+        /// <paramref name="record"/> is true) records a grouped <see cref="PluginTraceLog"/> entry
+        /// containing this execution's trace messages and metadata.
+        /// </summary>
+        private void ExecuteAndRecord(MockupServiceProviderAndFactory provider, PluginContext ctx, ICoreOperations core, bool unwrapTargetInvocation, bool record)
+        {
+            PluginTraceRecorder.Run(
+                core,
+                provider,
+                ctx,
+                typeName: PluginExecute.Target?.GetType().FullName,
+                messageName: !string.IsNullOrEmpty(ctx.MessageName) ? ctx.MessageName : Operation,
+                primaryEntity: ctx.PrimaryEntityName,
+                operationType: PluginTraceOperationType.Plugin,
+                mode: this.Mode,
+                execute: () => PluginExecute(provider),
+                unwrapTargetInvocation: unwrapTargetInvocation,
+                record: record);
         }
 
         private void CheckInfiniteLoop(PluginContext pluginContext)
@@ -144,7 +167,8 @@ namespace DG.Tools.XrmMockup
 
         private Entity AddPostImageAttributesToEntity(Entity entity, Entity preImage, Entity postImage)
         {
-            if (Operation.Matches(EventOperation.Update) && Stage == ExecutionStage.PostOperation)
+            if (Operation.Matches(EventOperation.Update) && Stage == ExecutionStage.PostOperation
+                && preImage != null && postImage != null)
             {
                 var shadowAddedAttributes = postImage.Attributes.Where(a => !preImage.Attributes.ContainsKey(a.Key) && !entity.Attributes.ContainsKey(a.Key));
                 entity = entity.CloneEntity();
@@ -153,7 +177,7 @@ namespace DG.Tools.XrmMockup
             return entity;
         }
 
-        private bool FilteredAttributesMatches(Entity entity)
+        private bool FilteredAttributesMatches(Entity entity, ISet<string> systemInjectedAttributes)
         {
             if (!Operation.Matches(EventOperation.Update) || Attributes.Count == 0)
             {
@@ -163,6 +187,15 @@ namespace DG.Tools.XrmMockup
             bool foundAttr = false;
             foreach (var attr in entity.Attributes)
             {
+                // System-managed attributes that XrmMockup copied onto the Target for post-operation
+                // visibility were not part of the update the caller asked for, so they must not
+                // satisfy the filter — otherwise a step filtered on e.g. statecode would fire on
+                // every update of the table.
+                if (systemInjectedAttributes != null && systemInjectedAttributes.Contains(attr.Key))
+                {
+                    continue;
+                }
+
                 if (Attributes.Contains(attr.Key))
                 {
                     foundAttr = true;
@@ -172,7 +205,8 @@ namespace DG.Tools.XrmMockup
             return foundAttr;
         }
 
-        private bool VerifyPluginTrigger(Entity entity, string logicalName, Guid guid, Entity preImage, Entity postImage, PluginContext pluginContext)
+        private bool VerifyPluginTrigger(Entity entity, string logicalName, Guid guid, Entity preImage, Entity postImage, PluginContext pluginContext,
+            ISet<string> systemInjectedAttributes = null)
         {
             if (EntityName != "" && EntityName != logicalName) return false;
 
@@ -185,7 +219,7 @@ namespace DG.Tools.XrmMockup
             entity = AddPostImageAttributesToEntity(entity, preImage, postImage);
             CheckSpecialRequest();
 
-            if (FilteredAttributesMatches(entity))
+            if (FilteredAttributesMatches(entity, systemInjectedAttributes))
             {
                 return true;
             }
@@ -215,7 +249,7 @@ namespace DG.Tools.XrmMockup
                 {
                     thisPluginContext.PostEntityImages.Add(image.ImageName, postImage.CloneEntity(Metadata.GetMetadata(postImage.LogicalName), cols));
                 }
-                if (preImage != null && imageType == ImageType.PreImage || imageType == ImageType.Both)
+                if (preImage != null && (imageType == ImageType.PreImage || imageType == ImageType.Both))
                 {
                     thisPluginContext.PreEntityImages.Add(image.ImageName, preImage.CloneEntity(Metadata.GetMetadata(preImage.LogicalName), cols));
                 }

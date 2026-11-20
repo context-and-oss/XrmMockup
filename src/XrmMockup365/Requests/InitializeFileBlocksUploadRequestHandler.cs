@@ -14,6 +14,13 @@ namespace DG.Tools.XrmMockup
         {
             var request = MakeRequest<InitializeFileBlocksUploadRequest>(orgRequest);
 
+            if (!db.IsValidEntity("fileattachment"))
+            {
+                throw new MockupException(
+                    "File operations require the 'fileattachment' entity, which is not present in the loaded metadata. " +
+                    "Regenerate your metadata so it includes 'fileattachment' (it is one of the metadata generator's default entities).");
+            }
+
             var token = Guid.NewGuid().ToString();
             var fileAttachmentId = Guid.NewGuid();
 

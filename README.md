@@ -15,6 +15,12 @@ the plugins and workflows automatically being run inside your test cases if nece
 
 Find more in-depth information and examples in the [wiki](https://github.com/delegateas/XrmMockup/wiki).
 
+## Supported frameworks
+
+XrmMockup365 targets .NET Framework 4.6.2, .NET Framework 4.8, and .NET 10.
+The test suite runs on .NET Framework 4.8 and .NET 10, including regression coverage
+for plugins compiled against .NET Framework 4.6.2.
+
 ## Features
 
 * Simulates a target Dynamics 365/CRM instance by reading a local copy of its metadata.
@@ -22,3 +28,7 @@ Find more in-depth information and examples in the [wiki](https://github.com/del
 * Automatically executes plugins and workflows during requests which trigger them.
 * Enforces the security model of CRM, thus allowing you to test your security roles and business unit setup.
 * Enables changing the time of the internal clock of XrmMockup during tests, which enables testing of time-based events (i.e waiting workflows or other time-sensitive business logic).
+
+## Releasing
+
+Maintainers: see [RELEASE.md](RELEASE.md) for PR labels, repository setup, and independent product releases.

@@ -18,14 +18,13 @@ public class MetadataConfigurationTests
     }
 
     [Fact]
-    public void SecurityRoles_DefaultsToEmptyArray()
+    public void SecurityRoles_DefaultsToNull()
     {
         // Arrange & Act
         var config = new MetadataConfiguration();
 
         // Assert
-        Assert.NotNull(config.SecurityRoles);
-        Assert.Empty(config.SecurityRoles);
+        Assert.Null(config.SecurityRoles);
     }
 
     [Fact]

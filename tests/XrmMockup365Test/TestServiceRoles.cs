@@ -19,8 +19,8 @@ namespace DG.XrmMockupTest
                 var account = new Account();
                 account.Id = orgAdminService.Create(account);
 
-                account.StateCode = AccountState.Inactive;
-                account.StatusCode = Account_StatusCode.Inactive;
+                account.StateCode = account_statecode.Inactive;
+                account.StatusCode = account_statuscode.Inactive;
                 orgAdminService.Update(account);
 
                 account.Name = "SDK can do";

@@ -1,12 +1,17 @@
-﻿using System;
+using System;
+using System.Linq;
+using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Crm.Sdk.Messages;
-using DG.XrmFramework.BusinessDomain.ServiceContext;
 using Xunit;
+using Xunit.Sdk;
+using DG.XrmFramework.BusinessDomain.ServiceContext;
 
 namespace DG.XrmMockupTest
 {
+    // Late-bound tests for the Win/Lose opportunity request handlers; Opportunity/OpportunityClose
+    // metadata is supplied by RemovedEntitiesMetadata.xml (entities not in the environment).
     public class TestOpportunity : UnitTestBase
     {
         public TestOpportunity(XrmMockupFixture fixture) : base(fixture) { }
@@ -14,60 +19,54 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestWinOpportunity()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            var opportunity = new Entity("opportunity");
+            opportunity.Id = orgAdminUIService.Create(opportunity);
+
+            var winReq = new WinOpportunityRequest();
+            var opclose = new Entity("opportunityclose")
             {
-                var opportunity = new Opportunity();
-                opportunity.Id = orgAdminUIService.Create(opportunity);
+                ["actualrevenue"] = new Money(1000m),
+                ["actualend"] = DateTime.Now,
+                ["statecode"] = new OptionSetValue(1),
+                ["statuscode"] = new OptionSetValue(2),
+                ["opportunityid"] = opportunity.ToEntityReference()
+            };
+            winReq.OpportunityClose = opclose;
+            winReq.Status = new OptionSetValue(3);
 
-                var winReq = new WinOpportunityRequest();
-                var opclose = new OpportunityClose()
-                {
-                    ActualRevenue = 1000m,
-                    ActualEnd = DateTime.Now,
-                    StateCode = OpportunityCloseState.Completed,
-                    StatusCode = OpportunityClose_StatusCode.Completed,
-                    OpportunityId = opportunity.ToEntityReference()
-                };
-                winReq.OpportunityClose = opclose;
-                winReq.Status = new OptionSetValue((int)Opportunity_StatusCode.Won);
+            orgAdminUIService.Execute(winReq);
 
-                orgAdminUIService.Execute(winReq);
-
-                var retrieved = orgAdminUIService.Retrieve(Opportunity.EntityLogicalName, opportunity.Id, new ColumnSet(true)) as Opportunity;
-                Assert.Equal(OpportunityState.Won, retrieved.StateCode);
-                Assert.Equal(Opportunity_StatusCode.Won, retrieved.StatusCode);
-                Assert.True(crm.ContainsEntity(opclose));
-                Assert.Equal("SetFromWinLose", retrieved.Description);
-            }
+            var retrieved = orgAdminUIService.Retrieve("opportunity", opportunity.Id, new ColumnSet(true));
+            Assert.Equal(1, retrieved.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(3, retrieved.GetAttributeValue<OptionSetValue>("statuscode").Value);
+            Assert.True(crm.ContainsEntity(opclose));
+            Assert.Equal("SetFromWinLose", retrieved.GetAttributeValue<string>("description"));
         }
 
         [Fact]
         public void TestLoseOpportunity()
         {
-            using (var context = new Xrm(orgAdminUIService))
+            var opportunity = new Entity("opportunity");
+            opportunity.Id = orgAdminUIService.Create(opportunity);
+
+            var loseReq = new LoseOpportunityRequest();
+            var opclose = new Entity("opportunityclose")
             {
-                var opportunity = new Opportunity();
-                opportunity.Id = orgAdminUIService.Create(opportunity);
+                ["actualrevenue"] = new Money(1000m),
+                ["actualend"] = DateTime.Now,
+                ["statuscode"] = new OptionSetValue(3),
+                ["opportunityid"] = opportunity.ToEntityReference()
+            };
+            loseReq.OpportunityClose = opclose;
+            loseReq.Status = new OptionSetValue(4);
 
-                var loseReq = new LoseOpportunityRequest();
-                var opclose = new OpportunityClose()
-                {
-                    ActualRevenue = 1000m,
-                    ActualEnd = DateTime.Now,
-                    StatusCode = OpportunityClose_StatusCode.Canceled,
-                    OpportunityId = opportunity.ToEntityReference()
-                };
-                loseReq.OpportunityClose = opclose;
-                loseReq.Status = new OptionSetValue((int)Opportunity_StatusCode.Canceled);
+            orgAdminUIService.Execute(loseReq);
 
-                orgAdminUIService.Execute(loseReq);
-
-                var retrieved = orgAdminUIService.Retrieve(Opportunity.EntityLogicalName, opportunity.Id, new ColumnSet(true)) as Opportunity;
-                Assert.Equal(OpportunityState.Lost, retrieved.StateCode);
-                Assert.Equal(Opportunity_StatusCode.Canceled, retrieved.StatusCode);
-                Assert.True(crm.ContainsEntity(opclose));
-                Assert.Equal("SetFromWinLose", retrieved.Description);
-            }
+            var retrieved = orgAdminUIService.Retrieve("opportunity", opportunity.Id, new ColumnSet(true));
+            Assert.Equal(2, retrieved.GetAttributeValue<OptionSetValue>("statecode").Value);
+            Assert.Equal(4, retrieved.GetAttributeValue<OptionSetValue>("statuscode").Value);
+            Assert.True(crm.ContainsEntity(opclose));
+            Assert.Equal("SetFromWinLose", retrieved.GetAttributeValue<string>("description"));
         }
     }
 }

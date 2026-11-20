@@ -32,6 +32,15 @@ namespace DG.Tools.XrmMockup
             clonedEntity.Attributes = new AttributeCollection();
             clonedEntity.Attributes.AddRange(validAttributes);
 
+            // Resolve the effective owner for the access checks only. The persisted default is applied in
+            // Execute and the plugin-visible Target is intentionally left without an ownerid, matching
+            // Dataverse. Ownership-based checks (e.g. user-level Append) need the effective owner here.
+            if (!clonedEntity.Attributes.ContainsKey("ownerid") &&
+                Utility.IsValidAttribute("ownerid", entityMetadata))
+            {
+                clonedEntity["ownerid"] = userRef;
+            }
+
             if (userRef != null && userRef.Id != Guid.Empty)
             {
                 if (!security.HasPermission(clonedEntity, AccessRights.CreateAccess, userRef))
@@ -75,45 +84,6 @@ namespace DG.Tools.XrmMockup
             }
         }
 
-        internal override void InitializePreOperation(OrganizationRequest orgRequest, EntityReference userRef, Entity preImage)
-        {
-            var entity = orgRequest["Target"] as Entity;
-            var logicalName = metadata.EntityMetadata.GetMetadata(entity.LogicalName);
-            var createdOn = DateTime.UtcNow.Add(core.TimeOffset);
-
-            if (Utility.IsValidAttribute("createdon", logicalName))
-            {
-                if (Utility.IsValidAttribute("overriddencreatedon", logicalName) && entity.Attributes.ContainsKey("overriddencreatedon") && entity["overriddencreatedon"] is DateTime overriddencreatedon)
-                {
-                    if (overriddencreatedon > createdOn)
-                    {
-                        throw new FaultException(
-                            $"Trying to create entity '{entity.LogicalName}', but overriddencreatedon cannot be set to a date in the future");
-                    }
-
-                    entity["overriddencreatedon"] = createdOn;
-                    createdOn = overriddencreatedon;
-                }
-
-                entity["createdon"] = createdOn;
-            }
-
-            if (Utility.IsValidAttribute("createdby", logicalName))
-            {
-                entity["createdby"] = userRef;
-            }
-
-            if (Utility.IsValidAttribute("modifiedon", logicalName))
-            {
-                entity["modifiedon"] = createdOn;
-            }
-
-            if (Utility.IsValidAttribute("modifiedby", logicalName))
-            {
-                entity["modifiedby"] = userRef;
-            }
-        }
-
         internal override OrganizationResponse Execute(OrganizationRequest orgRequest, EntityReference userRef)
         {
             var request = MakeRequest<CreateRequest>(orgRequest);
@@ -132,6 +102,44 @@ namespace DG.Tools.XrmMockup
             {
                 throw new FaultException(
                     $"Trying to create entity '{clonedEntity.LogicalName}', but the attributes had a circular reference");
+            }
+
+            // Stamp the created/modified system attributes on the record being persisted. This runs as
+            // part of the main operation (not a pre-stage) so the values surface via the post-image and
+            // the post-operation Target, matching Dataverse — they are absent from the pre-stage Target.
+            var createdOn = DateTime.UtcNow.Add(core.TimeOffset);
+            if (Utility.IsValidAttribute("createdon", entityMetadata))
+            {
+                if (Utility.IsValidAttribute("overriddencreatedon", entityMetadata) &&
+                    clonedEntity.Attributes.ContainsKey("overriddencreatedon") &&
+                    clonedEntity["overriddencreatedon"] is DateTime overriddencreatedon)
+                {
+                    if (overriddencreatedon > createdOn)
+                    {
+                        throw new FaultException(
+                            $"Trying to create entity '{clonedEntity.LogicalName}', but overriddencreatedon cannot be set to a date in the future");
+                    }
+
+                    clonedEntity["overriddencreatedon"] = createdOn;
+                    createdOn = overriddencreatedon;
+                }
+
+                clonedEntity["createdon"] = createdOn;
+            }
+
+            if (Utility.IsValidAttribute("createdby", entityMetadata))
+            {
+                clonedEntity["createdby"] = userRef;
+            }
+
+            if (Utility.IsValidAttribute("modifiedon", entityMetadata))
+            {
+                clonedEntity["modifiedon"] = createdOn;
+            }
+
+            if (Utility.IsValidAttribute("modifiedby", entityMetadata))
+            {
+                clonedEntity["modifiedby"] = userRef;
             }
 
             var transactioncurrencyId = "transactioncurrencyid";

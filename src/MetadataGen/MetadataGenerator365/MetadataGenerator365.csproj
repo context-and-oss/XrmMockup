@@ -2,6 +2,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net462</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
     <DebugType>portable</DebugType>
     <Title>MetadataGenerator365</Title>
     <Description>Tool to generate early-bound .NET classes and enumerations for MS Dynamics 365/CRM server-side coding.</Description>

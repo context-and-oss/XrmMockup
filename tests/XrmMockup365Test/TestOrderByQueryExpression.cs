@@ -90,23 +90,26 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminService))
             {
-                var lead1 = new Lead
+                // Migrated from Lead -> Account and Contact.OriginatingLeadId -> Contact.ParentCustomerId
+                // (Lead removed). This still exercises ordering by an EntityReference (lookup) field and
+                // verifies the referenced record's Name is populated on the result.
+                var account1 = new Account
                 {
-                    LastName = "Jordi"
+                    Name = "Jordi"
                 };
-                lead1.Id = orgAdminService.Create(lead1);
+                account1.Id = orgAdminService.Create(account1);
 
-                var lead2 = new Lead
+                var account2 = new Account
                 {
-                    LastName = "Skuba"
+                    Name = "Skuba"
                 };
-                lead2.Id = orgAdminService.Create(lead2);
+                account2.Id = orgAdminService.Create(account2);
 
                 var contact1 = new Contact
                 {
                     FirstName = "Fred",
                     LastName = "Bloggs",
-                    OriginatingLeadId = lead1.ToEntityReference()
+                    ParentCustomerId = account1.ToEntityReference()
                 };
                 contact1.Id = orgAdminService.Create(contact1);
 
@@ -114,7 +117,7 @@ namespace DG.XrmMockupTest
                 {
                     FirstName = "Jo",
                     LastName = "Bloggs",
-                    OriginatingLeadId = lead2.ToEntityReference()
+                    ParentCustomerId = account2.ToEntityReference()
                 };
                 contact2.Id = orgAdminService.Create(contact2);
 
@@ -122,10 +125,10 @@ namespace DG.XrmMockupTest
                 {
                     ColumnSet = new ColumnSet(true)
                 };
-                qry.AddOrder("originatingleadid", OrderType.Ascending);
+                qry.AddOrder("parentcustomerid", OrderType.Ascending);
                 var results = orgAdminService.RetrieveMultiple(qry);
 
-                var firstResultValue = (results.Entities[0] as Contact).OriginatingLeadId;
+                var firstResultValue = (results.Entities[0] as Contact).ParentCustomerId;
 
                 Assert.Equal("Jordi", firstResultValue.Name);
             }
@@ -136,23 +139,25 @@ namespace DG.XrmMockupTest
         {
             using (var context = new Xrm(orgAdminService))
             {
-                var lead1 = new Lead
+                // Migrated from Lead -> Account and Contact.OriginatingLeadId -> Contact.ParentCustomerId
+                // (Lead removed). Ordering by an EntityReference (lookup) field, descending.
+                var account1 = new Account
                 {
-                    LastName = "Jordi"
+                    Name = "Jordi"
                 };
-                lead1.Id = orgAdminService.Create(lead1);
+                account1.Id = orgAdminService.Create(account1);
 
-                var lead2 = new Lead
+                var account2 = new Account
                 {
-                    LastName = "Skuba"
+                    Name = "Skuba"
                 };
-                lead2.Id = orgAdminService.Create(lead2);
+                account2.Id = orgAdminService.Create(account2);
 
                 var contact1 = new Contact
                 {
                     FirstName = "Fred",
                     LastName = "Bloggs",
-                    OriginatingLeadId = lead1.ToEntityReference()
+                    ParentCustomerId = account1.ToEntityReference()
                 };
                 contact1.Id = orgAdminService.Create(contact1);
 
@@ -160,7 +165,7 @@ namespace DG.XrmMockupTest
                 {
                     FirstName = "Jo",
                     LastName = "Bloggs",
-                    OriginatingLeadId = lead2.ToEntityReference()
+                    ParentCustomerId = account2.ToEntityReference()
                 };
                 contact2.Id = orgAdminService.Create(contact2);
 
@@ -168,10 +173,10 @@ namespace DG.XrmMockupTest
                 {
                     ColumnSet = new ColumnSet(true)
                 };
-                qry.AddOrder("originatingleadid", OrderType.Descending);
+                qry.AddOrder("parentcustomerid", OrderType.Descending);
                 var results = orgAdminService.RetrieveMultiple(qry);
 
-                var firstResultValue = (results.Entities[0] as Contact).OriginatingLeadId;
+                var firstResultValue = (results.Entities[0] as Contact).ParentCustomerId;
 
                 Assert.Equal("Skuba", firstResultValue.Name);
             }
@@ -186,14 +191,14 @@ namespace DG.XrmMockupTest
                 var contact1 = new Contact
                 {
                     FirstName = "Fred",
-                    GenderCode = Contact_GenderCode.Male
+                    GenderCode = contact_gendercode.Male
                 };
                 contact1.Id = orgAdminService.Create(contact1);
 
                 var contact2 = new Contact
                 {
                     FirstName = "Jo",
-                    GenderCode = Contact_GenderCode.Female
+                    GenderCode = contact_gendercode.Female
                 };
                 contact2.Id = orgAdminService.Create(contact2);
 
@@ -206,7 +211,7 @@ namespace DG.XrmMockupTest
 
                 var firstResultValue = (results.Entities[0] as Contact).GenderCode;
 
-                Assert.Equal(Contact_GenderCode.Male, firstResultValue.Value);
+                Assert.Equal(contact_gendercode.Male, firstResultValue.Value);
             }
         }
 
@@ -219,14 +224,14 @@ namespace DG.XrmMockupTest
                 var contact1 = new Contact
                 {
                     FirstName = "Fred",
-                    GenderCode = Contact_GenderCode.Male
+                    GenderCode = contact_gendercode.Male
                 };
                 contact1.Id = orgAdminService.Create(contact1);
 
                 var contact2 = new Contact
                 {
                     FirstName = "Jo",
-                    GenderCode = Contact_GenderCode.Female
+                    GenderCode = contact_gendercode.Female
                 };
                 contact2.Id = orgAdminService.Create(contact2);
 
@@ -239,7 +244,7 @@ namespace DG.XrmMockupTest
 
                 var firstResultValue = (results.Entities[0] as Contact).GenderCode;
 
-                Assert.Equal(Contact_GenderCode.Female, firstResultValue.Value);
+                Assert.Equal(contact_gendercode.Female, firstResultValue.Value);
             }
         }
 

@@ -9,12 +9,9 @@ namespace DG.XrmMockupTest
 {
     public class UnitTestBaseNoReset : IClassFixture<XrmMockupFixture>
     {
-        private static DateTime _startTime { get; set; }
-
         protected IOrganizationService orgAdminUIService;
         protected IOrganizationService orgAdminService;
         protected IOrganizationService orgGodService;
-        protected IOrganizationService orgRealDataService;
 
         protected XrmMockup365 crm;
 
@@ -25,8 +22,6 @@ namespace DG.XrmMockupTest
             orgAdminUIService = crm.GetAdminService(new MockupServiceSettings(true, false, MockupServiceSettings.Role.UI));
             orgGodService = crm.GetAdminService(new MockupServiceSettings(false, true, MockupServiceSettings.Role.SDK));
             orgAdminService = crm.GetAdminService();
-            // Skip real data service - it causes online connection issues and isn't needed for most tests
-            orgRealDataService = null;
 
             //create an admin user to run our impersonating user plugins as
 

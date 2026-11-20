@@ -12,7 +12,7 @@ namespace XrmMockup.MetadataGenerator.Tool.Context;
 /// <para>Mapping between statuses.</para>
 /// <para>Display Name: Status Map</para>
 /// </summary>
-[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.22")]
+[System.CodeDom.Compiler.GeneratedCode("DataverseProxyGenerator", "4.0.0.25")]
 [EntityLogicalName("statusmap")]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 [DataContract]
@@ -101,9 +101,9 @@ public partial class StatusMap : ExtendedEntity
     /// </summary>
     [AttributeLogicalName("statusmapid")]
     [DisplayName("statusmapid")]
-    public Guid StatusMapId
+    public Guid? StatusMapId
     {
-        get => GetAttributeValue<Guid>("statusmapid");
+        get => GetAttributeValue<Guid?>("statusmapid");
         set => SetId("statusmapid", value);
     }
 

@@ -1,5 +1,7 @@
-﻿using XrmPluginCore.Enums;
+using XrmPluginCore.Enums;
 using XrmPluginCore.Interfaces.Plugin;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using System;
 using System.Collections.Generic;
@@ -16,20 +18,30 @@ namespace DG.Tools.XrmMockup.Plugin.RegistrationStrategy.DAXIF
 
     internal class PluginRegistrationStrategy : IRegistrationStrategy<IPluginStepConfig>
     {
+        private readonly ILogger _logger;
+
+        public PluginRegistrationStrategy(ILogger logger = null)
+        {
+            _logger = logger ?? NullLogger.Instance;
+        }
+
         public IEnumerable<IPluginStepConfig> AnalyzeType(IPlugin plugin)
         {
             var pluginType = plugin.GetType();
             if (pluginType.GetMethod("PluginProcessingStepConfigs") == null)
             {
+                _logger.LogDebug("[DAXIF] {TypeName}: no PluginProcessingStepConfigs method found, skipping", pluginType.FullName);
                 return Enumerable.Empty<IPluginStepConfig>();
             }
+
+            _logger.LogDebug("[DAXIF] {TypeName}: found PluginProcessingStepConfigs method, extracting steps", pluginType.FullName);
 
             var configs = pluginType
                 .GetMethod("PluginProcessingStepConfigs")
                 .Invoke(plugin, new object[] { })
                 as IEnumerable<Tuple<StepConfig, ExtendedStepConfig, IEnumerable<ImageTuple>>>;
 
-            return configs.Select(c =>
+            var results = configs.Select(c =>
             {
                 var hasImpersonatingUser = Guid.TryParse(c.Item2.Item6, out var impersonatingUserId);
 
@@ -53,7 +65,10 @@ namespace DG.Tools.XrmMockup.Plugin.RegistrationStrategy.DAXIF
                         Attributes = i.Item4
                     })
                 };
-            });
+            }).ToList();
+
+            _logger.LogDebug("[DAXIF] {TypeName}: extracted {Count} plugin step(s)", pluginType.FullName, results.Count);
+            return results;
         }
     }
 }

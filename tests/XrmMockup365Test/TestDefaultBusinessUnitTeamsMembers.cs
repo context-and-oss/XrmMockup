@@ -26,13 +26,13 @@ namespace DG.XrmMockupTest
 
             _businessUnit2 = new BusinessUnit { ParentBusinessUnitId = businessUnitId, Name = "Business Unit 2" };
             _businessUnit2.Id = orgAdminService.Create(_businessUnit2);
-            _user1 = crm.CreateUser(orgAdminService, _businessUnit2.ToEntityReference(), SecurityRoles.SystemCustomizer) as SystemUser;
+            _user1 = crm.CreateUser(orgAdminService, _businessUnit2.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess) as SystemUser;
 
             _businessUnit3 = new BusinessUnit { ParentBusinessUnitId = businessUnitId, Name = "Business Unit 3" };
             _businessUnit3.Id = orgAdminService.Create(_businessUnit3);
             _businessUnit4 = new BusinessUnit { ParentBusinessUnitId = businessUnitId, Name = "Business Unit 4" };
             _businessUnit4.Id = orgAdminService.Create(_businessUnit4);
-            _user2 = crm.CreateUser(orgAdminService, _businessUnit3.ToEntityReference(), SecurityRoles.SystemCustomizer) as SystemUser;
+            _user2 = crm.CreateUser(orgAdminService, _businessUnit3.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess) as SystemUser;
         }
 
         [Fact]
@@ -40,7 +40,7 @@ namespace DG.XrmMockupTest
         {
             var team = RetrieveBusinessUnitDefaultTeamAndCheckAttributes(_businessUnit1);
 
-            crm.CreateUser(orgAdminService, _businessUnit1.ToEntityReference(), SecurityRoles.SystemCustomizer);
+            crm.CreateUser(orgAdminService, _businessUnit1.ToEntityReference(), SecurityRoles.XrmMockupTestNoContactAccess);
 
             using (var context = new Xrm(orgAdminService))
             {
@@ -110,7 +110,7 @@ namespace DG.XrmMockupTest
             businessUnit = (BusinessUnit)orgAdminService.Retrieve(LogicalNames.BusinessUnit, businessUnit.Id, new ColumnSet("name", "createdby"));
 
             Assert.Equal(businessUnit.Name, fetchedTeam.Name);
-            Assert.Equal(Team_TeamType.Owner, fetchedTeam.TeamType);
+            Assert.Equal(team_type.Owner, fetchedTeam.TeamType);
             Assert.Equal(true, fetchedTeam.IsDefault);
             Assert.Equal("Default team for the parent business unit. The name and membership for default team are inherited from their parent business unit.",
                  fetchedTeam.Description);

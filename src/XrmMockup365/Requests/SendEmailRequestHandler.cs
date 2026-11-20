@@ -10,6 +10,7 @@ namespace DG.Tools.XrmMockup
     {
         const int EMAIL_STATE_COMPLETED = 1;
         const int EMAIL_STATUS_DRAFT = 1;
+        const int EMAIL_STATUS_FAILED = 8;
         const int EMAIL_STATUS_PENDING_SEND = 6;
         const int EMAIL_STATUS_SENT = 3;
 
@@ -50,15 +51,32 @@ namespace DG.Tools.XrmMockup
             // Remaining security checks have been omitted to reduce complexity
         }
 
+        private static string GetEmailAddress(Entity entity)
+        {
+            if (entity.LogicalName == "systemuser")
+            {
+                return entity.GetAttributeValue<string>("internalemailaddress");
+            }
+            else if (entity.LogicalName == "queue")
+            {
+                return entity.GetAttributeValue<string>("emailaddress");
+            }
+            else
+            {
+                return entity.GetAttributeValue<string>("emailaddress1");
+            }
+        }
+
         internal override OrganizationResponse Execute(OrganizationRequest orgRequest, EntityReference userRef)
         {
             var request = MakeRequest<SendEmailRequest>(orgRequest);
 
             var email = db.GetEntity(new EntityReference("email", request.EmailId));
 
-            if (email.GetAttributeValue<OptionSetValue>("statuscode").Value != EMAIL_STATUS_DRAFT)
+            var statusCode = email.GetAttributeValue<OptionSetValue>("statuscode").Value;
+            if (statusCode != EMAIL_STATUS_DRAFT && statusCode != EMAIL_STATUS_FAILED)
             {
-                throw new FaultException("Email must be in Draft status to send");
+                throw new FaultException("Email must be in Draft or Failed status to send");
             }
 
             if (email.GetAttributeValue<bool>("directioncode") is false)
@@ -106,9 +124,14 @@ namespace DG.Tools.XrmMockup
                     if (activityParty.Contains("partyid"))
                     {
                         var partyRef = activityParty.GetAttributeValue<EntityReference>("partyid");
-                        if (db.GetEntityOrNull(partyRef) is null)
+                        var partyEntity = db.GetEntityOrNull(partyRef);
+                        if (partyEntity is null)
                         {
                             throw new FaultException($"{partyRef.LogicalName} with Id = {partyRef.Id} does not exist");
+                        }
+                        if (string.IsNullOrEmpty(GetEmailAddress(partyEntity)))
+                        {
+                            throw new FaultException($"{partyRef.LogicalName} with Id = {partyRef.Id} does not have an email address");
                         }
                     }
                     else if (!activityParty.Contains("addressused"))
@@ -121,7 +144,6 @@ namespace DG.Tools.XrmMockup
             {
                 throw new FaultException("The email must have at least one recipient before it can be sent");
             }
-
 
             email["statecode"] = new OptionSetValue(EMAIL_STATE_COMPLETED);
             email["statuscode"] = new OptionSetValue(request.IssueSend ? EMAIL_STATUS_PENDING_SEND : EMAIL_STATUS_SENT);

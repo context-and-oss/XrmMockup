@@ -1,7 +1,6 @@
 ﻿using Microsoft.Crm.Sdk.Messages;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
 using DG.Tools.XrmMockup;
-using DG.XrmContext;
 using Xunit;
 
 namespace DG.XrmMockupTest
@@ -24,7 +23,7 @@ namespace DG.XrmMockupTest
         {
             var bu = new BusinessUnit { Name = "child bu", ParentBusinessUnitId = crm.RootBusinessUnit };
             bu.Id = orgAdminUIService.Create(bu);
-            var user = crm.CreateUser(orgAdminService, new SystemUser { BusinessUnitId = bu.ToEntityReference() }, SecurityRoles.SalesManager) as SystemUser;
+            var user = crm.CreateUser(orgAdminService, new SystemUser { BusinessUnitId = bu.ToEntityReference() }, SecurityRoles.XrmMockupTestReadOnly) as SystemUser;
             var service = crm.CreateOrganizationService(user.Id);
             var whoAmI = (WhoAmIResponse)service.Execute(new WhoAmIRequest());
             Assert.Equal(whoAmI.UserId, user.Id);
