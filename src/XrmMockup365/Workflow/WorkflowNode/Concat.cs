@@ -24,6 +24,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. VariableName: {1}", this.GetType().Name, VariableName);
             var variablesInstance = variables;
             // Dataverse permits a calculated field's Concat to receive non-string operands (numbers,
             // money, dates, etc.) and stringifies them with invariant culture before joining. Mirror

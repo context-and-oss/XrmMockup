@@ -31,6 +31,7 @@ namespace WorkflowExecuter
         public void Execute(int loopStart, ref Dictionary<string, object> variables, TimeSpan timeOffset,
              IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. Activities Count: {1} VariableNames: {2}", this.GetType().Name, Activities.Length, string.Join(", ", VariableNames));
             foreach (var variableName in VariableNames)
             {
                 if (!variables.ContainsKey(variableName))

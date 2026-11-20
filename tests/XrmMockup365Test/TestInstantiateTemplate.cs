@@ -75,6 +75,7 @@ namespace DG.XrmMockupTest
                 ObjectId = objectId,
                 ObjectType = objectType
             });
+            Assert.Equal("InstantiateTemplate", response.ResponseName);
             return Assert.Single(response.EntityCollection.Entities);
         }
 

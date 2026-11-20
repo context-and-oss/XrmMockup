@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<OutputType>Library</OutputType>
-		<TargetFrameworks>net462;net10.0</TargetFrameworks>
+		<TargetFrameworks>net48;net10.0</TargetFrameworks>
 		<LangVersion>10.0</LangVersion>
 		<Nullable>enable</Nullable>
 		<DebugType>portable</DebugType>
@@ -21,19 +21,19 @@
 		<DefineConstants>TRACE;</DefineConstants>
 		<ErrorReport>prompt</ErrorReport>
 	</PropertyGroup>
-	<PropertyGroup Condition="'$(TargetFramework)' != 'net462'">
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
 		<DefineConstants>$(DefineConstants);DATAVERSE_SERVICE_CLIENT</DefineConstants>
 	</PropertyGroup>
-	<ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
 		<PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.59" />
 		<PackageReference Include="Microsoft.CrmSdk.Workflow" Version="9.0.2.28" />
 	</ItemGroup>
-	<ItemGroup Condition="'$(TargetFramework)' != 'net462'">
+	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
 		<PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
 		<PackageReference Include="UiPath.Workflow" Version="6.0.3" />
 		<ProjectReference Include="..\..\src\XrmMockup365\XrmMockup365.csproj" />
 	</ItemGroup>
-	<ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
 		<Reference Include="System" />
 		<Reference Include="System.Activities" />
 		<Reference Include="System.Core" />

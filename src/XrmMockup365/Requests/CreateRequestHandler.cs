@@ -28,6 +28,11 @@ namespace DG.Tools.XrmMockup
 
             var entityMetadata = metadata.EntityMetadata.GetMetadata(entity.LogicalName);
             var clonedEntity = entity.CloneEntity(entityMetadata, new ColumnSet(true));
+            foreach (var keyAttribute in entity.KeyAttributes)
+            {
+                if (!clonedEntity.Contains(keyAttribute.Key))
+                    clonedEntity[keyAttribute.Key] = keyAttribute.Value;
+            }
             var validAttributes = clonedEntity.Attributes.Where(x => x.Value != null);
             clonedEntity.Attributes = new AttributeCollection();
             clonedEntity.Attributes.AddRange(validAttributes);
@@ -94,6 +99,11 @@ namespace DG.Tools.XrmMockup
 
             var entityMetadata = metadata.EntityMetadata.GetMetadata(entity.LogicalName);
             var clonedEntity = entity.CloneEntity(entityMetadata, new ColumnSet(true));
+            foreach (var keyAttribute in entity.KeyAttributes)
+            {
+                if (!clonedEntity.Contains(keyAttribute.Key))
+                    clonedEntity[keyAttribute.Key] = keyAttribute.Value;
+            }
             var validAttributes = clonedEntity.Attributes.Where(x => x.Value != null);
             clonedEntity.Attributes = new AttributeCollection();
             clonedEntity.Attributes.AddRange(validAttributes);
@@ -107,6 +117,15 @@ namespace DG.Tools.XrmMockup
             // Stamp the created/modified system attributes on the record being persisted. This runs as
             // part of the main operation (not a pre-stage) so the values surface via the post-image and
             // the post-operation Target, matching Dataverse — they are absent from the pre-stage Target.
+            var autoNumberTime = DateTime.UtcNow.Add(core.TimeOffset);
+            foreach (var attribute in entityMetadata.Attributes.OfType<StringAttributeMetadata>())
+            {
+                // Explicit non-null SDK values win; null behaves like an omitted value.
+                if (!string.IsNullOrEmpty(attribute.AutoNumberFormat) &&
+                    !clonedEntity.Attributes.ContainsKey(attribute.LogicalName))
+                    clonedEntity[attribute.LogicalName] = core.AutoNumbers.Generate(entity.LogicalName, attribute, autoNumberTime);
+            }
+
             var createdOn = DateTime.UtcNow.Add(core.TimeOffset);
             if (Utility.IsValidAttribute("createdon", entityMetadata))
             {

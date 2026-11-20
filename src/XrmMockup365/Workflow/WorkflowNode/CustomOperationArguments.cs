@@ -22,6 +22,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. VariableName: {1}", this.GetType().Name, VariableName);
             var variableName = "{" + Parameters[0][0] + "(Arguments)}";
             variables[VariableName] = variables.ContainsKey(variableName) ? variables[variableName] : null;
         }

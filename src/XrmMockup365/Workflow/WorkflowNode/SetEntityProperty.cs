@@ -31,6 +31,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. Attribute: {1} EntityId: {2} EntityLogicalName: {3} VariableId: {4} TargetType: {5}", this.GetType().Name, Attribute, EntityId, EntityLogicalName, VariableId, TargetType);
             if (!variables.ContainsKey(VariableId))
             {
                 Console.WriteLine($"The attribute '{Attribute}' was not created with id '{VariableId}' before being set");
@@ -59,7 +60,8 @@ namespace WorkflowExecuter
                 attr = new Money(amount);
             }
 
-            if (TargetType == "EntityReference")
+            // Null is a valid empty lookup; only non-null values need conversion.
+            if (TargetType == "EntityReference" && attr != null)
             {
                 if (attr is Guid guid)
                 {

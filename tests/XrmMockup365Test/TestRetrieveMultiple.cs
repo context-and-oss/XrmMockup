@@ -81,27 +81,26 @@ namespace DG.XrmMockupTest
             contact3.Id = orgAdminUIService.Create(contact3);
             contact4.Id = orgAdminUIService.Create(contact4);
 
-            var rand = new Random();
             p1 = new ctx_parent()
             {
-                ctx_Name = "Some contact lead " + rand.Next(0, 1000),
+                ctx_Name = "Some contact lead " + Guid.NewGuid().ToString("N"),
                 ctx_ContactId = contact1.ToEntityReference(),
                 ctx_Industrycode = ctx_parent_ctx_industrycode.Accounting,
                 ctx_Postalcode = account1.Address1_PostalCode
             };
             p2 = new ctx_parent()
             {
-                ctx_Name = "Some contact lead " + rand.Next(0, 1000),
+                ctx_Name = "Some contact lead " + Guid.NewGuid().ToString("N"),
                 ctx_ContactId = contact2.ToEntityReference()
             };
             p3 = new ctx_parent()
             {
-                ctx_Name = "Some new lead " + rand.Next(0, 1000),
+                ctx_Name = "Some new lead " + Guid.NewGuid().ToString("N"),
                 ctx_DateValue = new DateTime(2025, 9, 29, 7, 28, 0, DateTimeKind.Local)
             };
             p4 = new ctx_parent()
             {
-                ctx_Name = "Some new lead " + rand.Next(0, 1000),
+                ctx_Name = "Some new lead " + Guid.NewGuid().ToString("N"),
                 ctx_Score = 100,
             };
 

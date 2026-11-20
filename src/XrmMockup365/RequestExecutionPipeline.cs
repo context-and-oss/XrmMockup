@@ -41,6 +41,10 @@ namespace DG.Tools.XrmMockup
             ExecuteSecurityAndInit(ctx);
             ExecutePreOperationStage(ctx);
             ctx.Response = DispatchRequest(ctx);
+            if (ctx.Response != null && string.IsNullOrEmpty(ctx.Response.ResponseName))
+            {
+                ctx.Response.ResponseName = request.RequestName;
+            }
             ExecutePostOperationStage(ctx);
             ExecuteExtensionStage(ctx);
             return ctx.Response;
@@ -60,6 +64,7 @@ namespace DG.Tools.XrmMockup
                 UserId = userRef.Id,
                 InitiatingUserId = userRef.Id,
                 MessageName = RequestNameToMessageName(request.RequestName),
+                OperationCreatedOn = DateTime.UtcNow.Add(core.TimeOffset),
                 Depth = 1,
                 ExtensionDepth = 1,
                 OrganizationName = core.OrganizationName,

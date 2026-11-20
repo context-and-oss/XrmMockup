@@ -23,6 +23,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. EntityId: {1} OwnerId: {2}", this.GetType().Name, EntityId, OwnerId);
             if (!variables.ContainsKey(OwnerId))
             {
                 throw new WorkflowException($"There is no variable with the id '{OwnerId}'");

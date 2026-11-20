@@ -92,7 +92,7 @@ namespace DG.Tools.XrmMockup {
             clone.CanBeGlobal = this.CanBeGlobal;
             clone.CanBeDeep = this.CanBeDeep;
             clone.CanBeLocal = this.CanBeLocal;
-            clone.CanBeLocal = this.CanBeLocal;
+            clone.CanBeBasic = this.CanBeBasic;
             clone.AccessRight = this.AccessRight;
             clone.PrivilegeDepth = this.PrivilegeDepth;
 
@@ -102,6 +102,12 @@ namespace DG.Tools.XrmMockup {
 
     public class SecurityRole {
         public Dictionary<string, Dictionary<AccessRights, RolePrivilege>> Privileges;
+
+        /// <summary>
+        /// Privileges that aren't tied to a table, such as prvActOnBehalfOfAnotherUser, by privilege name.
+        /// Null in metadata generated before they were downloaded.
+        /// </summary>
+        public Dictionary<string, RolePrivilege> GlobalPrivileges;
         public string Name;
         public EntityReference BusinessUnitId;
         public Guid RoleId;
@@ -123,6 +129,15 @@ namespace DG.Tools.XrmMockup {
                 clone.Privileges.Add(p.Key, p.Value);
             }
 
+            if (this.GlobalPrivileges != null)
+            {
+                clone.GlobalPrivileges = new Dictionary<string, RolePrivilege>();
+                foreach (var priv in this.GlobalPrivileges)
+                {
+                    clone.GlobalPrivileges.Add(priv.Key, priv.Value.Clone());
+                }
+            }
+
             clone.Name = "Clone of " + this.Name;
             clone.BusinessUnitId = this.BusinessUnitId;
             clone.RoleId = Guid.NewGuid();
@@ -130,5 +145,38 @@ namespace DG.Tools.XrmMockup {
 
             return clone;
         }
+    }
+
+    /// <summary>
+    /// Every privilege in the environment and every custom API with its execute privilege, so a privilege name can be
+    /// looked up as a table and access right. Written to PrivilegeCatalog.xml next to Metadata.xml.
+    /// </summary>
+    public class PrivilegeCatalog {
+        public List<MetaPrivilege> Privileges;
+        public List<MetaCustomApi> CustomApis;
+    }
+
+    public class MetaPrivilege {
+        public string Name;
+        public Guid PrivilegeId;
+        public AccessRights AccessRight;
+
+        /// <summary>
+        /// Logical names of the tables the privilege applies to, sorted. Empty for a privilege that isn't tied to a
+        /// table.
+        /// </summary>
+        public List<string> Tables;
+    }
+
+    /// <summary>
+    /// A custom API and the privilege it needs to be called.
+    /// </summary>
+    public class MetaCustomApi {
+        public string UniqueName;
+
+        /// <summary>
+        /// Null when the custom API needs no privilege.
+        /// </summary>
+        public string ExecutePrivilegeName;
     }
 }

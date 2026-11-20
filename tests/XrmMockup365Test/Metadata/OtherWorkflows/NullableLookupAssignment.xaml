@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Synthetic regression workflow: copy an optional account lookup into an update record. -->
+<Activity xmlns="http://schemas.microsoft.com/netfx/2009/xaml/activities"
+          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+          xmlns:s="clr-namespace:System;assembly=mscorlib"
+          xmlns:scg="clr-namespace:System.Collections.Generic;assembly=mscorlib"
+          xmlns:mxs="clr-namespace:Microsoft.Xrm.Sdk;assembly=Microsoft.Xrm.Sdk"
+          xmlns:mxswa="clr-namespace:Microsoft.Xrm.Sdk.Workflow.Activities;assembly=Microsoft.Xrm.Sdk.Workflow">
+  <x:Members>
+    <x:Property Name="InputEntities" Type="InArgument(scg:IDictionary(x:String, mxs:Entity))" />
+    <x:Property Name="CreatedEntities" Type="InArgument(scg:IDictionary(x:String, mxs:Entity))" />
+  </x:Members>
+  <mxswa:Workflow>
+    <Sequence DisplayName="Copy optional lookup">
+      <Sequence.Variables>
+        <Variable x:TypeArguments="x:Object" Name="LookupValue" />
+      </Sequence.Variables>
+      <Assign x:TypeArguments="mxs:Entity" To="[CreatedEntities(&quot;primaryEntity#Temp&quot;)]" Value="[New Entity(&quot;account&quot;)]" />
+      <Assign x:TypeArguments="s:Guid" To="[CreatedEntities(&quot;primaryEntity#Temp&quot;).Id]" Value="[InputEntities(&quot;primaryEntity&quot;).Id]" />
+      <mxswa:GetEntityProperty Attribute="primarycontactid" Entity="[InputEntities(&quot;primaryEntity&quot;)]" EntityName="account" Value="[LookupValue]">
+        <mxswa:GetEntityProperty.TargetType>
+          <InArgument x:TypeArguments="s:Type">
+            <mxswa:ReferenceLiteral x:TypeArguments="s:Type" Value="mxs:EntityReference" />
+          </InArgument>
+        </mxswa:GetEntityProperty.TargetType>
+      </mxswa:GetEntityProperty>
+      <mxswa:SetEntityProperty Attribute="primarycontactid" Entity="[CreatedEntities(&quot;primaryEntity#Temp&quot;)]" EntityName="account" Value="[LookupValue]">
+        <mxswa:SetEntityProperty.TargetType>
+          <InArgument x:TypeArguments="s:Type">
+            <mxswa:ReferenceLiteral x:TypeArguments="s:Type" Value="mxs:EntityReference" />
+          </InArgument>
+        </mxswa:SetEntityProperty.TargetType>
+      </mxswa:SetEntityProperty>
+      <mxswa:UpdateEntity Entity="[CreatedEntities(&quot;primaryEntity#Temp&quot;)]" EntityName="account" />
+    </Sequence>
+  </mxswa:Workflow>
+</Activity>

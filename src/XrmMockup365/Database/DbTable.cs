@@ -21,6 +21,12 @@ namespace DG.Tools.XrmMockup.Database {
             }
         }
 
+        internal void ReplaceMetadata(EntityMetadata metadata)
+        {
+            Metadata = metadata;
+            _attributeMetadata = null;
+        }
+
         public DbTable(EntityMetadata entityMetadata) {
             this.Metadata = entityMetadata;
             this.TableName = Metadata.LogicalName;

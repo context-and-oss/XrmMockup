@@ -16,6 +16,14 @@
       "versionProperty": "MetadataReleaseVersion",
       "notesProperty": "MetadataReleaseNotesPath",
       "baselineVersion": "1.2.0"
+    },
+    "permissions": {
+      "packageId": "XrmMockup.PermissionAnalyzer",
+      "project": "src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj",
+      "changelog": "src/PermissionAnalyzer/PermissionAnalyzer.Tool/CHANGELOG.md",
+      "versionProperty": "PermissionsReleaseVersion",
+      "notesProperty": "PermissionsReleaseNotesPath",
+      "baselineVersion": "1.0.0-rc.1"
     }
   },
   "categories": {

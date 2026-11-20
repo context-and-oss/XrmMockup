@@ -38,7 +38,7 @@ namespace DG.Tools.XrmMockup
                 core.Execute(deleteRequest, userRef);
             }
 
-            return new OrganizationResponse { ResponseName = "DeleteMultiple" };
+            return new OrganizationResponse();
         }
     }
 }

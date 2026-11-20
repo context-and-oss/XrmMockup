@@ -4,7 +4,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $release = Get-Content '.release/release.json' -Raw | ConvertFrom-Json
 if ($release.tag -cne "$($release.product)-v$($release.version)") { throw 'Release version differs from the tag' }
 $config = Get-Content (Join-Path $PSScriptRoot 'config.json') -Raw | ConvertFrom-Json -AsHashtable
-$id = if ($release.product -eq 'core') { 'XrmMockup365' } elseif ($release.product -eq 'metadata') { 'XrmMockup.MetadataGenerator' } else { throw 'Unknown product' }
+if (!$config.products.ContainsKey($release.product)) { throw 'Unknown product' }
+$id = $config.products[$release.product].packageId
 $changelogName = Split-Path $config.products[$release.product].changelog -Leaf
 $notes = (Get-Content '.release/notes.md' -Raw).Replace("`r`n", "`n").TrimEnd()
 $packageHistoryNotes = (Get-Content '.release/package-notes.md' -Raw).Replace("`r`n", "`n").TrimEnd()

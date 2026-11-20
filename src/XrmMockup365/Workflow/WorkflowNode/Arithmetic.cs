@@ -31,6 +31,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
     IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. TargetType: {1} VariableName: {2} Method: {3}", this.GetType().Name, TargetType, VariableName, Method);
             var var1 = variables[Parameters[0][0]];
             var var2 = variables[Parameters[0][1]];
             var variablesInstance = variables;

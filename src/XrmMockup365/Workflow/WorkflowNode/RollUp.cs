@@ -36,6 +36,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. HierarchicalRelationshipName: {1} FilterResult: {2} AggregateResult: {3} Filter Count: {4} Aggregation Count: {5}", this.GetType().Name, HierarchicalRelationshipName, FilterResult, AggregateResult, Filter.Count, Aggregation.Count);
             var primaryEntityKey = "InputEntities(\"primaryEntity\")";
             var relation = Filter.First(x => x is SetAttributeValue) as SetAttributeValue;
             relation.Execute(ref variables, timeOffset, orgService, factory, trace);

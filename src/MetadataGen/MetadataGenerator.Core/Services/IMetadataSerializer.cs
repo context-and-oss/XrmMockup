@@ -24,6 +24,11 @@ public interface IMetadataSerializer
     Task SerializeSecurityRolesAsync(Dictionary<Guid, SecurityRole> securityRoles, CancellationToken ct = default);
 
     /// <summary>
+    /// Serializes the privilege catalog to the configured output directory.
+    /// </summary>
+    Task SerializePrivilegeCatalogAsync(PrivilegeCatalog catalog, CancellationToken ct = default);
+
+    /// <summary>
     /// Generates the TypeDeclarations.cs file with security role GUIDs.
     /// </summary>
     Task GenerateTypeDeclarationsAsync(Dictionary<Guid, SecurityRole> securityRoles, CancellationToken ct = default);

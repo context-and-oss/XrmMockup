@@ -16,6 +16,11 @@ internal sealed partial class DataContractMetadataSerializer(
     IOptions<GeneratorOptions> options,
     ILogger<DataContractMetadataSerializer> logger) : IMetadataSerializer
 {
+    /// <summary>
+    /// The file the privilege catalog is written to, next to Metadata.xml.
+    /// </summary>
+    public const string PrivilegeCatalogFile = "PrivilegeCatalog.xml";
+
     private readonly GeneratorOptions _options = options.Value;
 
     public async Task SerializeMetadataAsync(
@@ -113,6 +118,28 @@ internal sealed partial class DataContractMetadataSerializer(
             if (logger.IsEnabled(LogLevel.Information))
             {
                 logger.LogInformation("Written {Count} security role files to {Path}", securityRoles.Count, securityLocation);
+            }
+        }, ct);
+    }
+
+    public async Task SerializePrivilegeCatalogAsync(
+        PrivilegeCatalog catalog,
+        CancellationToken ct = default)
+    {
+        await Task.Run(() =>
+        {
+            Directory.CreateDirectory(_options.OutputDirectory);
+
+            var serializer = new DataContractSerializer(typeof(PrivilegeCatalog));
+            var catalogPath = Path.Combine(_options.OutputDirectory, PrivilegeCatalogFile);
+
+            using var stream = new FileStream(catalogPath, FileMode.Create);
+            using var writer = CreateXmlWriter(stream);
+            serializer.WriteObject(writer, catalog);
+
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation("Written {Count} privileges to {Path}", catalog.Privileges.Count, catalogPath);
             }
         }, ct);
     }

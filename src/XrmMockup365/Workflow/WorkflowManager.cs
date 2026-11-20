@@ -38,6 +38,8 @@ namespace DG.Tools.XrmMockup {
 
         private ConcurrentQueue<WorkflowExecutionContext> pendingAsyncWorkflows;
 
+        internal IEnumerable<Entity> PermissionCheckWorkflows => synchronousWorkflows.Concat(asynchronousWorkflows);
+
         internal int SynchronousWorkflowCount => synchronousWorkflows.Count;
         internal int AsynchronousWorkflowCount => asynchronousWorkflows.Count;
         internal int ActionsCount => actions.Count;
@@ -151,7 +153,7 @@ namespace DG.Tools.XrmMockup {
 
                 var primaryEntity = shadowService.Retrieve(waitInfo.PrimaryEntity.LogicalName, waitInfo.PrimaryEntity.Id, new ColumnSet(true));
                 variables["InputEntities(\"primaryEntity\")"] = primaryEntity;
-                waitInfo.Element.Execute(waitInfo.ElementIndex, ref variables, _core.TimeOffset, service, provider, provider.GetService<ITracingService>());
+                waitInfo.Resume(_core.TimeOffset, service, provider, provider.GetService<ITracingService>(), _core.GetMockupSettings().EnableWorkflowTracing);
                 if (variables["Wait"] != null) {
                     waitingWorkflows.Add(variables["Wait"] as WaitInfo);
                 }
@@ -400,7 +402,8 @@ namespace DG.Tools.XrmMockup {
                 primaryEntity: pluginContext?.PrimaryEntityName ?? primaryEntity?.LogicalName,
                 operationType: PluginTraceOperationType.WorkflowActivity,
                 mode: pluginContext != null ? (ExecutionMode)pluginContext.Mode : ExecutionMode.Synchronous,
-                execute: () => result = workflow.Execute(primaryEntity, _core.TimeOffset, service, provider, provider.GetService<ITracingService>()),
+                execute: () => result = workflow.Execute(primaryEntity, _core.TimeOffset, service, provider, provider.GetService<ITracingService>(),
+                    enableWorkflowTracing: _core.GetMockupSettings().EnableWorkflowTracing),
                 unwrapTargetInvocation: false,
                 record: pluginContext != null);
             return result;

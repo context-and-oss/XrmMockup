@@ -18,7 +18,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $config = Get-Content scripts/release/config.json -Raw | ConvertFrom-Json -AsHashtable
-          $labels = @('product:core', 'product:metadata', 'product:none') + @($config.categories.Keys)
+          $labels = @($config.products.Keys | ForEach-Object { "product:$_" }) + @('product:none') + @($config.categories.Keys)
           foreach ($label in $labels) {
             gh label create $label --color 5319e7 --description 'Release classification' --force --repo $env:GITHUB_REPOSITORY
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

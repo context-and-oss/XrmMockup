@@ -1,6 +1,13 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Add: Add missing request handlers (#374)
+* Add: Support .NET 4.8 plugins (#378)
+* Add: Implement permission analyzer tool (#357)
+* Add: Add support for AutoNumber attributes (#99)
+* Add: Add opt-in workflow diagnostics (#381)
+* Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
+* Fix: Analyze null-reference cause #375 (#379)
+* Fix: Response name assignment in request handler execution (#380)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.20.3 - 13 November 2026

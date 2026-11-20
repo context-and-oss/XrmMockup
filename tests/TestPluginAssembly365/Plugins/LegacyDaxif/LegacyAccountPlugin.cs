@@ -50,10 +50,9 @@ namespace TestPluginAssembly365.Plugins.LegacyDaxif {
                 throw new ArgumentNullException(nameof(account));
             }
 
-            var rand = new Random();
             // Migrated from Lead -> ctx_parent (see AccountPostPlugin for rationale).
             service.Create(new ctx_parent() {
-                ctx_Name = nameof(LegacyAccountPlugin) + " " + localContext.PluginExecutionContext.MessageName + ": Some new lead " + rand.Next(0, 1000),
+                ctx_Name = nameof(LegacyAccountPlugin) + " " + localContext.PluginExecutionContext.MessageName + ": Some new lead " + Guid.NewGuid().ToString("N"),
                 ctx_AccountId = new Account(localContext.PluginExecutionContext.PrimaryEntityId).ToEntityReference()
             });
         }

@@ -32,6 +32,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. EntityId: {1} EntityIdKey: {2} EntityName: {3} StateCode: {4} StatusCode: {5}", this.GetType().Name, EntityId, EntityIdKey, EntityName, StateCode, StatusCode);
             var entity = variables[EntityId] as Entity;
             if (entity.LogicalName != EntityName)
             {

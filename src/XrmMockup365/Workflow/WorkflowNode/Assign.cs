@@ -25,6 +25,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. To: {1} Value: {2}", this.GetType().Name, To, Value);
             var comparaters = new string[] { "<", "<=", "==", ">=", ">" };
             if (comparaters.Any(c => Value.Contains(c)))
             {

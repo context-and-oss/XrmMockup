@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Add: Implement permission analyzer tool (#357)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### v1.2.0 - 11 September 2026

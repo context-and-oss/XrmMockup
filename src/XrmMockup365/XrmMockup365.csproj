@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFrameworks>net462;net10.0</TargetFrameworks>
+    <TargetFrameworks>net462;net48;net10.0</TargetFrameworks>
     <DebugType>portable</DebugType>
     <Title>XrmMockup365</Title>
     <!-- Development builds never infer a version from generated changelog headings. -->
@@ -29,10 +29,10 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(TargetFramework)' != 'net462'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <DefineConstants>$(DefineConstants);DATAVERSE_SERVICE_CLIENT</DefineConstants>
   </PropertyGroup>
-  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net462' Or '$(TargetFramework)' == 'net48'">
     <Reference Include="System" />
     <Reference Include="System.Activities" />
     <Reference Include="System.configuration" />
@@ -47,14 +47,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\MetadataGen\MetadataGenerator365\bin\$(Configuration)\net462\MetadataGenerator365.exe" Pack="true" PackagePath="content\net462\Metadata" />
-    <Content Include="..\MetadataGen\MetadataGenerator365\bin\$(Configuration)\net462\MetadataGenerator365.exe.config" Pack="true" PackagePath="content\net462\Metadata" />
-    <Content Include="..\..\files\TypeDeclarations.cs" Pack="true" PackagePath="content\net462\Metadata" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="..\MetadataGen\MetadataGenerator365\bin\$(Configuration)\net462\MetadataGenerator365.exe" Pack="true" PackagePath="content\net10.0\Metadata" />
-    <Content Include="..\MetadataGen\MetadataGenerator365\bin\$(Configuration)\net462\MetadataGenerator365.exe.config" Pack="true" PackagePath="content\net10.0\Metadata" />
-    <Content Include="..\..\files\TypeDeclarations.cs" Pack="true" PackagePath="content\net10.0\Metadata" />
+    <!-- Bundle the legacy generator for every supported engine target. -->
+    <Content Include="..\MetadataGen\MetadataGenerator365\bin\$(Configuration)\net462\MetadataGenerator365.exe" Pack="true" PackagePath="content\net462\Metadata;content\net48\Metadata;content\net10.0\Metadata" />
+    <Content Include="..\MetadataGen\MetadataGenerator365\bin\$(Configuration)\net462\MetadataGenerator365.exe.config" Pack="true" PackagePath="content\net462\Metadata;content\net48\Metadata;content\net10.0\Metadata" />
+    <Content Include="..\..\files\TypeDeclarations.cs" Pack="true" PackagePath="content\net462\Metadata;content\net48\Metadata;content\net10.0\Metadata" />
   </ItemGroup>
   <ItemGroup>
     <!-- Icon is included by Directory.Build.props -->
@@ -62,12 +58,12 @@
     <None Include="..\..\LICENSE.txt" Pack="true" PackagePath="\" />
     <None Include="..\..\RELEASE_NOTES.md" Pack="true" PackagePath="\" />
   </ItemGroup>
-  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net462' Or '$(TargetFramework)' == 'net48'">
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.59" />
     <PackageReference Include="Microsoft.CrmSdk.Workflow" Version="9.0.2.60" />
     <PackageReference Include="Microsoft.CrmSdk.XrmTooling.CoreAssembly" Version="9.1.0.51" />
   </ItemGroup>
-  <ItemGroup Condition="'$(TargetFramework)' != 'net462'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
     <PackageReference Include="UiPath.Workflow" Version="6.0.3" />
     <PackageReference Include="DataverseConnection" Version="1.2.6" />
@@ -79,9 +75,14 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\PermissionAnalyzer\PermissionAnalyzer.Abstractions\PermissionAnalyzer.Abstractions.csproj" PrivateAssets="all" />
+    <None Include="buildTransitive\XrmMockup365.targets" Pack="true" PackagePath="buildTransitive" />
+  </ItemGroup>
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>XrmMockup365Test</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
   <Import Project="..\MetadataSkeleton\MetadataSkeleton.projitems" Label="Shared" />
+  <Import Project="PermissionAnalysis.Packaging.targets" />
 </Project>

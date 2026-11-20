@@ -73,7 +73,7 @@ namespace DG.Tools.XrmMockup.Internal
             {
                 return dateTimeValue.ToUniversalTime();
             }
-            
+
             // Can we convert from the value's type converter to the target type?
             var valueConverter = System.ComponentModel.TypeDescriptor.GetConverter(valueType);
             if (valueConverter.CanConvertTo(targetType))

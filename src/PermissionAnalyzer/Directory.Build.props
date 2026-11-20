@@ -1,0 +1,12 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  <PropertyGroup>
+    <!-- Applies only to the permission analyzer subtree. -->
+    <Version Condition="'$(PermissionsReleaseVersion)' == ''">0.0.0-dev</Version>
+    <Version Condition="'$(PermissionsReleaseVersion)' != ''">$(PermissionsReleaseVersion)</Version>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

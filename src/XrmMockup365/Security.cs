@@ -159,6 +159,18 @@ namespace DG.Tools.XrmMockup
                 Shares[target].Remove(revokee);
             }
         }
+        internal PrincipalAccess[] GetSharedPrincipalsAndAccess(EntityReference target)
+        {
+            // Return only explicit shares, not ownership, team membership or role-derived rights.
+            var entity = db.GetEntity(target);
+            if (!Shares.TryGetValue(entity.ToEntityReference(), out var shares)) return Array.Empty<PrincipalAccess>();
+            return shares.Select(share => new PrincipalAccess
+            {
+                Principal = new EntityReference(share.Key.LogicalName, share.Key.Id),
+                AccessMask = share.Value
+            }).ToArray();
+        }
+
         internal AccessRights GetAccessRights(EntityReference target, EntityReference userRef)
         {
             var entity = Core.GetDbRow(target);
@@ -418,6 +430,38 @@ namespace DG.Tools.XrmMockup
                 securityRoles.Add(SecurityRoles[SecurityRoleMapping[role.Id]]);
             }
             return securityRoles;
+        }
+
+        // Permission analysis reads local rows only: no requests, online retrieval, related-entity
+        // expansion or privilege-cache mutation (GetSecurityRoles(caller) can expand related entities).
+        internal bool HasLocalUser(Guid userId) => PermissionCheckRows("systemuser").Any(u => u.Id == userId);
+
+        private IEnumerable<DbRow> PermissionCheckRows(string table) => db.HasTable(table)
+            ? db[table].ToList() : Enumerable.Empty<DbRow>();
+
+        internal IReadOnlyList<SecurityRole> GetPermissionCheckRoles(Guid userId)
+        {
+            var result = new HashSet<SecurityRole>(PermissionCheckPrincipalRoles("systemuser", userId, "systemuserroles_association"));
+            var teams = PermissionCheckRows("teammembership").Where(m => m.GetColumn<Guid>("systemuserid") == userId)
+                .Select(m => m.GetColumn<Guid>("teamid")).Distinct();
+            foreach (var team in teams) result.UnionWith(PermissionCheckPrincipalRoles("team", team, "teamroles_association"));
+            return result.ToList();
+        }
+
+        private IEnumerable<SecurityRole> PermissionCheckPrincipalRoles(string principal, Guid id, string schema)
+        {
+            if (!Metadata.EntityMetadata.TryGetValue(principal, out var entity)) yield break;
+            var relation = (entity.ManyToManyRelationships ?? new ManyToManyRelationshipMetadata[0]).FirstOrDefault(r => r.SchemaName == schema);
+            if (relation == null) yield break;
+            var principalAttribute = relation.Entity1LogicalName == principal ? relation.Entity1IntersectAttribute : relation.Entity2IntersectAttribute;
+            var roleAttribute = relation.Entity1LogicalName == "role" ? relation.Entity1IntersectAttribute : relation.Entity2IntersectAttribute;
+            foreach (var row in PermissionCheckRows(relation.IntersectEntityName).Where(r => r.GetColumn<Guid>(principalAttribute) == id))
+            {
+                var assignedRole = row.GetColumn<Guid>(roleAttribute);
+                if (!SecurityRoleMapping.TryGetValue(assignedRole, out var roleId) || !SecurityRoles.TryGetValue(roleId, out var role))
+                    throw new ArgumentException($"Unknown assigned security role ID: {assignedRole}.");
+                yield return role;
+            }
         }
 
         private bool IsMemberOfTeam(EntityReference team, EntityReference user)

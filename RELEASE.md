@@ -1,13 +1,13 @@
 # Release process
 
-Core and metadata releases are independent. A product tag chooses the package and its version; maintainers do not edit version headings or copy release descriptions manually.
+Core, metadata and permission analyzer releases are independent. A product tag chooses the package and its version; maintainers do not edit version headings or copy release descriptions manually.
 
 ## Repository setup
 
 1. Run **Set up release labels** from `master` to create the labels below. The initial implementation PR is excluded by the migration cutoff; all subsequent PRs must be classified before merging.
 2. Use **PR release labels** and the normal .NET **ci** check for source PRs. If you configure required checks, replace any old **PR product labels**, **PR change category**, or **validate** requirements with **PR release labels**. Continue reviewing source PRs normally. The changelog writer runs the required **ci** check on its generated commit before pushing directly to `master`; do not remove or bypass that check. Other rules (such as requiring all changes through a PR, or additional required checks) can still prohibit this direct-write design; `contents: write` does not bypass them.
 3. Ensure repository/organization Actions policy permits `GITHUB_TOKEN` to use `contents: write`, `actions: write`, and `statuses: write`. The changelog workflow uses these to push commits, dispatch CI, and publish the verified CI result as a commit status, plus `pull-requests: read` for metadata. **Allow GitHub Actions to create and approve pull requests is not needed**; leave it disabled. No App or PAT is needed.
-4. Keep `NUGET_USER` and the NuGet Trusted Publishing policy configured for `release.yml` and the two packages. Restrict who can create release tags.
+4. Keep `NUGET_USER` and the NuGet Trusted Publishing policy configured for `release.yml` and the three packages. Restrict who can create release tags.
 
 The separate **Release automation tests** workflow runs only for automation/workflow or packaging-configuration changes, or a manual dispatch. Do not make this path-filtered check globally required; if an old `release-automation` check was required, remove that requirement so unrelated PRs are not blocked. The single release-label check and .NET CI still run on every PR.
 
@@ -25,7 +25,8 @@ Every PR to `master` needs a product classification:
 | --- | --- |
 | `product:core` | Core package changes |
 | `product:metadata` | Metadata tool changes |
-| Both | Changes affecting both products |
+| `product:permissions` | Permission analyzer tool changes |
+| Multiple product labels | Changes affecting multiple products |
 | `product:none` | Repository maintenance; no release-note entry |
 
 `product:none` is exclusive: do not combine it with a product label. Use the affected product even if you are not planning an immediate release.
@@ -64,6 +65,7 @@ The initial notes collection cutoff is the release-automation rollout merge, PR 
 | --- | --- |
 | `core-v<VERSION>` | `XrmMockup365` |
 | `metadata-v<VERSION>` | `XrmMockup.MetadataGenerator` |
+| `permissions-v<VERSION>` | `XrmMockup.PermissionAnalyzer` |
 
 Use semantic versions such as `1.20.3` or `1.3.0-rc.1`. No combined-version tags are used for new releases.
 
@@ -90,9 +92,9 @@ The workflow checks out the exact source, builds/tests the solution, packs only 
 
 ### Packaged changelogs and release notes
 
-Release preparation replaces the selected product's `Unreleased` heading in the build checkout with the exact tag version and UTC release date in `d MMMM yyyy` format (for example, `4 November 2026`), using English month names. The other product's changelog and published history are left unchanged. This versioned section is saved as `.release/notes.md` and used for the GitHub release body, including prerelease suffixes. NuGet `PackageReleaseNotes` uses a separate `.release/package-notes.md` containing the latest 10 complete release sections (or all releases if fewer than 10 exist), followed by a link to the selected product's full changelog on GitHub.
+Release preparation replaces the selected product's `Unreleased` heading in the build checkout with the exact tag version and UTC release date in `d MMMM yyyy` format (for example, `4 November 2026`), using English month names. The other products' changelogs and published history are left unchanged. This versioned section is saved as `.release/notes.md` and used for the GitHub release body, including prerelease suffixes. NuGet `PackageReleaseNotes` uses a separate `.release/package-notes.md` containing the latest 10 complete release sections (or all releases if fewer than 10 exist), followed by a link to the selected product's full changelog on GitHub.
 
-The regular NuGet package includes the complete selected product changelog at its root: `RELEASE_NOTES.md` for `XrmMockup365`, or `CHANGELOG.md` for `XrmMockup.MetadataGenerator`. Before artifact upload and again before publication, validation checks that both package manifests contain the saved package release notes, that these match the latest 10 sections and full-history link from the packaged changelog, and that the changelog starts with the individual GitHub release section. Missing files, stale notes, and mismatched versions fail validation. Development/local preview packages retain their development notes and unreleased changelog; they are not publication artifacts.
+The regular NuGet package includes the complete selected product changelog at its root: `RELEASE_NOTES.md` for `XrmMockup365`, or `CHANGELOG.md` for `XrmMockup.MetadataGenerator` and `XrmMockup.PermissionAnalyzer`. Before artifact upload and again before publication, validation checks that both package manifests contain the saved package release notes, that these match the latest 10 sections and full-history link from the packaged changelog, and that the changelog starts with the individual GitHub release section. Missing files, stale notes, and mismatched versions fail validation. Development/local preview packages retain their development notes and unreleased changelog; they are not publication artifacts.
 
 ## Failed release
 

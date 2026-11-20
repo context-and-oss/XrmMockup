@@ -23,9 +23,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: |
-            8.x
-            10.x
+          dotnet-version: 10.x
 
       - name: Install dependencies
         run: dotnet restore
@@ -41,6 +39,9 @@ jobs:
 
       - name: Pack MetadataGenerator.Tool
         run: dotnet pack src/MetadataGen/MetadataGenerator.Tool/MetadataGenerator.Tool.csproj --configuration Release --no-build --output ./nupkg
+
+      - name: Pack PermissionAnalyzer.Tool
+        run: dotnet pack src/PermissionAnalyzer/PermissionAnalyzer.Tool/PermissionAnalyzer.Tool.csproj --configuration Release --no-build --output ./nupkg
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

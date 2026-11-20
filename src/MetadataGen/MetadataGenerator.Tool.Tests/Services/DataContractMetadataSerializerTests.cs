@@ -238,6 +238,74 @@ public class DataContractMetadataSerializerTests : IDisposable
     }
 
     [Fact]
+    public async Task SerializeSecurityRolesAsync_RoundTripsGlobalPrivileges()
+    {
+        var roleId = Guid.NewGuid();
+        var role = new SecurityRole
+        {
+            Name = "Test Role",
+            RoleId = roleId,
+            Privileges = [],
+            GlobalPrivileges = new Dictionary<string, RolePrivilege>
+            {
+                ["prvActOnBehalfOfAnotherUser"] = new RolePrivilege { CanBeGlobal = true, PrivilegeDepth = PrivilegeDepth.Global }
+            }
+        };
+
+        await _serializer.SerializeSecurityRolesAsync(new Dictionary<Guid, SecurityRole> { { roleId, role } });
+
+        var file = Directory.GetFiles(Path.Combine(_testOutputDir, "SecurityRoles"), "*.xml").Single();
+        await using var stream = new FileStream(file, FileMode.Open);
+        var deserialized = (SecurityRole?)new DataContractSerializer(typeof(SecurityRole)).ReadObject(stream);
+        var privilege = Assert.Single(deserialized!.GlobalPrivileges);
+        Assert.Equal("prvActOnBehalfOfAnotherUser", privilege.Key);
+        Assert.Equal(PrivilegeDepth.Global, privilege.Value.PrivilegeDepth);
+    }
+
+    [Fact]
+    public async Task SecurityRole_WithoutGlobalPrivileges_DeserializesWithNull()
+    {
+        var roleId = Guid.NewGuid();
+        var role = new SecurityRole { Name = "Test Role", RoleId = roleId, Privileges = [] };
+        await _serializer.SerializeSecurityRolesAsync(new Dictionary<Guid, SecurityRole> { { roleId, role } });
+        var file = Directory.GetFiles(Path.Combine(_testOutputDir, "SecurityRoles"), "*.xml").Single();
+
+        // Role files generated before global privileges were downloaded have no GlobalPrivileges element
+        var xml = System.Text.RegularExpressions.Regex.Replace(await File.ReadAllTextAsync(file), "<GlobalPrivileges[^>]*/>", "");
+        Assert.DoesNotContain("GlobalPrivileges", xml);
+        using var reader = System.Xml.XmlReader.Create(new StringReader(xml));
+        var deserialized = (SecurityRole?)new DataContractSerializer(typeof(SecurityRole)).ReadObject(reader);
+
+        Assert.NotNull(deserialized);
+        Assert.Null(deserialized.GlobalPrivileges);
+    }
+
+    [Fact]
+    public async Task SerializePrivilegeCatalogAsync_CreatesDeserializableFile()
+    {
+        var catalog = new PrivilegeCatalog
+        {
+            Privileges =
+            [
+                new MetaPrivilege { Name = "prvReadAccount", PrivilegeId = Guid.NewGuid(), AccessRight = AccessRights.ReadAccess, Tables = ["account"] },
+                new MetaPrivilege { Name = "prvActOnBehalfOfAnotherUser", PrivilegeId = Guid.NewGuid(), AccessRight = AccessRights.None, Tables = [] }
+            ],
+            CustomApis = [new MetaCustomApi { UniqueName = "ctx_Submit", ExecutePrivilegeName = "prvReadAccount" }]
+        };
+
+        await _serializer.SerializePrivilegeCatalogAsync(catalog);
+
+        var path = Path.Combine(_testOutputDir, DataContractMetadataSerializer.PrivilegeCatalogFile);
+        await using var stream = new FileStream(path, FileMode.Open);
+        var deserialized = (PrivilegeCatalog?)new DataContractSerializer(typeof(PrivilegeCatalog)).ReadObject(stream);
+        Assert.NotNull(deserialized);
+        Assert.Equal(["prvReadAccount", "prvActOnBehalfOfAnotherUser"], deserialized.Privileges.Select(p => p.Name));
+        Assert.Equal(["account"], deserialized.Privileges[0].Tables);
+        Assert.Equal(AccessRights.ReadAccess, deserialized.Privileges[0].AccessRight);
+        Assert.Equal("prvReadAccount", Assert.Single(deserialized.CustomApis).ExecutePrivilegeName);
+    }
+
+    [Fact]
     public async Task GenerateTypeDeclarationsAsync_ContainsNamespace()
     {
         var roleId = Guid.NewGuid();

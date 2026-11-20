@@ -24,7 +24,7 @@ namespace WorkflowExecuter
         {
             if (workflow == null || workflow.LogicalName != LogicalNames.Workflow)
             {
-                throw new WorkflowException($"Entity had logicalname '{LogicalNames.Workflow}' instead of workflow");
+                throw new WorkflowException($"Entity had logicalname '{workflow?.LogicalName ?? "<null>"}' instead of {LogicalNames.Workflow}");
             }
             var parsed = Parser.Parse(workflow.GetAttributeValue<string>("xaml"));
             var workflowName = workflow.GetAttributeValue<string>("name");
@@ -47,7 +47,7 @@ namespace WorkflowExecuter
                workflow.GetOptionSetValue<workflow_stage>("createstage"), workflow.GetOptionSetValue<workflow_stage>("updatestage"),
                workflow.GetOptionSetValue<workflow_stage>("deletestage"), workflow.GetOptionSetValue<Workflow_Mode>("mode"),
                workflow.GetAttributeValue<EntityReference>("ownerid").Id, workflow.GetAttributeValue<string>("primaryentity"), codeActivites,
-               input, output);
+               input, output, workflowName, workflow.Id);
         }
 
         private static WorkflowArgument ConvertToArgument(Property p)

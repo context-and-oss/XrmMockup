@@ -26,7 +26,8 @@ namespace DG.XrmMockupTest
                 }
             };
 
-            orgAdminService.Execute(deleteMultipleRequest);
+            var response = orgAdminService.Execute(deleteMultipleRequest);
+            Assert.Equal("DeleteMultiple", response.ResponseName);
 
             Assert.Throws<FaultException>(() => orgAdminService.Retrieve(Contact.EntityLogicalName, contactId1, new Microsoft.Xrm.Sdk.Query.ColumnSet(true)));
             Assert.Throws<FaultException>(() => orgAdminService.Retrieve(Contact.EntityLogicalName, contactId2, new Microsoft.Xrm.Sdk.Query.ColumnSet(true)));
