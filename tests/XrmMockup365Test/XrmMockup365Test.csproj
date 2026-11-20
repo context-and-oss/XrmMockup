@@ -1,46 +1,71 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net462</TargetFramework>
-    <DebugType>portable</DebugType>
-    <Title>XrmMockup365Test</Title>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>TRACE;DEBUG;XRM_MOCKUP_TEST_365</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE;XRM_MOCKUP_TEST_365</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-  </PropertyGroup>
-  <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.DirectoryServices" />
-    <Reference Include="System.DirectoryServices.AccountManagement" />
-    <Reference Include="System.IdentityModel" />
-    <Reference Include="System.Runtime.Serialization" />
-    <Reference Include="System.Security" />
-    <Reference Include="System.ServiceModel" />
-    <Reference Include="System.ServiceModel.Web" />
-    <Reference Include="System.Web" />
-    <Reference Include="System.Xml" />
-    <Reference Include="System.Xml.Linq" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\XrmMockup365\XrmMockup365.csproj" />
-    <ProjectReference Include="..\TestPluginAssembly365\TestPluginAssembly365.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.28" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.7.1" />
-    <PackageReference Include="xunit" Version="2.4.1" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.3">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
-  <Import Project="..\SharedTests\SharedTests.projitems" Label="Shared" />
+	<PropertyGroup>
+		<TargetFrameworks>net48;net10.0</TargetFrameworks>
+		<DebugType>portable</DebugType>
+		<Title>XrmMockup365Test</Title>
+		<RootNamespace>DG.XrmMockupTest</RootNamespace>
+		<!-- Test project, not a NuGet package -->
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+		<Optimize>false</Optimize>
+		<OutputPath>bin\Debug\</OutputPath>
+		<DefineConstants>TRACE;DEBUG</DefineConstants>
+		<ErrorReport>prompt</ErrorReport>
+	</PropertyGroup>
+	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+		<Optimize>true</Optimize>
+		<OutputPath>bin\Release\</OutputPath>
+		<DefineConstants>TRACE</DefineConstants>
+		<ErrorReport>prompt</ErrorReport>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<DefineConstants>$(DefineConstants);DATAVERSE_SERVICE_CLIENT</DefineConstants>
+		<XrmMockupEnablePermissionAnalysis>true</XrmMockupEnablePermissionAnalysis>
+	</PropertyGroup>
+	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+		<Reference Include="System" />
+		<Reference Include="System.DirectoryServices" />
+		<Reference Include="System.DirectoryServices.AccountManagement" />
+		<Reference Include="System.IdentityModel" />
+		<Reference Include="System.Runtime.Serialization" />
+		<Reference Include="System.Security" />
+		<Reference Include="System.ServiceModel" />
+		<Reference Include="System.ServiceModel.Web" />
+		<Reference Include="System.Web" />
+		<Reference Include="System.Xml" />
+		<Reference Include="System.Xml.Linq" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\XrmMockup365\XrmMockup365.csproj" AdditionalProperties="XrmMockupEnablePermissionAnalysis=$(XrmMockupEnablePermissionAnalysis)" />
+		<ProjectReference Include="..\TestPluginAssembly365\TestPluginAssembly365.csproj" />
+		<!-- Intentionally load a net462 plugin assembly in both test hosts for regression coverage. -->
+		<ProjectReference Include="..\TestPluginAssembly462\TestPluginAssembly462.csproj" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+		<PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.59" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<!-- Source/project-reference tests need the internal contracts directly; NuGet consumers get
+		     this assembly as a lib asset of XrmMockup365 itself. No workspace project/package reference. -->
+		<ProjectReference Include="..\..\src\PermissionAnalyzer\PermissionAnalyzer.Abstractions\PermissionAnalyzer.Abstractions.csproj" />
+		<PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
+		<PackageReference Include="UiPath.Workflow" Version="6.0.3" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+		<PackageReference Include="XrmPluginCore" Version="1.2.3" />
+		<PackageReference Include="System.Text.Json" Version="8.0.5" />
+		<PackageReference Include="xunit" Version="2.4.1" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="2.4.3">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+	</ItemGroup>
+	<ItemGroup>
+		<Content Include="xunit.runner.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
 </Project>
