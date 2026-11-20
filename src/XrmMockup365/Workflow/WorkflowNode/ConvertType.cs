@@ -25,6 +25,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. Input: {1}, Type: {2}, Result: {3}", this.GetType().Name, Input, Type, Result);
 
             if (!variables.ContainsKey(Input))
             {

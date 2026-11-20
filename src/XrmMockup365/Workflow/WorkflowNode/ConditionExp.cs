@@ -32,6 +32,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. Operator: {1} Parameters: {2} Operand: {3} ReturnName: {4}", this.GetType().Name, Operator, Parameters, Operand, ReturnName);
             var operand = variables[Operand];
             var variablesInstance = variables;
             var parameters = Parameters != null && Parameters.Count() == 1 ? Parameters[0].Split(',').Select(p => variablesInstance[p.Trim()]).ToArray() : null;

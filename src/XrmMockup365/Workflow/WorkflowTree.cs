@@ -71,6 +71,10 @@ namespace WorkflowExecuter
         public List<WorkflowArgument> Input;
         [DataMember]
         public List<WorkflowArgument> Output;
+        [DataMember]
+        public string Name;
+        [DataMember]
+        public Guid Id;
 
 
         public WorkflowTree(IWorkflowNode StartActivity) : this(StartActivity, false, false, new HashSet<string>(),
@@ -83,7 +87,7 @@ namespace WorkflowExecuter
             HashSet<string> TriggerFieldsChange, workflow_runas? RunAs, Workflow_Scope? Scope,
             workflow_stage? CreateStage, workflow_stage? UpdateStage, workflow_stage? DeleteStage, Workflow_Mode? Mode,
             Guid? Owner, string PrimaryEntityLogicalname, Dictionary<string, CodeActivity> CodeActivites,
-            List<WorkflowArgument> Input, List<WorkflowArgument> Output)
+            List<WorkflowArgument> Input, List<WorkflowArgument> Output, string Name = null, Guid Id = default(Guid))
         {
             this.Variables = new Dictionary<string, object>();
             this.StartActivity = StartActivity;
@@ -101,6 +105,8 @@ namespace WorkflowExecuter
             this.CodeActivites = CodeActivites;
             this.Input = Input;
             this.Output = Output;
+            this.Name = Name;
+            this.Id = Id;
         }
 
         // A calculated/formula field is evaluated on demand during a Retrieve and must never persist:
@@ -116,30 +122,34 @@ namespace WorkflowExecuter
 
         public WorkflowTree Execute(Entity primaryEntity, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace,
-            bool suppressWrites = false)
+            bool suppressWrites = false, bool enableWorkflowTracing = false)
         {
-            if (primaryEntity.Id == Guid.Empty)
-            {
-                throw new WorkflowException("The primary entity must have an id");
-            }
-            Reset();
-            // Set unconditionally after Reset() (which doesn't touch this key): a WorkflowTree instance
-            // can be reused across executions, so the flag must reflect only the current call - never a
-            // value left over from a previous suppressWrites: true run, which would otherwise silently
-            // suppress a real workflow's Update.
-            Variables[SuppressWritesKey] = suppressWrites;
-            Variables[IsCalculatedFieldKey] = IsCalculatedField;
-            Variables["InputEntities(\"primaryEntity\")"] = primaryEntity;
-            Variables["ExecutionTime"] = DateTime.Now.Add(timeOffset);
-            var transactioncurrencyid = "transactioncurrencyid";
-            if (primaryEntity.Attributes.ContainsKey(transactioncurrencyid))
-            {
-                var currencyRef = primaryEntity.GetAttributeValue<EntityReference>(transactioncurrencyid);
-                var exchangerate = "exchangerate";
-                var currency = orgService.Retrieve("transactioncurrency", currencyRef.Id, new ColumnSet(exchangerate));
-                Variables["ExchangeRate"] = currency[exchangerate];
-            }
-            StartActivity.Execute(ref Variables, timeOffset, orgService, factory, trace);
+            WorkflowDiagnostics.Run(Name, Id, Mode, primaryEntity?.ToEntityReference(), timeOffset,
+                trace, enableWorkflowTracing, false, executionTrace =>
+                {
+                    if (primaryEntity.Id == Guid.Empty)
+                    {
+                        throw new WorkflowException("The primary entity must have an id");
+                    }
+                    Reset();
+                    // Set unconditionally after Reset() (which doesn't touch this key): a WorkflowTree instance
+                    // can be reused across executions, so the flag must reflect only the current call - never a
+                    // value left over from a previous suppressWrites: true run, which would otherwise silently
+                    // suppress a real workflow's Update.
+                    Variables[SuppressWritesKey] = suppressWrites;
+                    Variables[IsCalculatedFieldKey] = IsCalculatedField;
+                    Variables["InputEntities(\"primaryEntity\")"] = primaryEntity;
+                    Variables["ExecutionTime"] = DateTime.Now.Add(timeOffset);
+                    var transactioncurrencyid = "transactioncurrencyid";
+                    if (primaryEntity.Attributes.ContainsKey(transactioncurrencyid))
+                    {
+                        var currencyRef = primaryEntity.GetAttributeValue<EntityReference>(transactioncurrencyid);
+                        var exchangerate = "exchangerate";
+                        var currency = orgService.Retrieve("transactioncurrency", currencyRef.Id, new ColumnSet(exchangerate));
+                        Variables["ExchangeRate"] = currency[exchangerate];
+                    }
+                    StartActivity.Execute(ref Variables, timeOffset, orgService, factory, executionTrace);
+                }, () => Variables["Wait"] as WaitInfo);
             return this;
         }
 

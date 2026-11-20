@@ -42,6 +42,12 @@ namespace DG.Tools.XrmMockup
         public bool? TriggerWorkflows { get; set; }
 
         /// <summary>
+        /// Emit workflow start, node, wait/resume, completion and failure diagnostics through
+        /// the configured tracing service. Default is false. Does not suppress traces from code activities.
+        /// </summary>
+        public bool EnableWorkflowTracing { get; set; } = false;
+
+        /// <summary>
         /// List of request that will not throw exceptions.
         /// </summary>
         public IEnumerable<string> ExceptionFreeRequests { get; set; }

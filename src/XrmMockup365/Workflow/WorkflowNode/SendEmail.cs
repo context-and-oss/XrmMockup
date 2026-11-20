@@ -25,6 +25,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. EntityId: {1} DisplayName: {2} Entity: {3}", this.GetType().Name, EntityId, DisplayName, Entity);
             if (EntityId == "{x:Null}")
             {
                 orgService.Create(variables[Entity.TrimEdge()] as Entity);

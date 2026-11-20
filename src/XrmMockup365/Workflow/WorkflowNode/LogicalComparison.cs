@@ -29,6 +29,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0} Operator: {1} LeftOperand: {2} RightOperand: {3} Result: {4}", this.GetType().Name, Operator, LeftOperand, RightOperand, Result);
             var left = (bool?)variables[LeftOperand];
             var right = (bool?)variables[RightOperand];
 

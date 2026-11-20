@@ -23,6 +23,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. Status: {1} MessageId: {2}", this.GetType().Name, status, messageId);
             var sb = new StringBuilder($"Workflow exited with status '{status}'");
             if (variables[messageId] != null && (variables[messageId] as string != ""))
             {

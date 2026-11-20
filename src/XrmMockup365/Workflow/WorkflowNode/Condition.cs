@@ -25,6 +25,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. GuardId: {1} Then: {2} Otherwise: {3}", this.GetType().Name, GuardId, Then, Otherwise);
             if (variables[GuardId] != null && (bool)variables[GuardId])
             {
                 Then.Execute(ref variables, timeOffset, orgService, factory, trace);
