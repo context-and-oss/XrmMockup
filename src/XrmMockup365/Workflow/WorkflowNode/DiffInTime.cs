@@ -25,6 +25,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. VariableName: {1} Amount: {2}", this.GetType().Name, VariableName, Amount);
             var date1 = variables[Parameters[0][0]] as DateTime?;
             var date2 = variables[Parameters[0][1]] as DateTime?;
             if (date1.HasValue && date2.HasValue)

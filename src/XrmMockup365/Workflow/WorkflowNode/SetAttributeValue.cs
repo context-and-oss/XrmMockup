@@ -23,6 +23,7 @@ namespace WorkflowExecuter
         public void Execute(ref Dictionary<string, object> variables, TimeSpan timeOffset,
             IOrganizationService orgService, IOrganizationServiceFactory factory, ITracingService trace)
         {
+            WorkflowDiagnostics.Trace(trace, "Entering {0}. VariableId: {1} EntityName: {2}", this.GetType().Name, VariableId, EntityName);
             var relatedlinked = "relatedlinked";
             if (VariableId.Contains(relatedlinked))
             {

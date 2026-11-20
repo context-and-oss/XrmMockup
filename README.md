@@ -29,6 +29,26 @@ for plugins compiled against .NET Framework 4.6.2.
 * Enforces the security model of CRM, thus allowing you to test your security roles and business unit setup.
 * Enables changing the time of the internal clock of XrmMockup during tests, which enables testing of time-based events (i.e waiting workflows or other time-sensitive business logic).
 
+## Workflow diagnostics
+
+Set `XrmMockupSettings.EnableWorkflowTracing = true` to enable workflow diagnostics.
+It defaults to `false`. Diagnostics include workflow name and ID, mode, primary entity,
+node execution details, failure, and completion. A paused workflow reports waiting rather
+than success; subsequent executions report resume and retain the workflow identity.
+
+```csharp
+var settings = new XrmMockupSettings
+{
+    // Configure metadata, plugins and code activities as usual.
+    EnableWorkflowTracing = true
+};
+```
+
+Messages use the existing execution-scoped `ITracingService` and configured
+`TracingServiceFactory`, including its collection/callback behavior. Disabling diagnostics
+does not disable tracing from code activities or plugins. Invalid format strings with
+arguments still throw `FormatException`; messages without arguments retain literal braces.
+
 ## Releasing
 
 Maintainers: see [RELEASE.md](RELEASE.md) for PR labels, repository setup, and independent product releases.
