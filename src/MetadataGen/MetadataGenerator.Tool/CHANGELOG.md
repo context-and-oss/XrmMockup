@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
 * Add: Implement permission analyzer tool (#357)
+* Change: Update dataverseconnection to v1.2.6 (#384)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### v1.2.0 - 11 September 2026

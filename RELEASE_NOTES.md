@@ -1,14 +1,15 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
 * Add: Add missing request handlers (#374)
-* Add: Support .NET 4.8 plugins (#378)
 * Add: Implement permission analyzer tool (#357)
 * Add: Add support for AutoNumber attributes (#99)
 * Add: Add opt-in workflow diagnostics (#381)
 * Add: Enforce active alternate-key uniqueness on create and update (#383)
 * Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
-* Fix: Analyze null-reference cause #375 (#379)
+* Fix: Updated workflow property nodes to handle nullable lookups (#379)
 * Fix: Response name assignment in request handler execution (#380)
+* Change: Support .NET 4.8 plugins (#378)
+* Change: Update dataverseconnection to v1.2.6 (#384)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.20.3 - 13 November 2026
