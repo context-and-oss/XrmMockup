@@ -5,6 +5,7 @@
 * Add: Implement permission analyzer tool (#357)
 * Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
 * Fix: Analyze null-reference cause #375 (#379)
+* Fix: Imported fork PR #309: Fix: response (#380)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.20.3 - 13 November 2026
