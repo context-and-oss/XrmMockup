@@ -1,5 +1,9 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
+* No unreleased changes.
+<!-- END GENERATED RELEASE NOTES -->
+
+### 1.21.0 - 20 November 2026
 * Add: Add missing request handlers (#374)
 * Add: Implement permission analyzer tool (#357)
 * Add: Add support for AutoNumber attributes (#99)
@@ -10,7 +14,6 @@
 * Fix: Response name assignment in request handler execution (#380)
 * Change: Support .NET 4.8 plugins (#378)
 * Change: Update dataverseconnection to v1.2.6 (#384)
-<!-- END GENERATED RELEASE NOTES -->
 
 ### 1.20.3 - 13 November 2026
 * Add: Support RowVersion and versionnumber (#366)

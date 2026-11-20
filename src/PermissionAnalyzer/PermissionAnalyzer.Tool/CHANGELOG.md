@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* Add: Implement permission analyzer tool (#357)
+* No unreleased changes.
 <!-- END GENERATED RELEASE NOTES -->
+
+### 1.0.0 - 20 November 2026
+* Add: Implement permission analyzer tool (#357)
 
 ### v1.0.0-rc.1 - 23 October 2026
 * Add: `xrmmockup-permissions`, which lists the Dataverse table privileges, and privileges not tied to a table, that a solution or project needs, found by static analysis of its `IOrganizationService`, request and `OrganizationServiceContext` calls
