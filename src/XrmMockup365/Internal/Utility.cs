@@ -1044,61 +1044,6 @@ namespace DG.Tools.XrmMockup.Internal
                 var newCollection = new OptionSetValueCollection(typed.Values.Select(x => new OptionSetValue(x)).ToList());
                 return newCollection;
             }
-            else if (type == typeof(EntityCollection))
-            {
-                var node = JsonNode.Parse(colToSerialize.Value);
-                var typed = (EntityCollectionDTO)node.Deserialize(typeof(EntityCollectionDTO));
-
-                // Manually deserialize entities
-                var entities = new List<Entity>();
-                if (typed.Entities.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var entityElement in typed.Entities.EnumerateArray())
-                    {
-                        var entity = new Entity();
-
-                        // Deserialize LogicalName
-                        if (entityElement.TryGetProperty("LogicalName", out var logicalNameProp))
-                        {
-                            entity.LogicalName = logicalNameProp.GetString();
-                        }
-
-                        // Deserialize Id
-                        if (entityElement.TryGetProperty("Id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
-                        {
-                            entity.Id = Guid.Parse(idProp.GetString());
-                        }
-
-                        // Deserialize Attributes
-                        if (entityElement.TryGetProperty("Attributes", out var attributesProp) && attributesProp.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var attr in attributesProp.EnumerateArray())
-                            {
-                                if (attr.TryGetProperty("Key", out var keyProp) && attr.TryGetProperty("Value", out var valueProp))
-                                {
-                                    var key = keyProp.GetString();
-                                    // Recursively deserialize attribute values (could be EntityReference, etc.)
-                                    var value = JsonSerializer.Deserialize<object>(valueProp.GetRawText());
-                                    entity[key] = value;
-                                }
-                            }
-                        }
-
-                        entities.Add(entity);
-                    }
-                }
-
-                var newCollection = new EntityCollection(entities)
-                {
-                    MoreRecords = typed.MoreRecords,
-                    PagingCookie = typed.PagingCookie,
-                    MinActiveRowVersion = typed.MinActiveRowVersion,
-                    TotalRecordCount = typed.TotalRecordCount,
-                    TotalRecordCountLimitExceeded = typed.TotalRecordCountLimitExceeded,
-                    EntityName = typed.EntityName
-                };
-                return newCollection;
-            }
             else if (type == typeof(BooleanManagedProperty))
             {
                 var node = JsonNode.Parse(colToSerialize.Value);
