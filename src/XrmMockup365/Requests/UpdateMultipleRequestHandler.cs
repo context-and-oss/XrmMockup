@@ -34,12 +34,12 @@ namespace DG.Tools.XrmMockup
             var seenIds = new HashSet<Guid>();
             foreach (var entity in request.Targets.Entities)
             {
-                if (seenIds.Contains(entity.Id))
+                if (entity.Id != Guid.Empty && seenIds.Contains(entity.Id))
                 {
                     continue;
                 }
 
-                seenIds.Add(entity.Id);
+                if (entity.Id != Guid.Empty) seenIds.Add(entity.Id);
                 var updateRequest = new UpdateRequest
                 {
                     Target = entity

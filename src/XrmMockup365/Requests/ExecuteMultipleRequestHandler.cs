@@ -31,7 +31,7 @@ namespace DG.Tools.XrmMockup {
                     }
 
                 } catch (Exception e) {
-                    resp.Fault = new OrganizationServiceFault {
+                    resp.Fault = (e as FaultException<OrganizationServiceFault>)?.Detail ?? new OrganizationServiceFault {
                         Message = e.Message,
                         Timestamp = DateTime.Now
                     };

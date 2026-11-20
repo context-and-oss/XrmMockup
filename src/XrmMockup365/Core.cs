@@ -801,6 +801,22 @@ namespace DG.Tools.XrmMockup
         public OrganizationResponse Execute(OrganizationRequest request, EntityReference userRef,
             PluginContext parentPluginContext)
         {
+            // Standard-table bulk writes are atomic, including writes performed by their
+            // pre/post-operation plugins. ExecuteMultiple intentionally remains per-item.
+            if (request.RequestName == "CreateMultiple" || request.RequestName == "UpdateMultiple" ||
+                request.RequestName == "UpsertMultiple")
+            {
+                var snapshot = TakeJsonSnapshot();
+                try
+                {
+                    return pipeline.Execute(request, userRef, parentPluginContext);
+                }
+                catch
+                {
+                    RestoreJsonSnapshot(snapshot);
+                    throw;
+                }
+            }
             return pipeline.Execute(request, userRef, parentPluginContext);
         }
 

@@ -2,15 +2,27 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
+using Microsoft.Xrm.Sdk.Metadata;
 using System;
 using System.ServiceModel;
 using Xunit;
 
 namespace DG.XrmMockupTest
 {
-    public class TestAlternateKeys : UnitTestBase
+    public class TestAlternateKeys : RequestHandlerTestBase
     {
         public TestAlternateKeys(XrmMockupFixture fixture) : base(fixture) { }
+
+        // These resolution tests need independent rows sharing a name. Declare the
+        // composite key they exercise instead of violating the checked-in name-only key.
+        private void UseParentCompositeKey(string component)
+        {
+            var entity = CloneMetadata(metadata.EntityMetadata[ctx_parent.EntityLogicalName]);
+            var key = new EntityKeyMetadata { LogicalName = "test_composite", KeyAttributes = new[] { "ctx_name", component } };
+            Set(key, "EntityKeyIndexStatus", EntityKeyIndexStatus.Active);
+            Set(entity, "Keys", new[] { key });
+            metadata.EntityMetadata[ctx_parent.EntityLogicalName] = entity;
+        }
 
         [Fact]
         public void TestAlternateKeysAll()
@@ -142,6 +154,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAlternateKeyWithString()
         {
+            UseParentCompositeKey("ctx_postalcode");
             // Built at runtime, not an interned literal
             var wanted = 2800.ToString();
 
@@ -171,6 +184,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAlternateKeyWithWholeNumber()
         {
+            UseParentCompositeKey("ctx_wholenumber");
             Create(new ctx_parent { ctx_Name = "Counted", ctx_WholeNumber = 1 });
             var target = Create(new ctx_parent { ctx_Name = "Counted", ctx_WholeNumber = 4242 });
 
@@ -232,6 +246,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAlternateKeyWithDateTime()
         {
+            UseParentCompositeKey("ctx_datevalue");
             var other = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
             var wanted = new DateTime(2026, 8, 28, 9, 30, 0, DateTimeKind.Utc);
 
@@ -261,6 +276,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAlternateKeyWithOptionSet()
         {
+            UseParentCompositeKey("ctx_industrycode");
             Create(new ctx_parent { ctx_Name = "Sorted", ctx_Industrycode = ctx_parent_ctx_industrycode.Accounting });
             var target = Create(new ctx_parent { ctx_Name = "Sorted", ctx_Industrycode = ctx_parent_ctx_industrycode.Consulting });
 
@@ -325,6 +341,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAlternateKeyStringIsCaseInsensitive()
         {
+            UseParentCompositeKey("ctx_postalcode");
             // Text columns collate case-insensitively
             Create(new ctx_parent { ctx_Name = "Meatballs", ctx_Postalcode = "2830" });
             var target = Create(new ctx_parent { ctx_Name = "Meatballs", ctx_Postalcode = "2800" });
@@ -361,6 +378,7 @@ namespace DG.XrmMockupTest
         [Fact]
         public void TestAlternateKeyWithNullValueNeverMatches()
         {
+            UseParentCompositeKey("ctx_postalcode");
             // Both rows leave ctx_postalcode unset, null would match an arbitrary one
             var first = Create(new ctx_parent { ctx_Name = "Nulled" });
             var second = Create(new ctx_parent { ctx_Name = "Nulled" });
@@ -460,14 +478,14 @@ namespace DG.XrmMockupTest
             Assert.Equal("2800", orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, existing.Id, new ColumnSet(true))
                 .ToEntity<ctx_parent>().ctx_Postalcode);
 
-            // Key matching nothing still creates
+            // A different active name key still creates
             resp = orgAdminUIService.Execute(new UpsertRequest
             {
                 Target = new ctx_parent
                 {
                     KeyAttributes = new KeyAttributeCollection
                     {
-                        { "ctx_name",        "Upserted" },
+                        { "ctx_name",        "Upserted-new" },
                         { "ctx_wholenumber", 1 }
                     }
                 }
