@@ -14,27 +14,39 @@ namespace DG.Tools.XrmMockup.Internal
     internal sealed class AutoNumberGenerator
     {
         internal const long DefaultSeed = 1000;
+        // One lock protects allocation and every other access to this generator's state.
+        private readonly object syncRoot = new object();
         private readonly Dictionary<Tuple<string, string>, AutoNumberStateDTO> states =
             new Dictionary<Tuple<string, string>, AutoNumberStateDTO>();
 
         internal void SetSeed(string entity, string attribute, long value)
         {
-            if (value < 0) throw new FaultException("An auto-number seed cannot be negative.");
-            states[Tuple.Create(entity, attribute)] = new AutoNumberStateDTO
+            lock (syncRoot)
             {
-                EntityName = entity, AttributeName = attribute, Seed = value, NextValue = value
-            };
+                if (value < 0) throw new FaultException("An auto-number seed cannot be negative.");
+                states[Tuple.Create(entity, attribute)] = new AutoNumberStateDTO
+                {
+                    EntityName = entity, AttributeName = attribute, Seed = value, NextValue = value
+                };
+            }
         }
 
-        internal long GetSeed(string entity, string attribute) => GetState(entity, attribute).Seed;
+        internal long GetSeed(string entity, string attribute)
+        {
+            lock (syncRoot) return GetState(entity, attribute).Seed;
+        }
 
         internal long GetNext(string entity, string attribute)
         {
-            var state = GetState(entity, attribute);
-            if (state.Exhausted) throw new FaultException("The auto-number sequence is exhausted.");
-            return state.NextValue;
+            lock (syncRoot)
+            {
+                var state = GetState(entity, attribute);
+                if (state.Exhausted) throw new FaultException("The auto-number sequence is exhausted.");
+                return state.NextValue;
+            }
         }
 
+        // Caller must hold syncRoot; mutable state never escapes the generator.
         private AutoNumberStateDTO GetState(string entity, string attribute)
         {
             var key = Tuple.Create(entity, attribute);
@@ -45,6 +57,12 @@ namespace DG.Tools.XrmMockup.Internal
         }
 
         internal string Generate(string entity, StringAttributeMetadata attribute, DateTime utcNow)
+        {
+            // Keep the read, full render, and advance atomic even across repeated placeholders.
+            lock (syncRoot) return GenerateCore(entity, attribute, utcNow);
+        }
+
+        private string GenerateCore(string entity, StringAttributeMetadata attribute, DateTime utcNow)
         {
             // Parse and render the entire format before consuming a sequence. Invalid formats
             // must not partially advance it. Repeated SEQNUM placeholders share one reservation.
@@ -118,14 +136,20 @@ namespace DG.Tools.XrmMockup.Internal
 
         private static FaultException InvalidFormat() => new FaultException("Invalid AutoNumberFormat.");
 
-        internal List<AutoNumberStateDTO> Capture() => states.Values.Select(s => s.Clone()).ToList();
+        internal List<AutoNumberStateDTO> Capture()
+        {
+            lock (syncRoot) return states.Values.Select(s => s.Clone()).ToList();
+        }
 
         internal void Restore(IEnumerable<AutoNumberStateDTO> snapshot)
         {
-            states.Clear();
-            if (snapshot == null) return; // JSON snapshots produced before auto-number support.
-            foreach (var state in snapshot)
-                states.Add(Tuple.Create(state.EntityName, state.AttributeName), state.Clone());
+            lock (syncRoot)
+            {
+                states.Clear();
+                if (snapshot == null) return; // JSON snapshots produced before auto-number support.
+                foreach (var state in snapshot)
+                    states.Add(Tuple.Create(state.EntityName, state.AttributeName), state.Clone());
+            }
         }
     }
 }

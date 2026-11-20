@@ -10,6 +10,8 @@ using System.Linq;
 using System.ServiceModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace DG.XrmMockupTest
@@ -62,6 +64,44 @@ namespace DG.XrmMockupTest
             Assert.Equal("01001", Generate());
             Assert.Equal(1000, SeedValue());
             Assert.Equal(1002, Next());
+        }
+
+        [Fact]
+        public async Task ConcurrentCreatesOnSameInstanceAllocateUniqueSequenceValues()
+        {
+            const int workers = 8;
+            const int createsPerWorker = 32;
+            const int seed = 2000;
+            // Rendering between repeated placeholders exposes both duplicate allocations and
+            // values that mix two reservations if the read/render/advance is not atomic.
+            AddAutoTable(Table, "N-{SEQNUM:5}-{RANDSTRING:6}-{SEQNUM:5}");
+            Seed(seed);
+            Seed(3000, column: "test_second");
+
+            using (var start = new Barrier(workers))
+            {
+                // Dedicated workers avoid a thread-pool starvation deadlock at the start barrier.
+                var tasks = Enumerable.Range(0, workers).Select(_ => Task.Factory.StartNew(() =>
+                {
+                    Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)), "Create workers did not start together.");
+                    for (var i = 0; i < createsPerWorker; i++) Create(Table);
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+                await Task.WhenAll(tasks);
+            }
+
+            var rows = All(Table).Entities;
+            var count = workers * createsPerWorker;
+            Assert.Equal(count, rows.Count);
+            var sequences = rows.Select(row =>
+            {
+                var parts = row.GetAttributeValue<string>(Column).Split('-');
+                Assert.Equal(parts[1], parts[3]);
+                return int.Parse(parts[1], CultureInfo.InvariantCulture);
+            }).OrderBy(value => value).ToArray();
+            Assert.Equal(count, sequences.Distinct().Count());
+            Assert.Equal(Enumerable.Range(seed, count), sequences);
+            Assert.Equal(seed + count, Next());
+            Assert.Equal(3000 + count, Next(column: "test_second"));
         }
 
         [Fact]

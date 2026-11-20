@@ -40,6 +40,13 @@ State is independent per simulation instance, table, and column. Sequences start
 at 1000 unless explicitly seeded. The last Int64 value can be emitted once;
 subsequent generation faults rather than wrapping, until reseeded.
 
+Sequence allocation holds a per-generator lock through reading, rendering, and
+advancing the number. Reseeding, reads, and generator snapshot capture/restore use
+the same lock, making reservations atomic for concurrent Creates on one simulation.
+Explicit reseeding can still intentionally reuse previously allocated numbers.
+This does not make whole-environment snapshots or resets atomic with concurrent
+service requests.
+
 ## Environment lifecycle
 
 Named and JSON snapshots copy both seed and next-value state, including sequence
