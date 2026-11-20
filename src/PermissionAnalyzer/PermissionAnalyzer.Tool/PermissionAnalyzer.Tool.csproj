@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>XrmMockup.PermissionAnalyzer.Tool</RootNamespace>
+    <AssemblyName>XrmMockup.PermissionAnalyzer.Tool</AssemblyName>
+    <!-- The analysis allocates heavily while it holds whole compilations, as the compiler does -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+  <PropertyGroup>
+    <!-- Tool-specific settings -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>xrmmockup-permissions</ToolCommandName>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <PackageId>XrmMockup.PermissionAnalyzer</PackageId>
+    <!-- Project-specific metadata (shared metadata comes from Directory.Build.props) -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Development build. See CHANGELOG.md for release history.</PackageReleaseNotes>
+    <PackageReleaseNotes Condition="'$(PermissionsReleaseNotesPath)' != ''">$([System.IO.File]::ReadAllText('$(PermissionsReleaseNotesPath)'))</PackageReleaseNotes>
+    <Description>CLI tool that works out which Dataverse privileges your code needs, by static analysis</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PermissionAnalyzer.Workspace\PermissionAnalyzer.Workspace.csproj" />
+    <ProjectReference Include="..\..\ToolsCommon\ToolsCommon.csproj" />
+  </ItemGroup>
+  <ItemGroup><PackageReference Include="System.CommandLine" Version="2.0.0" /></ItemGroup>
+  <ItemGroup>
+    <!-- Icon is included by Directory.Build.props, license via PackageLicenseExpression -->
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="CHANGELOG.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

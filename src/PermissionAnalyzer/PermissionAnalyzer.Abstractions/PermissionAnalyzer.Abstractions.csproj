@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <!-- Shared across independently versioned owning packages. Bump only for a breaking contract change. -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <AssemblyName>XrmMockup.PermissionAnalyzer.Abstractions</AssemblyName>
+    <!-- Internal assembly, shipped by the owning products rather than independently released. -->
+    <IsPackable>false</IsPackable>
+    <Description>Lightweight contracts and role coverage for XrmMockup static permission checks.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Core" />
+    <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tool" />
+    <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,3 +1,0 @@
-image: Visual Studio 2022
-build_script:
-- cmd: build.cmd test

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>XrmMockup.MetadataGenerator.Core</RootNamespace>
+    <AssemblyName>XrmMockup.MetadataGenerator.Core</AssemblyName>
+    <!-- Internal library, not published as NuGet -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MetadataGenerator.Tool.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DataverseConnection" Version="1.2.5" />
+    <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MetadataGenerator.Context\MetadataGenerator.Context.csproj" />
+  </ItemGroup>
+  <Import Project="..\..\MetadataSkeleton\MetadataSkeleton.projitems" Label="Shared" />
+</Project>

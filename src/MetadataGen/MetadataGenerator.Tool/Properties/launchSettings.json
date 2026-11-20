@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "MetadataGenerator.Tool": {
+      "commandName": "Project",
+      "commandLineArgs": "--config ../../../../appsettings.json"
+    }
+  }
+}

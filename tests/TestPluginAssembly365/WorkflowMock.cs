@@ -1,9 +1,10 @@
-﻿using System;
+﻿#if DATAVERSE_SERVICE_CLIENT
 
-#if NET6_0_OR_GREATER
+using System;
+
 /// <summary>
 /// Implementations of the different Workflow related attributes
-/// These are part of the SDK package, which we do not have access to in .NET6 builds
+/// These are part of the SDK package, which we do not have access to in .NET builds
 /// </summary>
 namespace Microsoft.Xrm.Sdk.Workflow
 {

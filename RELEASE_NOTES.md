@@ -1,3 +1,213 @@
+<!-- BEGIN GENERATED RELEASE NOTES -->
+### Unreleased
+* Add: Add missing request handlers (#374)
+* Add: Support .NET 4.8 plugins (#378)
+* Add: Implement permission analyzer tool (#357)
+* Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
+* Fix: Analyze null-reference cause #375 (#379)
+* Fix: Response name assignment in request handler execution (#380)
+<!-- END GENERATED RELEASE NOTES -->
+
+### 1.20.3 - 13 November 2026
+* Add: Support RowVersion and versionnumber (#366)
+* Fix: Handle money input for calculated decimal and whole number fields (#365)
+
+### 1.20.2 - 5 November 2026
+* Chore: Refresh the internal `workflow` option set enums against current Dataverse, and use them in place of the hardcoded `category`/`statecode` literals in the workflow manager and metadata generator (#352)
+* Add: `SendEmailFromTemplate` request support. The e-mail is created from the template and then sent through the existing `Create` and `SendEmail` handlers, so security, plugins and status transitions behave like a normal send. Template subject/body are stored by Dataverse as XSLT stylesheets, so they are rendered against the regarding record and the sending user; plain-text templates pass through unchanged (#331)
+* Change: `InstantiateTemplate` now returns the merged template content instead of an empty e-mail, and rejects a missing or mistyped record like Dataverse does (#351)
+* Fix: Filter unregistered Custom API parameters and pass tag as shared variable (#355)
+* Add: Implement QueryExpression Aggregate Column Support (#358)
+* Add: Support for all date comparitors in queries, cleanup and handling of BigInt as long (@AnyTick) (#359)
+
+### 1.20.1 - 1 September 2026
+* Fix: Match alternate keys by value, not reference (#350)
+
+### 1.20.0 - 23 August 2026
+* Breaking: XrmMockup365 now targets `net10.0` instead of `net8.0` (the `net462` target is unchanged). Required by DataverseConnection 1.2.x, which is a `net10.0` package
+* Change: Updated `DataverseConnection` to 1.2.5. A bare `AddDataverse()` now defaults to `InteractiveBrowserCredential` instead of `DefaultAzureCredential`; set `DataverseCredentialType` to `azcli` or `devicecode` in configuration to change it
+
+### 1.19.1 - 6 August 2026
+* Fix: System-managed attributes copied onto Target for post-operation visibility no longer satisfy Update filtering attributes (#346)
+
+### 1.19.0 - 5 August 2026
+* Fix: Handle PrivilegeDepth.RecordFilter like PrivilegeDepth.Global instead of throwing exception (#345)
+
+### 1.18.8 - 14 July 2026
+* Fix: Align plugin Target with Dataverse for system-managed fields (#344)
+
+### 1.18.7 - 9 July 2026
+* Add: `QualifyLead` request support. (Based on code from @ladekarl in #51) (#343)
+* Fix: Reject RetrieveMultiple queries filtering on non-existent attributes (#342)
+
+### 1.18.6 - 7 July 2026
+* Add: Collect Plugin Trace Logs and handle invalid formatting strings correctly (by throwing formatting exceptions) (#341)
+
+### 1.18.5 - 1 July 2026
+* Fix: Evaluating a classic calculated field during Retrieve/RetrieveMultiple no longer issues a spurious `Update` of the record. The calculated value is now computed and projected onto the returned entity without persisting, so reads no longer bump `modifiedon`, fire update plugins, or trip the update-time circular-reference guard (which rejected records carrying a self-referential lookup, e.g. a `systemuser` whose `createdby` is itself). Real workflows and rollup fields still update as before.
+* Fix: RetrieveMultiple no longer throws when building the formatted value for a Money attribute that has no associated `transactioncurrencyid` (e.g. a calculated Money column projected onto a record without a currency); the formatted value is simply omitted.
+
+### 1.18.4 - 1 July 2026
+* Fix: AppendTo/security checks for business- and organization-owned entities (#339)
+
+### 1.18.3 - 26 June 2026
+* Fix: Classic calculated-field Concat threw `InvalidCastException` when a non-string column was concatenated with a string column, blocking Retrieve/RetrieveMultiple even if the calculated column was not requested (#338)
+* Improvement: Retrieve and RetrieveMultiple now skip evaluating calculated and formula fields that are not referenced by the ColumnSet (or, for calc fields, by the criteria/orders/links) (#338)
+* Fix: When the Workflows folder contained multiple XML files referencing the same workflow id (typically leftover files from older metadata generations), initialization threw a confusing internal "record already exists" FaultException. It now throws a `MockupException` at load time listing the conflicting files and instructing the user to re-generate metadata (#337)
+
+### 1.18.2 - 25 June 2026
+* Fix: Top level link criteria were unioned instead of cross joined (#336)
+
+### 1.18.1 - 15 June 2026
+* Fix: LinkCriteria and negative conditions did work correctly (#333)
+
+### 1.18.0 - 23 March 2026
+* Add: Added ability to log startup sequence and Plugin/API detection to a file (#314)
+* Add: Support re-sending emails with Failed status in SendEmailRequestHandler (#318)
+* Add: IPluginExecutionContext2-7 support to PluginContext (#323)
+
+* Fix: Throw better exception when security role isn't found on create (#315)
+* Fix: Ordinal sorting (byte-code based instead of locale) of the SecurityRoles struct to reduce unnessary changes to the file (#316)
+* Fix: SendEmailRequestHandler to support all recipient entity types (#320)
+* Fix: NullReferenceException when plugins with post-images fire via Multiple requests (#322)
+
+### 1.17.11 - 02 March 2026
+* Fix: Added validation of emailaddress on all to references in SendEmailRequest (@JonasGLund99) #313
+
+### 1.17.10 - 24 February 2026
+* Add: NotAny join support (@KristianKlodeD) (#281)
+
+### 1.17.9 - 15 January 2026
+* Add: File block upload/download support (@magesoe) (#307)
+
+### 1.17.8 - 12 January 2026
+* Add: Support for specifying which security roles are included (@magesoe) (#304)
+* Add: Settings option to skip execution of workflows. Defaults to the value of TriggerProcesses but allows specific override (@mkholt) (#305)
+* Add: Better error messages when workflow can't find code-activity (@mkholt) (#305)
+* Add: Better error message when Core can't find Entity Metadata (@mkholt) (#305)
+
+### 1.17.7 - 08 January 2026
+* Fix: Use ConcurrentQueue for plugin execution to avoid issues with parallel tests
+* Fix: Use ConcurrentDictionary for database tables to avoid issues with parallel tests
+
+### 1.17.6 - 07 January 2026
+* Fix: If metadata didn't contain the organization entity it would fail on initialization
+
+### 1.17.5 - 16 December 2025
+* Add: Full filtering support for RetrieveMetadataChangesRequest
+* Add: Preliminary support for BooleanManagedProperty
+* Add: Deprecation warning to metadata generator - replaced by dotnet tool
+
+### 1.17.4 - 15 December 2025
+* Fix: Issues with fullname and name on EntityReference
+
+### 1.17.3 - 14 November 2025
+* Add: Added IManagedIdentityService (@magesoe) (#300)
+
+### 1.17.2 - 08 October 2025
+* Refactor: Change plugin and workflow handling to use string instead of EventOperation (@mkholt) (#292)
+* Add: Support Revise Quote Request (@Lucki2g) (#294)
+
+### 1.17.1 - 03 October 2025
+* Update: Move to new version of XrmPluginCore to support combined Plugin / CustomAPI base classes (@mkholt)
+
+### 1.17.0 - 29 September 2025
+* Add: Support for DG.XrmPluginCore based plugins and custom apis (@mkholt)
+* Support: Remove .NET6 build target, since .NET6 is out of support by Microsoft. (@mkholt)
+* Fix: Improve implementation of Win- and CloseQuoteRequestHandlers (@Lucki2g)
+* Fix: Type conversion in RetrieveMultiple logic (@mkholt)
+* Fix: Order was ignored in FetchXML parsing (@AnyTick)
+
+### 1.16.1 - 23 September 2025
+* Add: Support for Win- & CloseQuoteRequestHandlers (@Lucki2g)
+
+### 1.16.0 - 12 September 2025
+* Add: Caching of the static parts of XrmMockup, such that each test can get its own instance with their own db. (@magesoe)
+* Add: Support for OverrideCreatedOn (@AnyTick)
+* Fix: In/NotIn operators in FetchXML parsing (@AnyTick)
+
+### 1.15.3 - 17 June 2025
+* Add: Support for OlderThanX... DateTime operators in FetchXML parsing (@AnyTick)
+* Fix: Make ToActivityPointer support custom activities by using the metadata provided objecttypecode for activitytypecode (@nedergaardcloud)
+
+### 1.15.2 - 11 June 2025
+* Added regardingobjectid to ToActivityPointer (@nedergaardcloud)
+* Add: Implementation of "ends-width", "begins-with", and "like" filtering in FetchXML (@AnyTick)
+* Fix: Ordering defaults to Ascending (@AnyTick)
+* Fix: Filter comparisons for Null, NotNull, and DateTime gt, ge, lt, le (@AnyTick)
+
+### 1.15.1 - 14 May 2025
+* Update: Update to production release of Microsoft.PowerFx.Dataverse.Eval dependency (@mkholt)
+
+### 1.15.0 - 13 May 2025
+* Add: Support for ExecuteTransactionRequest (@magesoe)
+* Add: Support for updating RelatedEntities via Create- and UpdateRequests (@Lucki2g)
+* Add: Support for PowerFx based Formula fields in Retrieve and RetrieveMultiple requests (@mkholt)
+
+* Fix: Set system fields (createdon, modifiedon, createdby, modifiedby) in the pre-operation stage of Create and Update requests (@mlRosenquist)
+* Fix: Made PowerFx evaluation optional, since not all methods in PowerFx is supported by the Eval engine yet. (@magesoe)
+* Fix: Calculations between Money and WholeNumber fields (@mkholt)
+* Fix: Waiting workflows weren't cleared on reset (@magesoe)
+* Fix: AlternateKeys weren't handled correctly in Create and Update (@magesoe)
+
+### 1.14.5 - 19 March 2025
+* Fix: Ordering failing in RetrieveMultipleRequestHandler when not selecting the attribute to order by (@mkholt)
+
+### 1.14.4 - 07 March 2025
+* Add ability to specify proxy classes through list of assemblies (@Lucki2g)
+
+### 1.14.3 - 05 March 2025
+* Add column comparison in MatchesCriteria (@magesoe)
+* Throw better exception when attempting to format an invalid OptionSet value (@mkholt)
+
+### 1.14.2 - 27 February 2025
+* Fix assembly lookup to support SDK-Style .csproj files (@Kageschwump)
+
+### 1.14.1 - 14 February 2025
+* Add support for UpdateMultipleRequest (@mkholt)
+* Add support for UpsertMultipleRequest (@mkholt)
+
+### 1.14.0 - 14 February 2025
+* Add support for CustomAPI execution (@magesoe)
+* Support for CreateMultipleRequest (@magesoe)
+
+### 1.13.3 - 29 November 2024
+* Extend RetrieveMultipleRequestHandler with support for TopCount and Take (@mai98)
+* Fix plugin vs workflow execution order (@mai98)
+
+### 1.13.2 - 25 October 2024
+* Support for InstantiateTemplateRequest (@nedergaardcloud)
+
+### 1.13.1 - 18 September 2024
+* Fix: An update request of Incident without a StateCode would throw NullReferenceException (@mkholt)
+
+### 1.13.0 - 18 September 2024
+* Add support for .NET8 (@mkholt)
+* Remove support for versions older than 9 (365) (@mkholt)
+* Set InitiatingUserId and UserId in workflow context (@mai98)
+
+### 1.12.5 - 10 September 2024
+* Fix: CloseIncidentRequestHandler now uses UpdateRequest instead of SetStateRequest (@mai98)
+* Fix: Throw FaultException when trying to update a resolved Incident (@mai98)
+* Add support for Retrieve plugins (@mai98)
+* Support Distinct in RetrieveMultipleRequestHandler when using Query Expressions (@mai98)
+* Support for SendEmailRequest and PartyList (@mai98)
+* Add file block upload handlers, without file-storage (@magesoe @nedergaardcloud)
+
+### 1.12.4 - 23 August 2024
+* Add support for multiple ThenBy's in retrievemultiple (@misoeli)
+
+### 1.12.3 - 22 December 2023
+* Add initializer based on an existing instance, letting us copy an already initialized XrmMockup instance (@mkholt)
+* Add optional tracing class factory to settings (@mkholt)
+* Add timers during initialization (@mkholt)
+
+### 1.12.2 - 24 August 2023
+* Add flag to mitigate duplicate security role names (@mkholt)
+
+### 1.12.1 - 12 May 2023
+* Use Mockup service instead of XrmExtension (@magesoe)
+
 ### 1.12.0 - 16 December 2022
 * Add support for RetrieveCurrentOrganization Request (@kato88)
 
