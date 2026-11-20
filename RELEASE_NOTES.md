@@ -5,6 +5,7 @@
 * Add: Implement permission analyzer tool (#357)
 * Add: Add support for AutoNumber attributes (#99)
 * Add: Add opt-in workflow diagnostics (#381)
+* Add: Enforce active alternate-key uniqueness on create and update (#383)
 * Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
 * Fix: Analyze null-reference cause #375 (#379)
 * Fix: Response name assignment in request handler execution (#380)
