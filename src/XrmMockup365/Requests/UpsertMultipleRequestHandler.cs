@@ -35,11 +35,11 @@ namespace DG.Tools.XrmMockup
 
             var results = request.Targets.Entities.Select(entity =>
             {
-                if (seenIds.Contains(entity.Id))
+                if (entity.Id != Guid.Empty && seenIds.Contains(entity.Id))
                 {
                     throw new FaultException($"Duplicate Ids are not allowed in the Target list of an {nameof(UpsertMultipleRequest)}: {entity.Id}.");
                 }
-                seenIds.Add(entity.Id);
+                if (entity.Id != Guid.Empty) seenIds.Add(entity.Id);
 
                 var upsertRequest = new UpsertRequest
                 {

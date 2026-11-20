@@ -30,17 +30,16 @@ namespace DG.Some.Namespace {
 
             var service = localContext.OrganizationService;
 
-            var rand = new Random();
             // Migrated from Lead -> ctx_parent (the Lead replacement): ctx_Name replaces Subject and
             // ctx_AccountId replaces ParentAccountId. Several account->child join tests in
             // TestRetrieveMultiple rely on these account-linked records being created here.
             service.Create(new ctx_parent() {
-                ctx_Name = "Some new lead " + rand.Next(0, 1000),
+                ctx_Name = "Some new lead " + Guid.NewGuid().ToString("N"),
                 ctx_AccountId = new Account(localContext.PluginExecutionContext.PrimaryEntityId).ToEntityReference()
             });
 
             service.Create(new ctx_parent() {
-                ctx_Name = "Some other lead " + rand.Next(0, 1000),
+                ctx_Name = "Some other lead " + Guid.NewGuid().ToString("N"),
                 ctx_AccountId = new Account(localContext.PluginExecutionContext.PrimaryEntityId).ToEntityReference()
             });
         }

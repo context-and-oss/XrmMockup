@@ -21,6 +21,7 @@ namespace DG.Tools.XrmMockup.Database {
         private int sequence;
         // Database-wide monotonically increasing version, independent of insertion order.
         private long rowVersion;
+        private readonly object writeLock = new object();
 
         public XrmDb(SortedDictionary<string, EntityMetadata> entityMetadata, IOnlineDataService onlineDataService) {
             this.EntityMetadata = entityMetadata;
@@ -41,10 +42,14 @@ namespace DG.Tools.XrmMockup.Database {
 
         public void Add(Entity xrmEntity, bool withReferenceChecks = true)
         {
-            int nextSequence = Interlocked.Increment(ref sequence);
-            var dbEntity = ToDbRow(xrmEntity,nextSequence, withReferenceChecks);
-            dbEntity.SetRowVersion(Interlocked.Increment(ref rowVersion));
-            this[dbEntity.Table.TableName][dbEntity.Id] = dbEntity;
+            lock (writeLock)
+            {
+                int nextSequence = Interlocked.Increment(ref sequence);
+                var dbEntity = ToDbRow(xrmEntity, nextSequence, withReferenceChecks);
+                CheckAlternateKeyUniqueness(dbEntity);
+                dbEntity.SetRowVersion(Interlocked.Increment(ref rowVersion));
+                this[dbEntity.Table.TableName][dbEntity.Id] = dbEntity;
+            }
         }
 
         public DbRow ToDbRow(Entity xrmEntity, int sequence, bool withReferenceChecks = true)
@@ -82,11 +87,57 @@ namespace DG.Tools.XrmMockup.Database {
         }
 
         public void Update(Entity xrmEntity, bool withReferenceChecks = true) {
-            var currentDbRow = GetDbRow(xrmEntity);
+            lock (writeLock)
+            {
+                var currentDbRow = GetDbRow(xrmEntity);
+                var dbEntity = DbRow.FromEntity(xrmEntity, this, withReferenceChecks);
+                CheckAlternateKeyUniqueness(dbEntity, currentDbRow.Id);
+                dbEntity.SetRowVersion(Interlocked.Increment(ref rowVersion));
+                this[dbEntity.Table.TableName][dbEntity.Id] = dbEntity;
+            }
+        }
 
-            var dbEntity = DbRow.FromEntity(xrmEntity, this, withReferenceChecks);
-            dbEntity.SetRowVersion(Interlocked.Increment(ref rowVersion));
-            this[dbEntity.Table.TableName][dbEntity.Id] = dbEntity;
+        // Check the actual row being persisted, not the request's sparse Attributes or
+        // KeyAttributes (which identify a row, but are not necessarily its new values).
+        // Each key and each candidate is independent. Hold writeLock through publication
+        // so concurrent creates cannot both pass the same uniqueness check.
+        private void CheckAlternateKeyUniqueness(DbRow prospective, Guid? excludingId = null)
+        {
+            var entityMetadata = prospective.Metadata;
+            foreach (var key in entityMetadata.Keys ?? Array.Empty<EntityKeyMetadata>())
+            {
+                if (key.EntityKeyIndexStatus != EntityKeyIndexStatus.Active ||
+                    key.KeyAttributes == null || key.KeyAttributes.Length == 0)
+                    continue;
+
+                // Null (including an absent column) makes a composite key incomplete.
+                if (key.KeyAttributes.Any(attribute => prospective[attribute] == null))
+                    continue;
+
+                if (!this[prospective.Table.TableName].Any(candidate =>
+                    candidate.Id != excludingId && key.KeyAttributes.All(attribute =>
+                        KeyValuesEqual(candidate[attribute], prospective[attribute]))))
+                    continue;
+
+                var fieldNames = string.Join(", ", key.KeyAttributes.Select(attribute =>
+                    DisplayName(entityMetadata.Attributes.FirstOrDefault(a => a.LogicalName == attribute)?.DisplayName, attribute)));
+                var keyName = DisplayName(key.DisplayName, key.LogicalName ?? key.SchemaName ?? prospective.Table.TableName);
+                var message = $"A record that has the attribute values {fieldNames} already exists. The entity key {keyName} requires that this set of attributes contains unique values. Select unique values and try again.";
+                var fault = new OrganizationServiceFault
+                {
+                    ErrorCode = unchecked((int)0x80060892), // DuplicateRecordEntityKey
+                    Message = message,
+                    Timestamp = DateTime.UtcNow
+                };
+                throw new FaultException<OrganizationServiceFault>(fault, new FaultReason(message));
+            }
+        }
+
+        private static string DisplayName(Label label, string fallback)
+        {
+            return !string.IsNullOrEmpty(label?.UserLocalizedLabel?.Label)
+                ? label.UserLocalizedLabel.Label
+                : fallback;
         }
 
         public void Delete(Entity xrmEntity) {
@@ -183,6 +234,8 @@ namespace DG.Tools.XrmMockup.Database {
                 return false;
             }
 
+            if (rowValue is DbRow row) rowValue = row.ToXrmEntityReference();
+            if (keyValue is DbRow keyRow) keyValue = keyRow.ToXrmEntityReference();
             if (rowValue is EntityReference rowRef && keyValue is EntityReference keyRef) {
                 return rowRef.Id == keyRef.Id && rowRef.LogicalName == keyRef.LogicalName;
             }

@@ -142,7 +142,7 @@ namespace DG.XrmMockupTest
                 retrieved = orgAdminUIService.Retrieve(ctx_parent.EntityLogicalName, childlessBus.Id, new ColumnSet(true)) as ctx_parent;
                 Assert.Null(retrieved.ctx_TotalAllowance);
 
-                var bus = new ctx_parent { ctx_Name = "Woop" };
+                var bus = new ctx_parent { ctx_Name = "Woop with children" };
                 bus.Id = orgAdminUIService.Create(bus);
 
                 orgAdminUIService.Create(

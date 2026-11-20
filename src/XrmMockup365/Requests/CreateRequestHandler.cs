@@ -28,6 +28,11 @@ namespace DG.Tools.XrmMockup
 
             var entityMetadata = metadata.EntityMetadata.GetMetadata(entity.LogicalName);
             var clonedEntity = entity.CloneEntity(entityMetadata, new ColumnSet(true));
+            foreach (var keyAttribute in entity.KeyAttributes)
+            {
+                if (!clonedEntity.Contains(keyAttribute.Key))
+                    clonedEntity[keyAttribute.Key] = keyAttribute.Value;
+            }
             var validAttributes = clonedEntity.Attributes.Where(x => x.Value != null);
             clonedEntity.Attributes = new AttributeCollection();
             clonedEntity.Attributes.AddRange(validAttributes);
@@ -94,6 +99,11 @@ namespace DG.Tools.XrmMockup
 
             var entityMetadata = metadata.EntityMetadata.GetMetadata(entity.LogicalName);
             var clonedEntity = entity.CloneEntity(entityMetadata, new ColumnSet(true));
+            foreach (var keyAttribute in entity.KeyAttributes)
+            {
+                if (!clonedEntity.Contains(keyAttribute.Key))
+                    clonedEntity[keyAttribute.Key] = keyAttribute.Value;
+            }
             var validAttributes = clonedEntity.Attributes.Where(x => x.Value != null);
             clonedEntity.Attributes = new AttributeCollection();
             clonedEntity.Attributes.AddRange(validAttributes);
