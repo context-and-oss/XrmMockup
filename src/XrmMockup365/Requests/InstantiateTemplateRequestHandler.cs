@@ -41,8 +41,7 @@ namespace DG.Tools.XrmMockup
                 Results = new ParameterCollection
                 {
                     { "EntityCollection", new EntityCollection(new List<Entity> { email }) }
-                },
-                ResponseName = "InstantiateTemplate",
+                }
             };
         }
     }

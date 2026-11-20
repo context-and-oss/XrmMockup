@@ -33,6 +33,7 @@ namespace DG.XrmMockupTest
             var stage = Create("processstage", ("processid", new EntityReference("workflow", process)), ("primaryentitytypecode", "contact"));
             var current = orgAdminService.Create(new Account()); var next = orgAdminService.Create(new Contact { FirstName = "Next" });
             var response = orgAdminService.Execute(Navigate(process, stage, current, next));
+            Assert.Equal("NavigateToNextEntity", response.ResponseName);
             Assert.Equal(stage.ToString("D"), response["TraversedPath"]);
             Assert.Equal(stage, Read("account", current).GetAttributeValue<Guid>("stageid"));
             Assert.Equal(stage, Read("contact", next).GetAttributeValue<Guid>("stageid"));

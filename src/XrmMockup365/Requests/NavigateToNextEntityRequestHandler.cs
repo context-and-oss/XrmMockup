@@ -47,7 +47,7 @@ namespace DG.Tools.XrmMockup
                     ["processid"] = processId, ["stageid"] = stageId, ["traversedpath"] = path
                 } });
             core.Execute(new ExecuteTransactionRequest { Requests = requests }, userRef);
-            var response = new OrganizationResponse { ResponseName = "NavigateToNextEntity" };
+            var response = new OrganizationResponse();
             response.Results["TraversedPath"] = path;
             return response;
         }
