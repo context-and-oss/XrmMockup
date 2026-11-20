@@ -1,3 +1,0 @@
-﻿group crm365 
-	Microsoft.CrmSdk.CoreAssemblies
-	Microsoft.IdentityModel.Clients.ActiveDirectory

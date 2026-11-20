@@ -1,0 +1,19 @@
+﻿[*.cs]
+
+# IDE0160: Convert to block scoped namespace
+dotnet_diagnostic.IDE0160.severity = silent
+
+# IDE0130: Namespace does not match folder structure
+dotnet_diagnostic.IDE0130.severity = silent
+
+# CS8603: Possible null reference return.
+dotnet_diagnostic.CS8603.severity = silent
+
+# CS8602: Dereference of a possibly null reference.
+dotnet_diagnostic.CS8602.severity = silent
+
+# CS8620: Argument cannot be used for parameter due to differences in the nullability of reference types.
+dotnet_diagnostic.CS8620.severity = silent
+
+# IDE0079: Remove unnecessary suppression
+dotnet_diagnostic.IDE0079.severity = silent

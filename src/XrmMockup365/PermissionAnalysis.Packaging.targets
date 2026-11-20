@@ -1,0 +1,60 @@
+<Project>
+  <PropertyGroup>
+    <_PermissionWorkspaceProject>$(MSBuildThisFileDirectory)../PermissionAnalyzer/PermissionAnalyzer.Workspace/PermissionAnalyzer.Workspace.csproj</_PermissionWorkspaceProject>
+    <_PermissionWorkspaceOutput>$(MSBuildThisFileDirectory)../PermissionAnalyzer/PermissionAnalyzer.Workspace/bin/$(Configuration)/net10.0/</_PermissionWorkspaceOutput>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludePermissionContractsInPackage</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificDebugSymbolsInPackage>$(TargetsForTfmSpecificDebugSymbolsInPackage);IncludePermissionContractSymbols</TargetsForTfmSpecificDebugSymbolsInPackage>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludePermissionSdkPayload</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <!-- Embed the public contracts in both Core target frameworks. PrivateAssets prevents a
+       dependency on an independently published Abstractions package in the nuspec. -->
+  <Target Name="IncludePermissionContractsInPackage">
+    <Error Condition="!Exists('$(TargetDir)XrmMockup.PermissionAnalyzer.Abstractions.dll')" Text="Build Core before packing: the shared permission contracts assembly is missing." />
+    <ItemGroup>
+      <BuildOutputInPackage Include="$(TargetDir)XrmMockup.PermissionAnalyzer.Abstractions.dll">
+        <FinalOutputPath>$(TargetDir)XrmMockup.PermissionAnalyzer.Abstractions.dll</FinalOutputPath>
+        <TargetPath>XrmMockup.PermissionAnalyzer.Abstractions.dll</TargetPath>
+      </BuildOutputInPackage>
+    </ItemGroup>
+  </Target>
+  <Target Name="IncludePermissionContractSymbols">
+    <ItemGroup>
+      <_TargetPathsToSymbols Include="$(TargetDir)XrmMockup.PermissionAnalyzer.Abstractions.pdb" Condition="Exists('$(TargetDir)XrmMockup.PermissionAnalyzer.Abstractions.pdb')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The normal solution build produces this library-only payload. In particular, No-build packing
+       must not rebuild it or add a dependency on either dotnet tool product. -->
+  <Target Name="IncludePermissionSdkPayload" Condition="'$(TargetFramework)' == 'net10.0'">
+    <Error Condition="!Exists('$(_PermissionWorkspaceOutput)XrmMockup.PermissionAnalyzer.Workspace.dll')" Text="Build the solution before packing Core: the optional permission-analysis library payload is missing." />
+    <ItemGroup>
+      <_PermissionPackageFile Include="$(_PermissionWorkspaceOutput)**/*" />
+      <TfmSpecificPackageFile Include="@(_PermissionPackageFile)">
+        <PackagePath>tools/permission-analysis/%(_PermissionPackageFile.RecursiveDir)%(_PermissionPackageFile.Filename)%(_PermissionPackageFile.Extension)</PackagePath>
+        <BuildAction>None</BuildAction>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
+
+  <!-- Project-reference consumers use the same payload layout as NuGet consumers. Build the
+       workspace library only for an explicitly enabled .NET 10 consumer; it stays out of Core's
+       normal reference/dependency graph and does not upgrade the host's workflow/Roslyn packages. -->
+  <PropertyGroup>
+    <_XrmMockupPermissionAnalysisSourcePath>$(_PermissionWorkspaceOutput)</_XrmMockupPermissionAnalysisSourcePath>
+  </PropertyGroup>
+  <Target Name="PreparePermissionAnalysisProjectPayload"
+          BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems"
+          Condition="'$(XrmMockupEnablePermissionAnalysis)' == 'true' and '$(TargetFramework)' == 'net10.0'">
+    <MSBuild Projects="$(_PermissionWorkspaceProject)" Targets="Build" Properties="Configuration=$(Configuration);TargetFramework=net10.0" RemoveProperties="TargetFrameworks" />
+    <ItemGroup>
+      <_PermissionSourceFile Include="$(_PermissionWorkspaceOutput)**/*" />
+      <Content Include="@(_PermissionSourceFile)">
+        <Link>XrmMockup.PermissionAnalysis/%(_PermissionSourceFile.RecursiveDir)%(_PermissionSourceFile.Filename)%(_PermissionSourceFile.Extension)</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <Visible>false</Visible>
+      </Content>
+    </ItemGroup>
+  </Target>
+</Project>

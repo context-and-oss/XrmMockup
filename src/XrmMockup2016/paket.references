@@ -1,4 +1,0 @@
-﻿group crm2016 
-	Microsoft.CrmSdk.CoreAssemblies
-	Microsoft.IdentityModel
-	Microsoft.CrmSdk.Workflow
