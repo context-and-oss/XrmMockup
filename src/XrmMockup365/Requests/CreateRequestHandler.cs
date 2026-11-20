@@ -107,6 +107,15 @@ namespace DG.Tools.XrmMockup
             // Stamp the created/modified system attributes on the record being persisted. This runs as
             // part of the main operation (not a pre-stage) so the values surface via the post-image and
             // the post-operation Target, matching Dataverse — they are absent from the pre-stage Target.
+            var autoNumberTime = DateTime.UtcNow.Add(core.TimeOffset);
+            foreach (var attribute in entityMetadata.Attributes.OfType<StringAttributeMetadata>())
+            {
+                // Explicit non-null SDK values win; null behaves like an omitted value.
+                if (!string.IsNullOrEmpty(attribute.AutoNumberFormat) &&
+                    !clonedEntity.Attributes.ContainsKey(attribute.LogicalName))
+                    clonedEntity[attribute.LogicalName] = core.AutoNumbers.Generate(entity.LogicalName, attribute, autoNumberTime);
+            }
+
             var createdOn = DateTime.UtcNow.Add(core.TimeOffset);
             if (Utility.IsValidAttribute("createdon", entityMetadata))
             {

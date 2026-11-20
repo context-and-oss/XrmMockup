@@ -3,6 +3,7 @@
 * Add: Add missing request handlers (#374)
 * Add: Support .NET 4.8 plugins (#378)
 * Add: Implement permission analyzer tool (#357)
+* Add: Add support for AutoNumber attributes (#99)
 * Fix: Fix OperationCreatedOn initialization in plugin contexts (#376)
 * Fix: Analyze null-reference cause #375 (#379)
 * Fix: Response name assignment in request handler execution (#380)
