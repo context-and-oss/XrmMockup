@@ -10,5 +10,6 @@ namespace DG.Tools.XrmMockup.Serialization
         public Guid OrganizationId { get; set; }
         public Guid RootBusinessUnitId { get; set; }
         public long TimeOffset { get; set; }
+        public System.Collections.Generic.List<AutoNumberStateDTO> AutoNumbers { get; set; }
     }
 }
