@@ -1,0 +1,20 @@
+<Project>
+  <!-- No extra PackageReference and no installed dotnet tool are needed. The opt-in payload
+       remains private to its own load context; ordinary Core consumers do not copy or load it. -->
+  <PropertyGroup>
+    <_XrmMockupPermissionAnalysisPackagePath>$(MSBuildThisFileDirectory)../tools/permission-analysis/</_XrmMockupPermissionAnalysisPackagePath>
+  </PropertyGroup>
+  <Target Name="EnableXrmMockupPermissionAnalysisLibraries"
+          BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems"
+          Condition="'$(XrmMockupEnablePermissionAnalysis)' == 'true' and '$(TargetFrameworkIdentifier)' == '.NETCoreApp' and $([MSBuild]::VersionGreaterThanOrEquals('$(TargetFrameworkVersion)', '10.0'))">
+    <ItemGroup>
+      <_XrmMockupPermissionLibraryFile Include="$(_XrmMockupPermissionAnalysisPackagePath)**/*" />
+      <Content Include="@(_XrmMockupPermissionLibraryFile)">
+        <Link>XrmMockup.PermissionAnalysis/%(_XrmMockupPermissionLibraryFile.RecursiveDir)%(_XrmMockupPermissionLibraryFile.Filename)%(_XrmMockupPermissionLibraryFile.Extension)</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <Visible>false</Visible>
+      </Content>
+    </ItemGroup>
+  </Target>
+</Project>

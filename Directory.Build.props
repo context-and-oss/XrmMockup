@@ -1,0 +1,25 @@
+<Project>
+  <!-- Release inputs are product-scoped and generated before restore/build. -->
+  <Import Project="$(ReleaseBuildProps)" Condition="'$(ReleaseBuildProps)' != ''" />
+  <PropertyGroup>
+    <!-- Author Information (unified) -->
+    <Authors>Context&amp;</Authors>
+    <Company>Context&amp; A/S</Company>
+    <Copyright>Copyright (c) Context&amp; A/S</Copyright>
+
+    <!-- Repository Information -->
+    <RepositoryUrl>https://github.com/delegateas/XrmMockup</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/delegateas/XrmMockup</PackageProjectUrl>
+
+    <!-- Package Settings -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>XrmMockup-sticker_small.png</PackageIcon>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)resources\XrmMockup-sticker_small.png" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>
