@@ -12,5 +12,6 @@ namespace DG.Tools.XrmMockup.Internal
         public EntityReference RootBusinessUnitRef;
         public Guid OrganizationId;
         public TimeSpan TimeOffset;
+        public System.Collections.Generic.List<DG.Tools.XrmMockup.Serialization.AutoNumberStateDTO> AutoNumbers;
     }
 }

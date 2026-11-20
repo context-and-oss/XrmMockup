@@ -35,6 +35,7 @@ namespace DG.Tools.XrmMockup
     internal partial class Core : IXrmMockupExtension, ICoreOperations
     {
         public TimeSpan TimeOffset { get; private set; }
+        internal AutoNumberGenerator AutoNumbers { get; } = new AutoNumberGenerator();
         public MockupServiceProviderAndFactory ServiceFactory { get; private set; }
         public ITracingServiceFactory TracingServiceFactory { get; private set; }
         public EntityReference AdminUserRef { get; private set; }
@@ -482,6 +483,9 @@ namespace DG.Tools.XrmMockup
             new PublishXmlRequestHandler(this, db, metadata, security),
             new RemoveFromQueueRequestHandler(this, db, metadata, security),
             new RetrieveSharedPrincipalsAndAccessRequestHandler(this, db, metadata, security),
+            new SetAutoNumberSeedRequestHandler(this, db, metadata, security),
+            new GetAutoNumberSeedRequestHandler(this, db, metadata, security),
+            new GetNextAutoNumberValueRequestHandler(this, db, metadata, security),
             new NavigateToNextEntityRequestHandler(this, db, metadata, security)
         };
 
@@ -1145,6 +1149,7 @@ namespace DG.Tools.XrmMockup
                 RootBusinessUnitRef = this.RootBusinessUnitRef,
                 TimeOffset = this.TimeOffset,
                 security = this.security.Clone(),
+                AutoNumbers = AutoNumbers.Capture(),
             };
             snapshots.Add(snapshotName, snapshot);
         }
@@ -1157,7 +1162,8 @@ namespace DG.Tools.XrmMockup
                 OrganizationId = this.OrganizationId,
                 RootBusinessUnitId = this.RootBusinessUnitRef.Id,
                 TimeOffset = this.TimeOffset.Ticks,
-                Security = this.security.ToSerializableDTO()
+                Security = this.security.ToSerializableDTO(),
+                AutoNumbers = AutoNumbers.Capture()
             };
             string jsonString = JsonSerializer.Serialize(jsonObj);
             return jsonString;
@@ -1171,6 +1177,7 @@ namespace DG.Tools.XrmMockup
             this.AdminUserRef = new EntityReference(this.AdminUserRef.LogicalName, jsonObj.AdminUserId);
             this.RootBusinessUnitRef = new EntityReference(this.RootBusinessUnitRef.LogicalName, jsonObj.RootBusinessUnitId);
             this.TimeOffset = new TimeSpan(jsonObj.TimeOffset);
+            AutoNumbers.Restore(jsonObj.AutoNumbers);
             this.OrganizationId = jsonObj.OrganizationId;
             this.RequestHandlers = GetRequestHandlers(this.db);
         }
@@ -1185,6 +1192,7 @@ namespace DG.Tools.XrmMockup
             this.AdminUserRef = snapshot.AdminUserRef;
             this.RootBusinessUnitRef = snapshot.RootBusinessUnitRef;
             this.TimeOffset = snapshot.TimeOffset;
+            AutoNumbers.Restore(snapshot.AutoNumbers);
             this.OrganizationId = snapshot.OrganizationId;
             this.RequestHandlers = GetRequestHandlers(this.db);
         }
@@ -1199,6 +1207,7 @@ namespace DG.Tools.XrmMockup
         internal void ResetEnvironment()
         {
             this.TimeOffset = new TimeSpan();
+            AutoNumbers.Restore(null);
             workflowManager.ResetWorkflows(settings.IncludeAllWorkflows);
 
             ClearPluginTraceLogs();
