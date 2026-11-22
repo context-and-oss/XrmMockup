@@ -10,6 +10,7 @@
     <!-- Repository Information -->
     <RepositoryUrl>https://github.com/delegateas/XrmMockup</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageProjectUrl>https://github.com/delegateas/XrmMockup</PackageProjectUrl>
 
     <!-- Package Settings -->
@@ -17,6 +18,13 @@
     <PackageIcon>XrmMockup-sticker_small.png</PackageIcon>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- SourceLink is built into the .NET 10 SDK for every target framework.
+         Keep generated/untracked source available when debugging from symbols. -->
+    <DebugType>portable</DebugType>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- Normalize source paths only in CI; preserve local debugging paths. -->
+    <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">

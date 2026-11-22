@@ -352,7 +352,7 @@ public class LookupTests
     [Fact]
     public void LoaderReadsXrmMockupMetadataFiles()
     {
-        var columns = MetadataFileLoader.Load(XrmMockupMetadataDirectory()).Lookups;
+        var columns = MetadataFileLoader.Load(TestMetadata.DirectoryPath).Lookups;
 
         var parent = Assert.Single(columns, c => c.Table == "contact" && c.Column == "parentcustomerid");
         Assert.Equal(["account", "contact"], parent.Targets);
@@ -365,9 +365,6 @@ public class LookupTests
         Assert.Empty(manifest.Unreached);
         return Assert.Single(manifest.EntryPoints);
     }
-
-    private static string XrmMockupMetadataDirectory([System.Runtime.CompilerServices.CallerFilePath] string path = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, "..", "..", "..", "tests", "XrmMockup365Test", "Metadata"));
 
     private sealed class LookupColumnComparer : IEqualityComparer<LookupColumn>
     {
