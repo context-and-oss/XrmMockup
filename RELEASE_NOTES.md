@@ -1,6 +1,6 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Chore: Implement support for SourceLink (ht (#385)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.21.0 - 20 November 2026
