@@ -109,10 +109,7 @@ public class PluginStepLoaderTests
     [Fact]
     public void MetadataWithoutStepsGivesNone()
     {
-        Assert.Empty(MetadataFileLoader.Load(RoleLoaderTestsDirectory()).PluginSteps);
+        Assert.Empty(MetadataFileLoader.Load(TestMetadata.DirectoryPath).PluginSteps);
         Assert.Empty(MetadataFileLoader.Load(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())).PluginSteps);
     }
-
-    private static string RoleLoaderTestsDirectory([System.Runtime.CompilerServices.CallerFilePath] string path = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, "..", "..", "..", "tests", "XrmMockup365Test", "Metadata"));
 }

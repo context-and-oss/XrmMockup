@@ -11,13 +11,10 @@ namespace XrmMockup.PermissionAnalyzer.Tests;
 
 public class RoleLoaderTests
 {
-    private static string MetadataDirectory([System.Runtime.CompilerServices.CallerFilePath] string path = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, "..", "..", "..", "tests", "XrmMockup365Test", "Metadata"));
-
     [Fact]
     public void LoadsTheTestSecurityRolesSortedByName()
     {
-        var roles = RoleLoader.Load(MetadataDirectory());
+        var roles = RoleLoader.Load(TestMetadata.DirectoryPath);
 
         Assert.NotEmpty(roles);
         Assert.Equal(roles.Select(r => r.Name).OrderBy(n => n, StringComparer.Ordinal), roles.Select(r => r.Name));
