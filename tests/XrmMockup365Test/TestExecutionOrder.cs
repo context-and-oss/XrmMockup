@@ -33,7 +33,7 @@ namespace DG.XrmMockupTest
         public void TestAsyncPluginThenAsyncWorkflow()
         {
             crm.RegisterAdditionalPlugins(Tools.XrmMockup.PluginRegistrationScope.Temporary, typeof(Test2Plugin1));                             // Appends: ASync1
-            crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowASync2.xml"));   // Appends: ASync2
+            crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowAsync2.xml"));   // Appends: ASync2
 
             var account = new Account()
             {
@@ -73,7 +73,7 @@ namespace DG.XrmMockupTest
         public void TestSyncPluginThenAsyncWorkflow()
         {
             crm.RegisterAdditionalPlugins(Tools.XrmMockup.PluginRegistrationScope.Temporary, typeof(Test1Plugin1));                             // Appends: pSync1
-            crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowASync2.xml"));   // Appends: ASync2
+            crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowAsync2.xml"));   // Appends: ASync2
 
             var account = new Account()
             {
