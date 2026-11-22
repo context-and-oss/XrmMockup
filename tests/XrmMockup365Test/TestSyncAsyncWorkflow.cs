@@ -20,7 +20,7 @@ namespace DG.XrmMockupTest
             {
                 crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowSync1.xml"));
                 crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowSync3.xml"));
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowASync2.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test1", "Test1WorkflowAsync2.xml"));
 
                 oldAccountName = "Test";
                 newAccountName = oldAccountName + "Sync1" + "Sync3" + "ASync2";
@@ -82,7 +82,7 @@ namespace DG.XrmMockupTest
             using (var context = new Xrm(orgAdminUIService))
             {
                 crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test3", "Test3WorkflowASync1.xml"));
-                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test3", "Test3WorkflowASync2.xml"));
+                crm.AddWorkflow(Path.Combine("../../..", "Metadata", "Workflows", "TestSyncAsyncWorkflows", "Test3", "Test3WorkflowAsync2.xml"));
 
                 oldAccountName = "Test";
                 newAccountName = oldAccountName + "ASync1" + "ASync2";
