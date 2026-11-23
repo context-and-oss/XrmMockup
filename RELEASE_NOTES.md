@@ -1,6 +1,7 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* Chore: Implement support for SourceLink (ht (#385)
+* Fix: Prevent record-level access from granting Create permission for a table (#387)
+* Chore: Implement support for SourceLink (#385)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.21.0 - 20 November 2026
