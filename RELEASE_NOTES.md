@@ -1,8 +1,11 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
+* No unreleased changes.
+<!-- END GENERATED RELEASE NOTES -->
+
+### 1.21.1 - 23 November 2026
 * Fix: Prevent record-level access from granting Create permission for a table (#387)
 * Chore: Implement support for SourceLink (#385)
-<!-- END GENERATED RELEASE NOTES -->
 
 ### 1.21.0 - 20 November 2026
 * Add: Add missing request handlers (#374)
