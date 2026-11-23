@@ -45,7 +45,7 @@ namespace DG.Tools.XrmMockup
         /// <summary>
         /// Organization id for the Mockup instance
         /// </summary>
-        public Guid OrganizationId { get; private set; }
+        public Guid OrganizationId { get; private set; } = Guid.NewGuid();
 
         /// <summary>
         /// Organization name for the Mockup instance
@@ -55,6 +55,8 @@ namespace DG.Tools.XrmMockup
         internal OrganizationDetail OrganizationDetail { get; private set; }
         internal EntityReference BaseCurrency { get; private set; }
 
+        // Setup admin user
+        private readonly Entity admin = new Entity(LogicalNames.SystemUser) { Id = Guid.NewGuid() };
         private RequestExecutionPipeline pipeline;
         private PluginManager pluginManager;
         private CustomApiManager customApiManager;
@@ -361,7 +363,6 @@ namespace DG.Tools.XrmMockup
 
         private void InitializeDB()
         {
-            this.OrganizationId = Guid.NewGuid();
             this.OrganizationName = "MockupOrganization";
 
             // Add organization entity to database so it can be queried
@@ -391,14 +392,7 @@ namespace DG.Tools.XrmMockup
             rootBu.Attributes.Remove("organizationid");
             this.db.Add(rootBu, false);
             this.RootBusinessUnitRef = rootBu.ToEntityReference();
-
-            // Setup admin user
-            var admin = new Entity(LogicalNames.SystemUser)
-            {
-                Id = Guid.NewGuid()
-            };
             this.AdminUserRef = admin.ToEntityReference();
-
             admin["firstname"] = "";
             admin["lastname"] = "SYSTEM";
             admin["businessunitid"] = RootBusinessUnitRef;

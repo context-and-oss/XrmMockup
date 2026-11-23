@@ -1,11 +1,11 @@
-﻿using System;
-using System.Linq;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
-using Microsoft.Xrm.Sdk.Messages;
-using System.ServiceModel;
+﻿using DG.Tools.XrmMockup;
 using DG.XrmFramework.BusinessDomain.ServiceContext;
-using DG.Tools.XrmMockup;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Query;
+using System;
+using System.Linq;
+using System.ServiceModel;
 using Xunit;
 using Xunit.Sdk;
 
@@ -14,6 +14,31 @@ namespace DG.XrmMockupTest
     public class TestRetrieve : UnitTestBase
     {
         public TestRetrieve(XrmMockupFixture fixture) : base(fixture) { }
+
+        [Fact]
+        public void WHEN_EnvironmentIsReset_UserId_SHOULD_RemainUnchanged()
+        {
+            using (var context = new Xrm(orgAdminUIService))
+            {
+                var calId = orgAdminUIService.Create(new Entity("ctx_parent"));
+                var cal = orgAdminUIService.Retrieve("ctx_parent", calId, new ColumnSet(true));
+                Assert.Equal(calId, cal.Id);
+                cal = orgAdminUIService.Retrieve("ctx_parent", calId, new ColumnSet("createdby"));
+                Assert.Equal(calId, cal.Id);
+                var createdby = (EntityReference)cal.Attributes["createdby"];
+
+                // Check the same User after ResetEnvironment
+                // This should be the case because identity IDs also remain unchanged in the real environment.
+                base.crm.ResetEnvironment();
+                var calId2 = orgAdminUIService.Create(new Entity("ctx_parent"));
+                var cal2 = orgAdminUIService.Retrieve("ctx_parent", calId2, new ColumnSet(true));
+                Assert.Equal(calId2, cal2.Id);
+                cal2 = orgAdminUIService.Retrieve("ctx_parent", calId2, new ColumnSet("createdby"));
+                Assert.Equal(calId2, cal2.Id);
+                var createdby2 = (EntityReference)cal2.Attributes["createdby"];
+                Assert.Equal(createdby.Id, createdby2.Id);
+            }
+        }
 
         [Fact]
         public void TestReferenceHasPrimaryAttribute()
