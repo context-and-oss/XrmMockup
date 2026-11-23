@@ -710,6 +710,10 @@ namespace DG.Tools.XrmMockup
             // check if any of the Teams that the caller is a member of has access
             if (HasTeamMemberPermission(entity, access, caller)) return true;
 
+            // Create must be granted on this table by the caller's or a team's roles.
+            // Record-level access through access teams, sharing or parent cascades cannot grant it.
+            if (access == AccessRights.CreateAccess) return false;
+
             // check if any of the Teams that the caller is a member of has access
             if (HasAccessTeamMemberPermission(entity, access, caller)) return true;
 
