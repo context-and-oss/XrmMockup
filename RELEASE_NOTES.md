@@ -1,6 +1,6 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Fix: EntityMatcher and implement 'not-_-with' (#388)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.21.1 - 23 November 2026
