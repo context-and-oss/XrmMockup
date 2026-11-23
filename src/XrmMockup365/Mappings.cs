@@ -131,7 +131,9 @@ namespace DG.Tools.XrmMockup {
             { "next-x-weeks", ConditionOperator.NextXWeeks },
             { "next-x-years", ConditionOperator.NextXYears },
             { "next-year", ConditionOperator.NextYear },
+            { "not-begin-with", ConditionOperator.DoesNotBeginWith },
             { "not-between", ConditionOperator.NotBetween },
+            { "not-end-with", ConditionOperator.DoesNotEndWith },
             { "not-in", ConditionOperator.NotIn },
             { "not-null", ConditionOperator.NotNull },
             { "null", ConditionOperator.Null },
@@ -151,7 +153,7 @@ namespace DG.Tools.XrmMockup {
             { "this-year", ConditionOperator.ThisYear },
             { "today", ConditionOperator.Today },
             { "tomorrow", ConditionOperator.Tomorrow },
-            { "yesterday", ConditionOperator.Yesterday }
+            { "yesterday", ConditionOperator.Yesterday },
         };
 
         public static EntityReference GetPrimaryEntityReferenceFromRequest(OrganizationRequest request)

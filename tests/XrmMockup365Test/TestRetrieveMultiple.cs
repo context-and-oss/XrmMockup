@@ -1001,6 +1001,7 @@ namespace DG.XrmMockupTest
                 EntityAlias = "ctxp"
             };
             linkEntity.LinkCriteria = new FilterExpression(LogicalOperator.And);
+            linkEntity.LinkCriteria.AddCondition(new ConditionExpression("ctxp", "ctx_postalcode", ConditionOperator.NotNull));
             linkEntity.LinkCriteria.AddCondition(new ConditionExpression("ctxp", "ctx_postalcode", ConditionOperator.NotEqual, "ZZZ"));
             query.LinkEntities.Add(linkEntity);
 
@@ -1015,6 +1016,7 @@ namespace DG.XrmMockupTest
             // Migrated from lead -> ctx_parent: only p1 has a postal code; the others are null.
             // NotEqual must exclude the null rows.
             var query = new QueryExpression("ctx_parent") { ColumnSet = new ColumnSet(true) };
+            query.Criteria.AddCondition(new ConditionExpression("ctx_postalcode", ConditionOperator.NotNull));
             query.Criteria.AddCondition(new ConditionExpression("ctx_postalcode", ConditionOperator.NotEqual, "ZZZ"));
 
             var res = orgAdminService.RetrieveMultiple(query).Entities.Cast<ctx_parent>().ToList();
@@ -1026,6 +1028,7 @@ namespace DG.XrmMockupTest
         public void TestQueryExpressionNotInExcludesNull()
         {
             var query = new QueryExpression("ctx_parent") { ColumnSet = new ColumnSet(true) };
+            query.Criteria.AddCondition(new ConditionExpression("ctx_postalcode", ConditionOperator.NotNull));
             query.Criteria.AddCondition(new ConditionExpression("ctx_postalcode", ConditionOperator.NotIn, new[] { "AAA", "BBB" }));
 
             var res = orgAdminService.RetrieveMultiple(query).Entities.Cast<ctx_parent>().ToList();
@@ -1037,6 +1040,7 @@ namespace DG.XrmMockupTest
         public void TestQueryExpressionDoesNotBeginWithExcludesNull()
         {
             var query = new QueryExpression("ctx_parent") { ColumnSet = new ColumnSet(true) };
+            query.Criteria.AddCondition(new ConditionExpression("ctx_postalcode", ConditionOperator.NotNull));
             query.Criteria.AddCondition(new ConditionExpression("ctx_postalcode", ConditionOperator.DoesNotBeginWith, "ZZ"));
 
             var res = orgAdminService.RetrieveMultiple(query).Entities.Cast<ctx_parent>().ToList();
