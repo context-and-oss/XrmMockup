@@ -66,6 +66,44 @@ namespace DG.XrmMockupTest
         }
 
         [Fact]
+        public async System.Threading.Tasks.Task ParentOwnershipDoesNotOverrideMissingChildCreatePrivilege()
+        {
+            crm.DisableRegisteredPlugins(true);
+            var analysis = await Analysis.Value;
+            var role = crm.CloneSecurityRole("XrmMockup Test Access Team");
+            role.Privileges[Contact.EntityLogicalName].Remove(AccessRights.CreateAccess);
+            crm.AddSecurityRole(role);
+            var user = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, role.RoleId);
+            var service = crm.CreateOrganizationService(user.Id);
+            var parent = new Account { Name = "Owned parent", OwnerId = user.ToEntityReference() };
+            parent.Id = orgGodService.Create(parent);
+            var scope = PermissionSelector.Operation<Contact>(Operation.Create, c => c.ParentCustomerId);
+
+            var denied = crm.CheckPermissions(analysis, scope, user.ToEntityReference());
+            Assert.False(denied.Passed);
+            Assert.Contains(denied.Coverage.Missing, missing => missing.Table == Contact.EntityLogicalName &&
+                missing.Privilege == XrmMockup.PermissionAnalyzer.Core.Model.Privilege.Create);
+            var error = Assert.Throws<System.ServiceModel.FaultException>(() => service.Create(new Contact
+            {
+                LastName = "Denied child", ParentCustomerId = parent.ToEntityReference()
+            }));
+            Assert.Contains("does not have Create access", error.Message);
+
+            var childRole = crm.CloneSecurityRole("XrmMockup Test Access Team");
+            childRole.Privileges.Clear();
+            childRole.Privileges[Contact.EntityLogicalName] = new Dictionary<AccessRights, RolePrivilege>
+            {
+                { AccessRights.CreateAccess, new RolePrivilege { AccessRight = AccessRights.CreateAccess, PrivilegeDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth.Basic } }
+            };
+            crm.AddSecurityRole(childRole);
+            crm.AddSecurityRolesToPrinciple(user.ToEntityReference(), childRole.RoleId);
+            var allowed = crm.CheckPermissions(analysis, scope, user.ToEntityReference());
+            Assert.DoesNotContain(allowed.Coverage.Missing, missing => missing.Table == Contact.EntityLogicalName &&
+                missing.Privilege == XrmMockup.PermissionAnalyzer.Core.Model.Privilege.Create);
+            Assert.NotEqual(Guid.Empty, service.Create(new Contact { LastName = "Allowed child", ParentCustomerId = parent.ToEntityReference() }));
+        }
+
+        [Fact]
         public async System.Threading.Tasks.Task CombinedRolesAndCurrentUserTeamAssignments()
         {
             var analysis = await Analysis.Value;
