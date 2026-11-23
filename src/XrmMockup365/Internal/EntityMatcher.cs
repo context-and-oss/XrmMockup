@@ -3,8 +3,6 @@ using Microsoft.Xrm.Sdk.Query;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DG.Tools.XrmMockup.Internal
 {
@@ -72,16 +70,12 @@ namespace DG.Tools.XrmMockup.Internal
             {
                 case ConditionOperator.Null:
                     return attr == null;
-
                 case ConditionOperator.NotNull:
-                    return attr != null;
+                    return !Matches(attr, ConditionOperator.Null, values);
 
                 case ConditionOperator.Equal:
                     return IsEqual(attr, values);
-
                 case ConditionOperator.NotEqual:
-                    // Dataverse excludes null-valued records for "not" conditions (NULL <> value is unknown).
-                    if (attr == null) return false;
                     return !Matches(attr, ConditionOperator.Equal, values);
 
                 case ConditionOperator.GreaterThan:
@@ -90,8 +84,12 @@ namespace DG.Tools.XrmMockup.Internal
                 case ConditionOperator.LessThan:
                     return Compare((IComparable)attr, op, (IComparable)ValueConverter.ConvertTo(values.First(), attr?.GetType()));
 
-                case ConditionOperator.NotLike:
-                    return !Matches(attr, ConditionOperator.Like, values);
+                case ConditionOperator.Between:
+                    if (values.Count() != 2)
+                        throw new ArgumentException("Wrong number of values specified for condition operator: Between");
+                    return Compare((IComparable)attr, ConditionOperator.GreaterEqual, (IComparable)ValueConverter.ConvertTo(values.First(), attr?.GetType())) && Compare((IComparable)attr, ConditionOperator.LessEqual, (IComparable)ValueConverter.ConvertTo(values.Last(), attr?.GetType()));
+                case ConditionOperator.NotBetween:
+                    return !Matches(attr, ConditionOperator.Between, values) && !Matches(attr, ConditionOperator.Null, values);
 
                 case ConditionOperator.Like:
                     if (attr == null)
@@ -114,6 +112,8 @@ namespace DG.Tools.XrmMockup.Internal
                     {
                         throw new NotImplementedException($"The like matching for '{pattern}' has not been implemented yet");
                     }
+                case ConditionOperator.NotLike:
+                    return !Matches(attr, ConditionOperator.Like, values);
 
                 case ConditionOperator.Last7Days:
                 case ConditionOperator.LastMonth:
@@ -158,8 +158,6 @@ namespace DG.Tools.XrmMockup.Internal
                     return values.Contains(ValueConverter.ConvertTo(attr, values.FirstOrDefault()?.GetType()));
 
                 case ConditionOperator.NotIn:
-                    // Only exclude nulls when there are values to compare; an empty NotIn matches all rows.
-                    if (attr == null && values.Any()) return false;
                     return !Matches(attr, ConditionOperator.In, values);
 
                 case ConditionOperator.BeginsWith:
@@ -173,9 +171,7 @@ namespace DG.Tools.XrmMockup.Internal
                     {
                         throw new NotImplementedException($"The ConditionOperator '{op}' is not valid for anything other than string yet.");
                     }
-
                 case ConditionOperator.DoesNotBeginWith:
-                    if (attr == null) return false;
                     return !Matches(attr, ConditionOperator.BeginsWith, values);
 
                 case ConditionOperator.EndsWith:
@@ -192,6 +188,7 @@ namespace DG.Tools.XrmMockup.Internal
 
                 case ConditionOperator.DoesNotEndWith:
                     return !Matches(attr, ConditionOperator.EndsWith, values);
+
                 default:
                     throw new NotImplementedException($"The ConditionOperator '{op}' has not been implemented yet.");
             }
