@@ -56,7 +56,8 @@ public class UserRoleTests
         Assert.Equal(new[] { "Reader", "Writer" }, roles.Names);
         Assert.Equal(PrivilegeDepth.User, roles.Depth("account", Privilege.Read));
         Assert.Equal(PrivilegeDepth.Organization, roles.Depth("account", Privilege.Write));
-        Assert.Equal("--user: jane@contoso.com", roles.Origin);
+        Assert.Equal("Dataverse", roles.Origin);
+        Assert.Equal("Reader, Writer", roles.ToString());
         var source = Assert.IsType<LiveRoleSource>(roles.LiveSource);
         Assert.Equal(UserId, source.UserId);
         Assert.Equal("jane@contoso.com", source.UserName);
@@ -180,8 +181,8 @@ public class UserRoleTests
     [Fact]
     public void LiveRolesReplacePrincipalsAndKeepImpersonatedCallerSeparate()
     {
-        var user = RoleSet.Combine([Direct], "--user");
-        var caller = RoleSet.Combine([TeamRole], "--caller-user");
+        var user = RoleSet.Combine([Direct], "Dataverse");
+        var caller = RoleSet.Combine([TeamRole], "Dataverse");
         var settings = new PermissionsConfiguration { Principals = new() { ["stale"] = new() { Roles = ["Unknown"] } } };
         var coverage = CoverageSetup.Create([Direct, TeamRole], [], [], settings, true, user, caller)!;
         Assert.Same(user, coverage.Roles);
@@ -299,7 +300,11 @@ public class UserRoleTests
         new TextManifestWriter(new ReportOptions(Enum.Parse<Detail>(level))).Write(manifest, coverage, output);
         var text = output.ToString();
         Assert.StartsWith("Live security roles:\n  User: jane@contoso.com", text);
-        Assert.Contains("Reader, Writer (--user: jane@contoso.com)", text);
+        if (level is "Minimal" or "Compact")
+            Assert.Contains("Missing from Reader, Writer, for Caller", text);
+        else
+            Assert.Equal("  roles for Caller: Reader, Writer",
+                Assert.Single(text.Split('\n'), line => line.StartsWith("  roles for Caller:", StringComparison.Ordinal)));
         if (detailed)
         {
             Assert.Contains($"User: jane@contoso.com (ID: {UserId:D})", text);
@@ -318,6 +323,37 @@ public class UserRoleTests
             Assert.DoesNotContain("https://org.crm.dynamics.com/", text);
             Assert.DoesNotContain("Roles read:", text);
         }
+    }
+
+    [Theory]
+    [InlineData("text-minimal")]
+    [InlineData("text-compact")]
+    [InlineData("markdown")]
+    public void MissingFromSummaryNamesRoles(string format)
+    {
+        var manifest = Analyze.Code("""
+            class C
+            {
+                void M(IOrganizationService service) => service.Delete("account", Guid.Empty);
+            }
+            """, ["account"]);
+        var service = new FakeService(q => q.EntityName == "systemuser" ? Page(new Entity("systemuser", UserId)) :
+            q.LinkEntities[0].LinkToEntityName == "systemuserroles" ? Page(Role(RootId)) : Page());
+        var roles = Resolve(service, Direct);
+        var coverage = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = roles });
+        IManifestWriter writer = format switch
+        {
+            "text-minimal" => new TextManifestWriter(new ReportOptions(Detail.Minimal)),
+            "text-compact" => new TextManifestWriter(new ReportOptions(Detail.Compact)),
+            _ => new MarkdownManifestWriter(),
+        };
+        using var output = new StringWriter();
+        writer.Write(manifest, coverage, output);
+        Assert.Contains("User: jane@contoso.com", output.ToString());
+        var heading = Assert.Single(output.ToString().Split('\n'), line => line.Contains("Missing from", StringComparison.Ordinal));
+        Assert.Equal(format == "markdown"
+            ? "#### Missing from Reader, for Caller"
+            : "Missing from Reader, for Caller:", heading);
     }
 
     [Fact]
@@ -339,7 +375,7 @@ public class UserRoleTests
             "https://org.crm.dynamics.com/", "--caller-user", ReadAt);
         Assert.Equal(new[] { "Caller user: john@contoso.com", "  Reader: direct" },
             LiveRoleSources.Lines(roles, Detail.Minimal));
-        Assert.Equal("Reader (--caller-user: john@contoso.com)", roles.ToString());
+        Assert.Equal("Reader", roles.ToString());
     }
 
     [Fact]

@@ -16,7 +16,9 @@ internal static class LiveRoleSources
             .Where(roles => roles?.LiveSource is not null)
             .Cast<RoleSet>()
             .Distinct()
-            .OrderBy(roles => roles.Origin, StringComparer.Ordinal)
+            .OrderBy(roles => roles.LiveSource!.IsCaller)
+            .ThenBy(roles => roles.LiveSource!.UserName, StringComparer.Ordinal)
+            .ThenBy(roles => roles.LiveSource!.UserId)
             .ToList();
         return sources.Count == 0 ? null : sources;
     }
@@ -27,16 +29,15 @@ internal static class LiveRoleSources
         {
             var source = roles.LiveSource!;
             var assignments = source.Assignments.Select(a => $"{a.RoleName}: {Assignment(a, true)} (root role ID: {a.RootRoleId:D})");
-            return $"{string.Join(", ", roles.Names)} ({roles.Origin} ({source.UserId:D}); environment {source.EnvironmentUrl}; " +
-                $"roles read {Timestamp(source)}; {string.Join("; ", assignments)})";
+            return $"{Label(source)}: {source.UserName} ({source.UserId:D}); environment {source.EnvironmentUrl}; " +
+                $"roles read {Timestamp(source)}; {string.Join("; ", assignments)}";
         }).ToList();
 
     public static IEnumerable<string> Lines(RoleSet roles, Detail detail)
     {
         var source = roles.LiveSource!;
         var detailed = detail >= Detail.Detailed;
-        var label = roles.Origin.StartsWith(CliOptions.CallerUser.Primary + ":", StringComparison.Ordinal) ? "Caller user" : "User";
-        yield return $"{label}: {source.UserName}" + (detailed ? $" (ID: {source.UserId:D})" : "");
+        yield return $"{Label(source)}: {source.UserName}" + (detailed ? $" (ID: {source.UserId:D})" : "");
         if (detailed)
         {
             yield return $"  Environment: {source.EnvironmentUrl}";
@@ -60,6 +61,8 @@ internal static class LiveRoleSources
     private static string Assignment(LiveRoleAssignment assignment, bool detailed) => assignment.TeamId is { } teamId
         ? $"team '{assignment.TeamName}'" + (detailed ? $" (ID: {teamId:D})" : "")
         : "direct";
+
+    private static string Label(LiveRoleSource source) => source.IsCaller ? "Caller user" : "User";
 
     private static string Timestamp(LiveRoleSource source) => source.ReadAt.ToString("O", CultureInfo.InvariantCulture);
 }
