@@ -1,6 +1,7 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
 * Fix: EntityMatcher and implement 'not-_-with' (#388)
+* Fix: Fix permission analyzer impersonation coverage and incomplete-analysis reporting (#391)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.21.1 - 23 November 2026
