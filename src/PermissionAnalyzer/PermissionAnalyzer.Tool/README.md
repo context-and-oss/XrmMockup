@@ -83,6 +83,84 @@ in another method shows the call path from the entry point after it, such as
 - `Not reached from any entry point` lists methods that make service calls but that no entry point
   calls. Add them with `--entry` or `EntryPoints` if something outside the solution calls them.
 
+## Local web UI
+
+Start a read-only security explorer from the permission CLI:
+
+```bash
+# Load source and checked-in metadata once
+xrmmockup-permissions --web --solution Contoso.slnx --metadata ./Metadata
+
+# Open an existing snapshot without project loading or source files
+xrmmockup-permissions --web --snapshot permissions.snapshot.json
+
+# Override snapshot roles, choose startup roles, and use another port
+xrmmockup-permissions --web --snapshot permissions.snapshot.json --metadata ./Metadata --role "Salesperson" --port 9000
+
+# Capture source for future offline sessions while starting the UI
+xrmmockup-permissions --web --solution Contoso.slnx --metadata ./Metadata --save-snapshot permissions.snapshot.json
+```
+
+Open the address printed by the CLI in your browser (default: `http://127.0.0.1:8765/`).
+The CLI stays running until **Ctrl+C**. The local server uses ASP.NET Core 10 (included in the
+.NET 10 SDK); runtime-only installations also need the ASP.NET Core 10 runtime. An occupied/unavailable
+port is an error; use `--port` to choose another. No Node.js runtime, internet assets, or automated browser
+installation is required to run the packaged CLI; the React/TypeScript frontend is built by Vite and embedded in the tool package.
+
+**Query permissions** supports all entry points and unreached methods, individual plugin types/steps,
+custom APIs, Azure Functions, explicit methods, and synthetic table operations with plugin/workflow
+cascades. For operations, changed columns determine which filtered Update steps run; leaving columns
+blank treats them as unknown. Combine application/caller roles and separately choose impersonated
+caller roles. No selection uses startup CLI/configured defaults; **Requirements only** skips coverage.
+`--no-roles` at startup fixes the entire session to requirements-only evaluation.
+
+Results include granted/missing privileges and their depths, identities, source locations/call paths,
+assumptions, triggered steps, unresolved operations, and incomplete/truncated analysis warnings.
+Table/privilege filters affect displayed rows only; summary counts still describe the whole query.
+Download a query's report as JSON for further inspection. **Role catalog** browses individual role
+grants, including global privileges, with a role/table/privilege search. Unknown global metadata is
+shown as unknown, not as proof of a missing grant. Duplicate role names combine as in `--role`.
+
+The source graph, request rules, analysis metadata, and role catalog are frozen for the session;
+each query creates fresh evaluation state. Restart the CLI to refresh inputs. Configuration
+`Principals`, `Users`, and `Suppress` retain their CLI semantics. `--user`/`--caller-user` can resolve
+live direct/team roles **once at startup**; selecting catalog roles in the UI replaces the respective
+live identity with an offline role set. The web endpoints do not authenticate to or query Dataverse,
+execute analyzed code, write files, or modify permissions.
+
+The server binds **only to IPv4 loopback**, rejects foreign Host/Origin and cross-site browser requests,
+requires a per-session token for model/query APIs, and does not enable CORS. Keep the session local;
+it is not an authenticated shared service and should not be reverse-proxied or exposed over a network.
+Snapshots and query exports may contain sensitive code and security-model information.
+
+Static coverage is **not proof of record-level access**: ownership, business units, sharing, and runtime
+behavior are not evaluated. Missing, unresolved, not-checked, unverifiable, and incomplete results remain
+visible. Interactive mode does not set pass/fail exit codes from individual query results. It cannot be
+combined with CLI report, scope, filter, or failure switches (`--format`, `--output`, `--detail`,
+`--table`, `--privilege`, `--runs-as`, `--basis`, `--plugin`, `--custom-api`, `--function`, `--entry`,
+`--operation`, `--attributes`, `--fail-on-missing`, `--strict`); choose supported query options in the UI.
+Input, configuration, role/user, and snapshot-capture switches still apply.
+
+### Frontend development and build
+
+Building the permission tool from source requires **Node.js 24 LTS and npm**, in addition to the .NET SDK.
+The tool's MSBuild targets restore the lockfile-pinned frontend dependencies, run TypeScript checking
+and the Vite production build, and embed the resulting assets. Generated `dist/` and `node_modules/`
+are ignored; neither needs to be committed or distributed separately. Normal incremental builds reuse
+unchanged frontend output. CI also runs the React component/API tests.
+
+```bash
+cd src/PermissionAnalyzer/PermissionAnalyzer.Tool/Web/Client
+npm ci --include=dev
+npm test
+npm run build
+```
+
+For hot-reload development, first start the CLI with `--web` on its default port **8765**, then run
+`npm run dev` from the frontend directory and open `http://127.0.0.1:5173/`. Vite's loopback-only dev
+server proxies `/api` to the CLI, retaining the session token and rewriting Host/Origin for the local
+backend. Production `--web` serves only the embedded Vite build; it never starts Vite or an npm process.
+
 ## Analyze once, query many times
 
 Save an **analysis snapshot** to skip project loading, compilation and source extraction on subsequent runs:
@@ -165,6 +243,8 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 
 | Option | Alias | Description |
 |--------|-------|-------------|
+| `--web` | | Start the local security-model web UI; load source or a snapshot once and query interactively (see [Local web UI](#local-web-ui)) |
+| `--port` | | Web UI port, 1–65535 (default: 8765). Requires `--web`; binding remains IPv4 loopback only |
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
 | `--save-snapshot` | | Save the complete extracted analysis to a file for later queries. Requirements-only report by default; explicit role/user or failure options opt into coverage. The snapshot is independent of scope, filters, roles and format |
 | `--snapshot` | | Query a saved snapshot without loading source. Supports every scope, including new operations and explicit methods; cannot combine with `--solution`, `--exclude`, `--plugin-solution` or `--save-snapshot` |

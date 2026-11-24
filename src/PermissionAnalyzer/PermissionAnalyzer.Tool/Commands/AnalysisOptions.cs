@@ -10,6 +10,8 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 /// </summary>
 internal sealed class AnalysisOptions
 {
+    private readonly Option<bool> _web = new(CliOptions.Web.Primary) { Description = CliOptions.Web.Description };
+    private readonly Option<int> _port = new(CliOptions.Port.Primary) { Description = CliOptions.Port.Description, DefaultValueFactory = _ => 8765 };
     private readonly Option<string?> _solution = new(CliOptions.Solution.Primary, CliOptions.Solution.Alias) { Description = CliOptions.Solution.Description };
     private readonly Option<string?> _snapshot = new(CliOptions.Snapshot.Primary) { Description = CliOptions.Snapshot.Description };
     private readonly Option<string?> _saveSnapshot = new(CliOptions.SaveSnapshot.Primary) { Description = CliOptions.SaveSnapshot.Description };
@@ -65,13 +67,25 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _solution, _snapshot, _saveSnapshot, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _user, _callerUser, _dataverseUrl, _credentialType, _noRoles, _failOnMissing, _strict })
+        foreach (var option in new Option[] { _web, _port, _solution, _snapshot, _saveSnapshot, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _user, _callerUser, _dataverseUrl, _credentialType, _noRoles, _failOnMissing, _strict })
         {
             command.Options.Add(option);
         }
 
         command.Validators.Add(result =>
         {
+            if (result.GetResult(_port) is not null && result.GetValue(_port) is < 1 or > 65535)
+                result.AddError("--port must be between 1 and 65535.");
+            if (result.GetResult(_port) is not null && !result.GetValue(_web))
+                result.AddError("--port requires --web.");
+            if (result.GetValue(_web))
+            {
+                // Interactive queries choose their own scope/filter. Do not silently ignore report switches.
+                foreach (var webConflict in new Option[] { _format, _output, _detail, _table, _privilege, _runsAs, _basis,
+                    _plugin, _customApi, _function, _entry, _operation, _attributes, _failOnMissing, _strict }
+                    .Where(o => result.GetResult(o) is not null))
+                    result.AddError($"--web can't be used with {webConflict.Name}; choose query options in the UI.");
+            }
             if (result.GetResult(_snapshot) is not null)
             {
                 foreach (var sourceConflict in new Option[] { _solution, _exclude, _pluginSolution, _saveSnapshot }.Where(o => result.GetResult(o) is not null))
@@ -179,7 +193,9 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_dataverseUrl),
             parseResult.GetValue(_credentialType),
             parseResult.GetValue(_snapshot),
-            parseResult.GetValue(_saveSnapshot));
+            parseResult.GetValue(_saveSnapshot),
+            parseResult.GetValue(_web),
+            parseResult.GetResult(_port) is null ? 8765 : parseResult.GetValue(_port));
     }
 
     /// <summary>
@@ -220,7 +236,9 @@ internal sealed record AnalysisRequest(
     string? DataverseUrl = null,
     string? CredentialType = null,
     string? Snapshot = null,
-    string? SaveSnapshot = null)
+    string? SaveSnapshot = null,
+    bool Web = false,
+    int Port = 8765)
 {
     // Capture is analysis-first. Configured coverage must not require --no-roles just to save a graph.
     // Explicit coverage/failure options still opt in, including configured roles with --strict.

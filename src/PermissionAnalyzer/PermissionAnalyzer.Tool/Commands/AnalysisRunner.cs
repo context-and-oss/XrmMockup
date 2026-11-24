@@ -1,4 +1,5 @@
 using System.Reflection;
+using XrmMockup.PermissionAnalyzer.Tool.Web;
 using XrmMockup.PermissionAnalyzer.Tool.Dataverse;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -72,7 +73,7 @@ internal static class AnalysisRunner
                 var projects = new List<LoadedProject>();
                 incomplete = await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory,
                     cancellationToken, collectIncompleteSource: true, projects: projects);
-                inputs = request.Format == ReportFormat.Json
+                inputs = request.Web || request.Format == ReportFormat.Json
                     ? AnalysisProvenance.Create(settings, configuration.Permissions, projects, noRoles) : null;
                 if (request.SaveSnapshot is { } savePath)
                 {
@@ -83,6 +84,13 @@ internal static class AnalysisRunner
                     await artifact.SaveAsync(savePath, cancellationToken);
                     logger.LogInformation("Wrote complete analysis snapshot to {Path}", Path.GetFullPath(savePath));
                 }
+            }
+            if (request.Web)
+            {
+                var model = new SecurityModel(root, snapshot?.Graph ?? builder.Extracted(), incomplete, roles,
+                    configuration.Permissions, coverageOptions, inputs, request.NoRoles);
+                await SecurityWebHost.RunAsync(model, request.Port, logger, cancellationToken);
+                return ExitCodes.Success;
             }
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
