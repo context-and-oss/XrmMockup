@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
-* No unreleased changes.
+* Add: Pass an actual user to verify their access (#390)
 <!-- END GENERATED RELEASE NOTES -->
 
 ### 1.0.0 - 20 November 2026
