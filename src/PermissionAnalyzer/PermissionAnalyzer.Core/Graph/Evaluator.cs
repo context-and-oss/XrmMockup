@@ -70,7 +70,7 @@ internal sealed class EvaluationResult
     public HashSet<string> Reached { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Set when the evaluation stopped at <see cref="Evaluator.MaxVisits"/>, so the result may be incomplete.
+    /// Set when evaluation hit a call or resolution-depth limit, so the result may be incomplete.
     /// </summary>
     public bool Truncated { get; set; }
 }
@@ -98,6 +98,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     // The lowest position in _constructing whose default object is missing a part, cut off by a cycle or the depth
     // limit, so it isn't memoized
     private int _cutAt = int.MaxValue;
+    private bool _truncated;
     private readonly HashSet<string> _returning = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -152,6 +153,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
                 }
             }
         }
+        result.Truncated |= _truncated;
         return result;
     }
 
@@ -164,6 +166,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
         var state = node.Type is { } type ? DefaultObject(type, 0) : null;
         var frame = new Frame(node.Id, state, NoBindings, RequirementBasis.Direct, [display]);
         foreach (var access in node.Accesses) Record(access, frame, result);
+        result.Truncated |= _truncated;
         return result;
     }
 
@@ -419,7 +422,8 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
 
         // Requests that need nothing resolve to nothing, so for them only a method that returns none is unknown
         if (cyclic || returned.Reason.Length == 0) return result;
-        if (RequestShapes.IsRequest(returned.Shape)) return found ? result : TableResolution.Unresolved(returned.Reason);
+        if (RequestShapes.IsRequest(returned.Shape) || returned.Shape is TableShape.LookupHolder or TableShape.LookupTarget)
+            return found ? result : TableResolution.Unresolved(returned.Reason);
         return result.OrUnresolved(returned.Reason);
     }
 
@@ -557,6 +561,7 @@ internal sealed class Evaluator(CallGraph graph, EntryContext entry)
     /// </summary>
     private void CutOff()
     {
+        _truncated = true;
         if (_constructing.Count > 0) _cutAt = 0;
     }
 

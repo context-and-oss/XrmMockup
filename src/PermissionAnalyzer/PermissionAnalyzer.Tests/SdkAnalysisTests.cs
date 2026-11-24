@@ -1,3 +1,4 @@
+using System.CommandLine;
 using XrmMockup.PermissionAnalyzer.Core.Analysis;
 using XrmMockup.PermissionAnalyzer.Core.Coverage;
 using XrmMockup.PermissionAnalyzer.Core.Model;
@@ -63,10 +64,10 @@ public class SdkAnalysisTests
         var source = Source(Plugins);
         source.AddWorkflows([new WorkflowRegistration("File workflow", "task", true, false, null, false, null)]);
         var active = source.WithMetadata(new PermissionMetadata());
-        active.AddOperation("Create", "task");
+        active.AddOperation("Create", "task", []);
         Assert.Contains(Assert.Single(active.Build(scope: EntryPointSelector.Operation("Create", "task")).EntryPoints).Unresolved, u => u.Reason.Contains("File workflow"));
         var disabled = source.WithMetadata(new PermissionMetadata { Workflows = [] });
-        disabled.AddOperation("Create", "task");
+        disabled.AddOperation("Create", "task", []);
         Assert.Empty(Assert.Single(disabled.Build(scope: EntryPointSelector.Operation("Create", "task")).EntryPoints).Unresolved);
     }
 
@@ -126,7 +127,7 @@ public class SdkAnalysisTests
             """);
         var manifest = source.Build([], EntryPointSelector.Plugin("P"));
         var options = new CoverageOptions { Roles = RoleSet.Combine([], "test") };
-        Assert.True(CoverageEvaluator.Evaluate(manifest, options).Summary.Passed(strict: true)); // CLI parity
+        Assert.False(CoverageEvaluator.Evaluate(manifest, options).Summary.Passed(strict: true)); // CLI and SDK agree
         var result = new PermissionCheckResult(manifest, CoverageEvaluator.EvaluateForPermissionCheck(manifest, options));
         Assert.False(result.Passed);
         Assert.Equal(1, result.Coverage.Summary.NotChecked);
@@ -208,6 +209,25 @@ public class SdkAnalysisTests
             }));
             Assert.False(result.Passed);
             Assert.Throws<PermissionCheckException>(result.ThrowIfFailed);
+
+            // The CLI must carry the same failures into strict exit codes and role-free artifacts.
+            var options = new XrmMockup.PermissionAnalyzer.Tool.Commands.AnalysisOptions();
+            var command = new System.CommandLine.Command("permissions");
+            options.AddTo(command);
+            var roleName = XrmMockup.PermissionAnalyzer.Tool.Metadata.RoleLoader.Load(TestMetadata.DirectoryPath)[0].Name;
+            var report = Path.Combine(directory, "report.json");
+            var args = new[] { "--solution", project, "--metadata", TestMetadata.DirectoryPath, "--role", roleName,
+                "--operation", "WhoAmI systemuser", "--format", "json", "--output", report, "--strict" };
+            Assert.Equal(1, await XrmMockup.PermissionAnalyzer.Tool.Commands.AnalysisRunner.RunAsync(options.Read(command.Parse(args)), CancellationToken.None));
+            Assert.Equal(0, await XrmMockup.PermissionAnalyzer.Tool.Commands.AnalysisRunner.RunAsync(options.Read(command.Parse(args[..^1])), CancellationToken.None));
+            var plain = new[] { "--solution", project, "--metadata", TestMetadata.DirectoryPath, "--no-roles",
+                "--operation", "WhoAmI systemuser", "--format", "json", "--output", report };
+            Assert.Equal(0, await XrmMockup.PermissionAnalyzer.Tool.Commands.AnalysisRunner.RunAsync(options.Read(command.Parse(plain)), CancellationToken.None));
+            using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(report));
+            Assert.True(document.RootElement.GetProperty("analysis").GetProperty("incomplete").GetBoolean());
+            Assert.Contains("ThisMethodDoesNotExist", document.RootElement.GetProperty("entryPoints")[0].GetProperty("unresolved").ToString());
+            Assert.NotEmpty(document.RootElement.GetProperty("analysis").GetProperty("inputs").GetProperty("projects").EnumerateArray());
+            Assert.False(document.RootElement.TryGetProperty("result", out _));
         }
         finally { Directory.Delete(directory, recursive: true); }
     }

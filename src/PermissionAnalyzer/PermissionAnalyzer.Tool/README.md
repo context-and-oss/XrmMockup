@@ -194,7 +194,7 @@ Each requirement is checked against the roles of the identity it runs as:
 | `Caller` | `--user` or `--role` |
 | `ApplicationUser` | `--user` or `--role`, else the entry point's function app in `Principals` |
 | `User` | The user's roles in `Users` |
-| `ImpersonatedCaller` | `--caller-user` or `--caller-role`: the call runs with the privileges of the user in `CallerId` |
+| `ImpersonatedCaller` | `--caller-user` or `--caller-role`; the same privileges are also required on the application user |
 | `System` | Nothing; SYSTEM needs no role |
 
 - Repeated roles combine as they do in Dataverse: a privilege is granted when any of them grants it,
@@ -202,7 +202,7 @@ Each requirement is checked against the roles of the identity it runs as:
 - Any depth counts. The granted depth (`User`, `BusinessUnit`, `ParentChildBusinessUnit` or
   `Organization`) is shown but doesn't affect the result.
 - Requirements with an `(assumed)` identity are checked like the rest.
-- `✔` is granted (or on a table no role governs, which XrmMockup doesn't check), `✘` is missing, `-` is
+- `✔` is granted, `✘` is missing, `-` is
   [suppressed](#configuration), and `·` is not checked, unverifiable or runs as SYSTEM. Each entry point first lists the
   roles each identity was checked against, or why it wasn't checked.
 - Role names are matched exactly, then ignoring case. An unknown name is an error that suggests the
@@ -211,19 +211,25 @@ Each requirement is checked against the roles of the identity it runs as:
   grant it and every entry point or unreached method that needs it. With `--fail-on-missing`, the error names them too.
 - `Not checked` lists what the result doesn't cover: unresolved operations (split into requests
   without a rule, custom API calls, fired workflows, and operations with an unknown table or request), requirements whose identity
-  has no roles, unverifiable privileges, and entry points or methods whose analysis stopped at its limit of 10,000 calls
+  has no roles, unverifiable privileges, and entry points or methods whose analysis stopped at a call or resolution-depth limit
   (their requirements may be incomplete). It is left out when everything was checked. When nothing is
   missing but something wasn't checked, `--fail-on-missing` exits with `0` and logs a warning; `--strict` makes it fail.
 - Some privileges aren't tied to a table, such as `prvActOnBehalfOfAnotherUser` or the execute
   privilege of a custom API. They are listed with their name in the table column and `global` as the
   privilege, and under `Privileges not tied to a table`.
-- Setting `CallerId` needs `prvActOnBehalfOfAnotherUser` on the identity that sets it, usually the
-  application user, for every operation that acts for the user in `CallerId`.
+- `CallerId` uses the intersection of both identities' privileges, including global privileges.
+  The application user additionally needs directly assigned `prvActOnBehalfOfAnotherUser`;
+  team inheritance does not grant delegation. Explicit role lists and configured mappings
+  represent direct assignments. Live user lookups retain direct/team provenance.
 - Privileges not tied to a table are checked against the roles' global privileges, which
   `xrmmockup-metadata` downloads in releases after v1.2.0. Roles from older metadata don't have them,
   so these privileges are `unverifiable` until you regenerate the metadata.
 
 ### Failing a build
+
+Compilation and relevant workspace-load failures are included in the manifest and fail
+`--strict`; a warning alone is not a successful complete analysis. Unknown operations and
+unsupported code are explicit completeness findings, not silently empty requirement sets.
 
 Without `--fail-on-missing` or `--strict`, the exit code is `0` whatever the roles lack, so the report can
 be read without failing anything. In CI, pass `--fail-on-missing`:
@@ -234,8 +240,8 @@ xrmmockup-permissions --function ProcessOrder --role "Integration App" --fail-on
 
 | Code | Meaning |
 |------|---------|
-| `0` | Success. With `--fail-on-missing`: every checked privilege is granted, suppressed or on a table no role governs |
-| `1` | With `--fail-on-missing`: some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, a privilege is unverifiable, or an analysis stopped at the call limit |
+| `0` | Success. With `--fail-on-missing`: every checked privilege is granted or suppressed; incomplete coverage may still be reported |
+| `1` | With `--fail-on-missing`: some privilege is missing. With `--strict`, also when an operation is unresolved, an identity has no roles to check against, a privilege is unverifiable, or analysis hit a call or resolution-depth limit |
 | `2` | Error: invalid options, missing files, an unknown role, or, with `--fail-on-missing`, no roles at all (no `--role`, `--caller-role`, and nothing analyzed matches `Principals` or `Users`) |
 
 As a pull request check, run the tool on the pull request's code but take `Metadata/` and
@@ -362,10 +368,10 @@ collections built with `Add`, `AddRange` or collection expressions, including ba
 | `GrantAccess`, `ModifyAccess` | Share, and each right in `PrincipalAccess.AccessMask` |
 | `RevokeAccess` | Share |
 | `Merge` | Read, Write; `prvMerge` |
-| `QualifyLead` | Write on the lead; Create on account, contact and opportunity when asked to create them |
-| `SendEmail` | Read, Write on email, with the assumption that it is sent as the caller (sending as another user needs `prvSendAsUser`) |
+| `QualifyLead` | Write on the lead; Create/Append on requested new records, AppendTo on their references; copied runtime lookups remain unresolved |
+| `SendEmail` | Read, Write on email; runtime regarding Read and possible `prvSendAsUser` remain unresolved |
 | `CloseIncident`, `WinOpportunity`, `LoseOpportunity`, `WinQuote`, `CloseQuote` | Create on the close activity, Write on the closed record |
-| `ReviseQuote` | Read, Create on quote |
+| `ReviseQuote` | Read/Create/AppendTo on quote, Create/Append on quote lines; other copied lookup values remain unresolved |
 | `InitializeFileBlocksUpload` / `InitializeFileBlocksDownload` | Write / Read on `Target` |
 | `BulkDelete` | `prvBulkDelete` |
 | `ImportSolution`, `ImportSolutionAsync` / `ExportSolution`, `ExportSolutionAsync` | `prvImportCustomization` / `prvExportCustomization` |
@@ -431,8 +437,10 @@ resolved, the lookup's targets in the entity metadata (`*Metadata.xml` in the me
 the only target of a simple lookup, or every target of a polymorphic one such as a customer lookup, with
 basis `all-lookup-targets`. Without metadata such a lookup is reported as unresolved.
 
-The analysis only sees lookups set in the code. A record retrieved and written back unchanged, or one
-from a source it can't follow, adds no Append or AppendTo.
+Unknown lookup contents (retrieved records, external fields or unsupported transformations)
+remain unresolved even when the record's table is known. Synthetic writes without specified
+attributes likewise report unknown lookup contents. Specify attributes against matching metadata
+when checking an operation; a known empty entity/lookup set does not add requirements.
 
 ### Plugin cascades
 
@@ -551,7 +559,7 @@ names:
       },
       "Suppress": [
         { "Table": "ctx_auditlog", "Privilege": "Create", "Reason": "Created by SYSTEM via helper" },
-        { "Privilege": "prvActOnBehalfOfAnotherUser", "Reason": "Granted by the integration team" }
+        { "Privilege": "prvActOnBehalfOfAnotherUser", "Reason": "Accepted external policy exception" }
       ],
       "Rules": [
         { "Message": "ctx_Approve", "Target": "Target", "Privileges": ["Write"] }
@@ -602,7 +610,8 @@ needs. A message is matched to a rule by its own name first, ignoring case, so a
 | `Requests` | A member holding requests that run as part of this one |
 | `GlobalPrivileges` | Privileges the request needs by name, such as `prvBulkDelete`, looked up in the privilege catalog as above |
 | `Assumption` | What the analysis assumes about the request, listed under assumptions wherever it is called |
-| `Enforced` | `false` when XrmMockup doesn't make the checks (Dataverse still does) |
+| `Enforced` | `false` when XrmMockup does not enforce all checks; reported as an assumption, never used to omit requirements |
+| `Unresolved` | Reasons for runtime-dependent checks the rule cannot resolve; these make strict analysis fail |
 | `FiresOn` | The table the request's plugin steps fire on, when it isn't that of its first member check, as for `WinOpportunity`, which creates an `opportunityclose` but fires on `opportunity` |
 | `StepMessage` | The message the request's plugin steps are registered on, when it isn't the request's own, as `Win` for `WinOpportunity` |
 
@@ -639,9 +648,8 @@ Strong-name signing is ignored, so a key file that isn't checked in doesn't stop
 
 The metadata folder is also where plugin step registrations are read from (`Metadata.xml`).
 
-When the metadata folder contains `SecurityRoles/`, the output also lists the required tables that no
-role mentions. XrmMockup doesn't check privileges on those tables, so tests pass even when no role
-grants them. `--role`, `--caller-role` and the roles in `Principals` and `Users` are looked up in this folder, by name.
+Required tables absent from every downloaded role are unverifiable, not proven security
+exemptions. Regenerate incomplete metadata before relying on strict coverage. `--role`, `--caller-role` and the roles in `Principals` and `Users` are looked up in this folder, by name.
 
 ### Checking a Dataverse user's actual roles
 
@@ -696,7 +704,7 @@ to change, and `--detail` shows more:
 | `minimal` (default) | Only the privileges to change: a block per set of roles with what it lacks, merged over every entry point and identity, a line per table so a role can be changed one table at a time. Requirements that weren't checked or are unverifiable get blocks of their own. Without roles, a block per identity with every privilege it needs, except SYSTEM. Ends with the counts, `Result` and `Not checked` |
 | `compact` | Also, under each block, the entry points and methods that need its privileges, those that need the same ones listed together |
 | `normal` | Requirements the roles don't grant (`✘`), that weren't checked or are unverifiable (`·`), and unresolved operations (`?`). An entry point or method with none of these is left out. Without roles nothing is granted, so every requirement is shown, with `Privileges per table`. Up to three source locations per requirement, without call paths |
-| `detailed` | Also the requirements that are granted, not governed, suppressed or run as SYSTEM, every entry point and method, assumptions (`~`), the steps each entry point fires and `Privileges per table` |
+| `detailed` | Also the requirements that are granted, suppressed or run as SYSTEM, every entry point and method, assumptions (`~`), the steps each entry point fires and `Privileges per table` |
 | `full` | Also every source location with its call path |
 
 For three functions run by an app user, `compact` shows the changes to make to `Integration App`,
@@ -751,9 +759,17 @@ computed, counted or checked changes. In particular, filters never change the ex
 
 ### JSON
 
+The versioned contract is `schemaVersion: 1` (additive fields are compatible; breaking
+changes require a version bump). `analysis` is present with or without roles: completeness,
+truncated section IDs, selected entry points, report filters and whole-analysis count scope.
+CLI inputs include loaded project variants/symbols, source hashes, exclusions, a permission
+configuration hash and metadata file fingerprints. These identify inputs, not a reproducible
+build environment; authentication settings are excluded. Live lookup provenance stays separate.
+`--no-roles` excludes role assignments/coverage and role files from fingerprints.
+
 `--format json` writes the same content as an object with `entryPoints` (each with its `id`, `kind`,
 `trigger`, `requirements`, `unresolved`, `assumptions` and `triggers`, the ids of the steps it fires),
-`unreached` and `notRoleGoverned`. JSON is complete at every `--detail`, with every source and
+`unreached` and `tablesWithoutRoleMetadata`. JSON is complete at every `--detail`, with every source and
 call path. Filters narrow it like the text: requirements and unresolved operations they don't match
 are left out, so are entry points and methods left without any, and `missing` lists only what a matching
 requirement is missing. `result` stays the count of the whole analysis.
@@ -761,12 +777,12 @@ Requirements carry `table`, `privilege`, `runsAs`, `basis` and their `sources`, 
 `path` from the entry point. A privilege not tied to a table has no `table`, and its name as
 `privilege`.
 
-With roles, each requirement also has `coverage` (`status`: `granted`, `not-governed`, `missing`,
+With roles, each requirement also has `coverage` (`status`: `granted`, `missing`,
 `suppressed`, `not-checked`, `system` or `unverifiable`, with `depth` or `reason`), each entry point has `roles` (the
 roles per identity, with their `origin`), and the document
 has a `result` with the counts, `unresolvedNoRule`, `unresolvedCustomApi` and `unresolvedWorkflow` (the
 unresolved operations that are requests without a rule, custom API calls and fired workflows), `truncated` (the
-entry points and methods whose analysis stopped at the call limit) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
+entry points and methods whose analysis hit a call or resolution-depth limit) and `incomplete` (whether anything wasn't checked), and `missing` lists each missing privilege
 with `table` (left out for a privilege not tied to a table), `privilege`, `runsAs`, `roles`, `origin` and `in` (the entry points and methods that need
 it). Without roles, none of these are written.
 
@@ -798,7 +814,7 @@ related locations:
 | `missing-privilege` | error | A privilege the roles lack. A suppressed one has a `suppressions` entry with the reason, so code scanning shows it as dismissed |
 | `unresolved-operation` | warning | An operation whose table or request isn't known, except as SYSTEM, which needs no role |
 | `not-checked` | note | A privilege of an identity without roles |
-| `unverifiable` | note | A privilege not tied to a table that the role metadata predates |
+| `unverifiable` | note | Missing table or global privilege metadata prevents verification |
 
 Without roles, only unresolved operations are results. Filters narrow it; `--detail` doesn't
 apply. Each result has `properties` with the `table`, `privilege`, `runsAs`, `roles` and

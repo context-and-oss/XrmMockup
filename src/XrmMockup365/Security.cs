@@ -439,9 +439,10 @@ namespace DG.Tools.XrmMockup
         private IEnumerable<DbRow> PermissionCheckRows(string table) => db.HasTable(table)
             ? db[table].ToList() : Enumerable.Empty<DbRow>();
 
-        internal IReadOnlyList<SecurityRole> GetPermissionCheckRoles(Guid userId)
+        internal IReadOnlyList<SecurityRole> GetPermissionCheckRoles(Guid userId, bool directOnly = false)
         {
             var result = new HashSet<SecurityRole>(PermissionCheckPrincipalRoles("systemuser", userId, "systemuserroles_association"));
+            if (directOnly) return result.ToList();
             var teams = PermissionCheckRows("teammembership").Where(m => m.GetColumn<Guid>("systemuserid") == userId)
                 .Select(m => m.GetColumn<Guid>("teamid")).Distinct();
             foreach (var team in teams) result.UnionWith(PermissionCheckPrincipalRoles("team", team, "teamroles_association"));

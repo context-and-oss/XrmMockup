@@ -42,9 +42,9 @@ namespace DG.XrmMockupTest
             Assert.DoesNotContain(System.Runtime.Loader.AssemblyLoadContext.Default.Assemblies,
                 a => a.GetName().Name == "XrmMockup.PermissionAnalyzer.Workspace");
             var result = crm.CheckPermissions(analysis, PermissionSelector.Plugin<AccountTagPlugin>(Operation.Create, Stage.PostOperation), SecurityRoles.XrmMockupTestAccessTeam);
+            result.ThrowIfFailed();
             Assert.True(result.Passed);
             Assert.Equal("DG.Some.Namespace.AccountTagPlugin", Assert.Single(result.Manifest.EntryPoints).Type);
-            result.ThrowIfFailed();
             Assert.Throws<ArgumentException>(() => crm.CheckPermissions(analysis, PermissionSelector.Plugin<AccountTagPlugin>(Operation.Delete), SecurityRoles.XrmMockupTestAccessTeam));
         }
 
@@ -53,7 +53,7 @@ namespace DG.XrmMockupTest
         {
             var analysis = await Analysis.Value;
             // Business unit has no registered source plugins, but Create is still required.
-            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create);
+            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create, b => b.Name);
             var role = crm.CloneSecurityRole("XrmMockup Test Access Team");
             role.Privileges["businessunit"] = new Dictionary<AccessRights, RolePrivilege>();
             crm.AddSecurityRole(role);
@@ -61,8 +61,46 @@ namespace DG.XrmMockupTest
             Assert.False(first.Passed);
             Assert.Contains(first.Manifest.AllRequirements, r => r.Table == "businessunit" && r.Privilege == XrmMockup.PermissionAnalyzer.Core.Model.Privilege.Create);
             role.Privileges["businessunit"][AccessRights.CreateAccess] = new RolePrivilege { PrivilegeDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth.Basic, AccessRight = AccessRights.CreateAccess };
-            Assert.True(crm.CheckPermissions(analysis, scope, role.RoleId).Passed);
+            crm.CheckPermissions(analysis, scope, role.RoleId).ThrowIfFailed();
             Assert.False(first.Passed); // Old results remain snapshots.
+        }
+
+        [Theory]
+        [InlineData("Create", AccessRights.CreateAccess)]
+        [InlineData("Retrieve", AccessRights.ReadAccess)]
+        [InlineData("Update", AccessRights.WriteAccess)]
+        [InlineData("Delete", AccessRights.DeleteAccess)]
+        public async System.Threading.Tasks.Task DirectRequirementsMatchHandlerDenials(string message, AccessRights access)
+        {
+            var analysis = await Analysis.Value;
+            var role = crm.CloneSecurityRole("XrmMockup Test Access Team");
+            role.Privileges[ctx_child.EntityLogicalName][access] = new RolePrivilege
+            {
+                AccessRight = access, PrivilegeDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth.Global
+            };
+            crm.AddSecurityRole(role);
+            var allowedUser = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, role.RoleId);
+            var deniedRole = role.Clone();
+            deniedRole.Privileges[ctx_child.EntityLogicalName].Remove(access);
+            crm.AddSecurityRole(deniedRole);
+            var deniedUser = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, deniedRole.RoleId);
+            var record = orgGodService.Create(new ctx_child { ctx_Name = "Static rule parity" });
+            var scope = PermissionScope.ForOperation(message, ctx_child.EntityLogicalName, new[] { "ctx_name" });
+            crm.CheckPermissions(analysis, scope, allowedUser.ToEntityReference()).ThrowIfFailed();
+            var denied = crm.CheckPermissions(analysis, scope, deniedUser.ToEntityReference());
+            Assert.False(denied.Passed);
+            Assert.Single(denied.Coverage.Missing);
+            var error = Assert.Throws<System.ServiceModel.FaultException>(() => Execute(crm.CreateOrganizationService(deniedUser.Id)));
+            Assert.Contains(ctx_child.EntityLogicalName, error.Message);
+            Execute(crm.CreateOrganizationService(allowedUser.Id));
+
+            void Execute(IOrganizationService service)
+            {
+                if (message == "Create") service.Create(new ctx_child { ctx_Name = "Created" });
+                else if (message == "Retrieve") service.Retrieve(ctx_child.EntityLogicalName, record, new Microsoft.Xrm.Sdk.Query.ColumnSet("ctx_name"));
+                else if (message == "Update") service.Update(new ctx_child { Id = record, ctx_Name = "Updated" });
+                else service.Delete(ctx_child.EntityLogicalName, record);
+            }
         }
 
         [Fact]
@@ -107,7 +145,7 @@ namespace DG.XrmMockupTest
         public async System.Threading.Tasks.Task CombinedRolesAndCurrentUserTeamAssignments()
         {
             var analysis = await Analysis.Value;
-            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create);
+            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create, b => b.Name);
             var denied = crm.CloneSecurityRole("XrmMockup Test Access Team");
             denied.Privileges["businessunit"] = new Dictionary<AccessRights, RolePrivilege>();
             crm.AddSecurityRole(denied);
@@ -115,16 +153,16 @@ namespace DG.XrmMockupTest
             allowed.Privileges["businessunit"][AccessRights.CreateAccess] = new RolePrivilege { PrivilegeDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth.Basic, AccessRight = AccessRights.CreateAccess };
             crm.AddSecurityRole(allowed);
             Assert.False(crm.CheckPermissions(analysis, scope, denied.RoleId).Passed);
-            Assert.True(crm.CheckPermissions(analysis, scope, denied.RoleId, allowed.RoleId).Passed);
+            crm.CheckPermissions(analysis, scope, denied.RoleId, allowed.RoleId).ThrowIfFailed();
             var user = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, denied.RoleId);
             Assert.False(crm.CheckPermissions(analysis, scope, user.ToEntityReference()).Passed);
             var team = crm.CreateTeam(orgAdminService, new Team { BusinessUnitId = crm.RootBusinessUnit }, allowed.RoleId);
             orgAdminService.Execute(new AddMembersTeamRequest { TeamId = team.Id, MemberIds = new[] { user.Id } });
-            Assert.True(crm.CheckPermissions(analysis, scope, user.ToEntityReference()).Passed);
+            crm.CheckPermissions(analysis, scope, user.ToEntityReference()).ThrowIfFailed();
             orgAdminService.Execute(new RemoveMembersTeamRequest { TeamId = team.Id, MemberIds = new[] { user.Id } });
             Assert.False(crm.CheckPermissions(analysis, scope, user.ToEntityReference()).Passed);
             crm.AddSecurityRolesToPrinciple(user.ToEntityReference(), allowed.RoleId);
-            Assert.True(crm.CheckPermissions(analysis, scope, user.ToEntityReference()).Passed);
+            crm.CheckPermissions(analysis, scope, user.ToEntityReference()).ThrowIfFailed();
         }
 
         [Fact]
@@ -134,7 +172,7 @@ namespace DG.XrmMockupTest
             var user = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, SecurityRoles.XrmMockupTestAccessTeam);
             var core = (Core)typeof(XrmMockupBase).GetField("Core", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(crm);
             var before = core.TakeJsonSnapshot();
-            crm.CheckPermissions(analysis, PermissionSelector.Operation<BusinessUnit>(Operation.Create), user.ToEntityReference());
+            crm.CheckPermissions(analysis, PermissionSelector.Operation<BusinessUnit>(Operation.Create, b => b.Name), user.ToEntityReference());
             crm.CheckPermissions(analysis, PermissionSelector.Plugin<AccountTagPlugin>(), SecurityRoles.XrmMockupTestAccessTeam);
             Assert.Equal(before, core.TakeJsonSnapshot());
         }
@@ -143,9 +181,9 @@ namespace DG.XrmMockupTest
         public async System.Threading.Tasks.Task NewlyRegisteredWorkflowMakesAnalysisIncompleteWithoutExecutingIt()
         {
             var analysis = await Analysis.Value;
-            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create);
+            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create, b => b.Name);
             var core = (Core)typeof(XrmMockupBase).GetField("Core", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(crm);
-            Assert.True(crm.CheckPermissions(analysis, scope, SecurityRoles.SystemAdministrator).Passed);
+            crm.CheckPermissions(analysis, scope, SecurityRoles.SystemAdministrator).ThrowIfFailed();
             core.AddWorkflow(new Entity("workflow", Guid.NewGuid())
             {
                 ["name"] = "Static workflow boundary",
@@ -167,7 +205,7 @@ namespace DG.XrmMockupTest
             denied.Privileges["businessunit"] = new Dictionary<AccessRights, RolePrivilege>();
             crm.AddSecurityRole(denied);
             var user = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, denied.RoleId);
-            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create);
+            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create, b => b.Name);
             var analysis = new IdentityAnalysis(user.Id);
             var result = crm.CheckPermissions(analysis, scope, SecurityRoles.SystemAdministrator);
             Assert.False(result.Passed); // The primary administrator cannot cover the impersonated user.
@@ -175,10 +213,48 @@ namespace DG.XrmMockupTest
             Assert.Contains(user.Id.ToString(), error.Message);
             Assert.Contains(denied.Name, error.Message);
             crm.AddSecurityRolesToPrinciple(user.ToEntityReference(), SecurityRoles.SystemAdministrator);
-            Assert.True(crm.CheckPermissions(analysis, scope, denied.RoleId).Passed);
+            crm.CheckPermissions(analysis, scope, denied.RoleId).ThrowIfFailed();
             var unknown = crm.CheckPermissions(new IdentityAnalysis(Guid.NewGuid()), scope, SecurityRoles.SystemAdministrator);
             Assert.False(unknown.Passed);
             Assert.True(unknown.Coverage.Summary.NotChecked > 0);
+        }
+
+        [Fact]
+        public void LocalUserDelegationMustBeDirectAndChecksRemainReadOnly()
+        {
+            var direct = crm.CloneSecurityRole("XrmMockup Test Access Team");
+            direct.GlobalPrivileges = new Dictionary<string, RolePrivilege>();
+            crm.AddSecurityRole(direct);
+            var delegated = direct.Clone();
+            delegated.GlobalPrivileges[GlobalRequirement.ActOnBehalfOfAnotherUser] = new RolePrivilege
+            {
+                PrivilegeDepth = Microsoft.Crm.Sdk.Messages.PrivilegeDepth.Global
+            };
+            crm.AddSecurityRole(delegated);
+            var user = crm.CreateUser(orgAdminService, crm.RootBusinessUnit, direct.RoleId);
+            var team = crm.CreateTeam(orgAdminService, new Team { BusinessUnitId = crm.RootBusinessUnit }, delegated.RoleId);
+            orgAdminService.Execute(new AddMembersTeamRequest { TeamId = team.Id, MemberIds = new[] { user.Id } });
+            var scope = PermissionSelector.Operation<BusinessUnit>(Operation.Create, b => b.Name);
+            var core = (Core)typeof(XrmMockupBase).GetField("Core", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(crm);
+            var before = core.TakeJsonSnapshot();
+            var denied = crm.CheckPermissions(new DelegationAnalysis(), scope, user.ToEntityReference());
+            Assert.Equal(GlobalRequirement.ActOnBehalfOfAnotherUser, Assert.Single(denied.Coverage.MissingGlobal).Privilege);
+            Assert.False(denied.Passed);
+            Assert.Equal(before, core.TakeJsonSnapshot());
+            crm.AddSecurityRolesToPrinciple(user.ToEntityReference(), delegated.RoleId);
+            crm.CheckPermissions(new DelegationAnalysis(), scope, user.ToEntityReference()).ThrowIfFailed();
+        }
+
+        private sealed class DelegationAnalysis : PermissionAnalysis
+        {
+            public override Manifest Analyze(PermissionScope scope, PermissionMetadata metadata)
+            {
+                var requirement = new GlobalRequirement(GlobalRequirement.ActOnBehalfOfAnotherUser, RunsAs.Caller,
+                    RequirementBasis.Direct, new[] { new RequirementSource(new SourceLocation("Delegation.cs", 1, 1), new string[0]) });
+                return new Manifest(new[] { new EntryPoint("delegation", EntryPointKind.Operation, "", null,
+                    null, null, null, new Requirement[0], new UnresolvedOperation[0], new Assumption[0],
+                    globalRequirements: new[] { requirement }) }, new MethodManifest[0]);
+            }
         }
 
         private sealed class IdentityAnalysis : PermissionAnalysis

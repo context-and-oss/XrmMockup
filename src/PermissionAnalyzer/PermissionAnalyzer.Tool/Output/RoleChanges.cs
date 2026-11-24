@@ -49,7 +49,7 @@ internal static class RoleChanges
                 BlockKind.Missing when coverage is null => $"{key} needs",
                 BlockKind.Missing => $"Missing from {block.HeadingKey}, for {identities}",
                 BlockKind.NotChecked => key,
-                _ => $"Can't be checked against {block.HeadingKey}, for {identities} (the role metadata predates privileges not tied to a table; regenerate it)",
+                _ => $"Can't be checked against {block.HeadingKey}, for {identities} (role metadata is incomplete; regenerate it)",
             };
             // Sections that need exactly the same privileges are one group, placed where its first section is
             var groups = block.Sections

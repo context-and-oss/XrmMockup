@@ -22,8 +22,8 @@ public enum RunsAsKind
     ApplicationUser,
 
     /// <summary>
-    /// App code acting for a user by setting <c>CallerId</c>. The user needs the privilege; the application user
-    /// needs to be allowed to act on behalf of other users.
+    /// App code acting for a user by setting <c>CallerId</c>. Both identities need the operation's privileges;
+    /// the application user also needs directly assigned delegation permission.
     /// </summary>
     ImpersonatedCaller,
 

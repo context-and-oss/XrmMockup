@@ -74,7 +74,7 @@ internal static class ReportText
         }
         if (summary.Unverifiable > 0)
         {
-            parts.Add($"{Count(summary.Unverifiable, "privilege")} not tied to a table (the role metadata predates them; regenerate it)");
+            parts.Add($"{Count(summary.Unverifiable, "privilege")} unverifiable (role metadata is incomplete; regenerate it)");
         }
         if (summary.Truncated > 0)
         {

@@ -18,9 +18,11 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Workspace;
 /// weaker than a later one's.
 /// </para>
 /// </summary>
-internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompleteSource = false) : IDisposable
+internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompleteSource = false, string? reportingRoot = null) : IDisposable
 {
     internal List<UnresolvedOperation> IncompleteSource { get; } = [];
+    internal List<LoadedProject> Projects { get; } = [];
+    private readonly List<string> _loadErrors = [];
 
     // MSBuild reports warnings such as NuGet audit results as failures too, so they're only shown when a project
     // turns out not to load, below
@@ -53,15 +55,28 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompl
         _failureHandler = _workspace.RegisterWorkspaceFailedHandler(e =>
         {
             logger.LogDebug("{Message}", e.Diagnostic.Message);
-            lock (_failures) _failures.Add(e.Diagnostic.Message);
+            lock (_failures)
+            {
+                _failures.Add(e.Diagnostic.Message);
+                if (IsAnalysisFailure(e.Diagnostic)) _loadErrors.Add(e.Diagnostic.Message);
+            }
         });
         return _workspace;
     }
+
+    // MSBuildWorkspace labels cached NuGet audit warnings as failures too. They do not mean
+    // source was omitted; keep logging them without treating an advisory as a compilation gap.
+    internal static bool IsAnalysisFailure(WorkspaceDiagnostic diagnostic) =>
+        diagnostic.Kind == WorkspaceDiagnosticKind.Failure &&
+        !(diagnostic.Message.Contains("Package '", StringComparison.Ordinal) &&
+          diagnostic.Message.Contains("severity vulnerability, https://github.com/advisories/", StringComparison.Ordinal));
 
     public async Task AddAsync(string path, ManifestBuilder builder, ProjectFilter filter, CancellationToken cancellationToken, bool pluginCode = false)
     {
         var solutionDirectory = Path.GetDirectoryName(Path.GetFullPath(path))!;
         var workspace = Workspace();
+        int firstError;
+        lock (_failures) firstError = _loadErrors.Count;
 
         logger.LogInformation("Loading {Path}", path);
         IEnumerable<Project> projects;
@@ -153,7 +168,7 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompl
                 {
                     var span = error.Location.GetLineSpan();
                     var file = string.IsNullOrEmpty(span.Path) ? project.FilePath ?? project.Name : span.Path;
-                    var location = new SourceLocation(Path.GetRelativePath(solutionDirectory, file).Replace('\\', '/'), span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
+                    var location = new SourceLocation(Path.GetRelativePath(reportingRoot ?? solutionDirectory, file).Replace('\\', '/'), span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
                     IncompleteSource.Add(new UnresolvedOperation("source compilation", [], error.ToString(), RunsAs.Caller, new RequirementSource(location, [])));
                 }
             }
@@ -176,6 +191,7 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompl
                 continue;
             }
             analyzed++;
+            Projects.Add(LoadedProject.Of(project, compilation, reportingRoot ?? solutionDirectory, pluginCode, cancellationToken));
 
             // Calls the compiler can't bind are invisible to the analysis, so say how much is affected. Getting every
             // diagnostic binds all the method bodies again, so it's only done when the analysis found code that
@@ -192,6 +208,16 @@ internal sealed class CodeLoader(ILogger<CodeLoader> logger, bool collectIncompl
                         errors.Count,
                         first);
                 }
+            }
+        }
+
+        if (collectIncompleteSource)
+        {
+            lock (_failures)
+            {
+                foreach (var error in _loadErrors.Skip(firstError).Distinct(StringComparer.Ordinal).OrderBy(e => e, StringComparer.Ordinal))
+                    IncompleteSource.Add(new UnresolvedOperation("source loading", [], error.Replace('\r', ' ').Replace('\n', ' '), RunsAs.Caller,
+                        new RequirementSource(new SourceLocation(Path.GetRelativePath(reportingRoot ?? solutionDirectory, path).Replace('\\', '/'), 1, 1), [])));
             }
         }
 

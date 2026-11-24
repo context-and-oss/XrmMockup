@@ -45,10 +45,7 @@ public static class PermissionAnalysisLoader
             }
             var manifest = builder.Build(metadata.RoleGovernedTables, selector);
             if (manifest.EntryPoints.Count == 0) throw new ArgumentException($"No registered entry point matches {scope}.", nameof(scope));
-            if (incomplete.Count == 0) return manifest;
-            return new Manifest(manifest.EntryPoints.Select(e => new EntryPoint(e.Id, e.Kind, e.Type, e.Assembly,
-                e.Trigger, e.ImpersonatingUserId, e.Declaration, e.Requirements, e.Unresolved.Concat(incomplete).ToList(),
-                e.Assumptions, e.Triggers, e.GlobalRequirements, e.Truncated)).ToList(), [], manifest.NotRoleGoverned);
+            return manifest.WithDiagnostics(incomplete);
         }
     }
 }

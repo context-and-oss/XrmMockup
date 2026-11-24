@@ -136,7 +136,7 @@ public class GlobalPrivilegeTests
     }
 
     [Fact]
-    public void SendEmailAssumesItIsSentAsTheCaller()
+    public void SendEmailReportsItsRuntimeDependentChecks()
     {
         var method = Analyze.Method("""
             class C
@@ -145,7 +145,7 @@ public class GlobalPrivilegeTests
             }
             """);
 
-        Assert.Contains("SendEmail sends the email as the calling user; sending it as another user needs prvSendAsUser", method.Assumptions.Select(a => a.Reason));
+        Assert.Contains(method.Unresolved, u => u.Reason.Contains("Read on the runtime regarding record") && u.Reason.Contains("prvSendAsUser"));
         Assert.Empty(method.GlobalRequirements);
     }
 
