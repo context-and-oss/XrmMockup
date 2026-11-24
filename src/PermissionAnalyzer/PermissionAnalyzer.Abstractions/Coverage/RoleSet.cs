@@ -33,6 +33,15 @@ public sealed class RoleSet
     /// </summary>
     public string Origin { get; }
 
+    internal LiveRoleSource? LiveSource { get; private set; }
+
+    internal static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, LiveRoleSource source)
+    {
+        var set = Combine(roles, origin);
+        set.LiveSource = source;
+        return set;
+    }
+
     public static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin)
     {
         var names = new SortedSet<string>(StringComparer.Ordinal);

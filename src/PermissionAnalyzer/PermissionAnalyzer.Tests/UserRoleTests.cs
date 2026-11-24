@@ -56,11 +56,17 @@ public class UserRoleTests
         Assert.Equal(new[] { "Reader", "Writer" }, roles.Names);
         Assert.Equal(PrivilegeDepth.User, roles.Depth("account", Privilege.Read));
         Assert.Equal(PrivilegeDepth.Organization, roles.Depth("account", Privilege.Write));
-        Assert.Contains("Reader: direct", roles.Origin);
-        Assert.Contains("Writer: team 'Entra group'", roles.Origin);
-        Assert.Contains(UserId.ToString("D"), roles.Origin);
-        Assert.Contains("environment https://org.crm.dynamics.com/", roles.Origin);
-        Assert.Contains("roles read 2026-11-23T12:00:00.0000000+00:00", roles.Origin);
+        Assert.Equal("--user: jane@contoso.com", roles.Origin);
+        var source = Assert.IsType<LiveRoleSource>(roles.LiveSource);
+        Assert.Equal(UserId, source.UserId);
+        Assert.Equal("jane@contoso.com", source.UserName);
+        Assert.Equal("https://org.crm.dynamics.com/", source.EnvironmentUrl);
+        Assert.Equal(ReadAt, source.ReadAt);
+        Assert.Equal(new[]
+        {
+            new LiveRoleAssignment("Reader", RootId),
+            new LiveRoleAssignment("Writer", TeamId, "Entra group", UserId),
+        }, source.Assignments);
     }
 
     [Fact]
@@ -135,8 +141,9 @@ public class UserRoleTests
         });
         var roles = Resolve(service, Direct, TeamRole);
         Assert.Equal(new[] { 1, 2 }, pages);
-        Assert.Contains("Reader: direct", roles.Origin);
-        Assert.Contains("Reader: team", roles.Origin);
+        var source = Assert.IsType<LiveRoleSource>(roles.LiveSource);
+        Assert.Contains(new LiveRoleAssignment("Reader", RootId), source.Assignments);
+        Assert.Contains(new LiveRoleAssignment("Reader", RootId, "Entra group", UserId), source.Assignments);
         Assert.Equal(2, roles.Names.Count);
     }
 
@@ -254,9 +261,85 @@ public class UserRoleTests
         using var output = new StringWriter();
         writer.Write(manifest, coverage, output);
         Assert.Contains("jane@contoso.com", output.ToString());
-        Assert.Contains("https://org.crm.dynamics.com/", output.ToString());
         Assert.Contains("Reader: direct", output.ToString());
-        Assert.Contains("2026-11-23T12:00:00", output.ToString());
+        if (format is "json" or "sarif")
+        {
+            Assert.Contains("https://org.crm.dynamics.com/", output.ToString());
+            Assert.Contains("2026-11-23T12:00:00", output.ToString());
+            Assert.Contains(UserId.ToString("D"), output.ToString());
+            Assert.Contains(RootId.ToString("D"), output.ToString());
+        }
+        else
+        {
+            Assert.DoesNotContain("https://org.crm.dynamics.com/", output.ToString());
+            Assert.DoesNotContain("2026-11-23T12:00:00", output.ToString());
+            Assert.DoesNotContain(UserId.ToString("D"), output.ToString());
+        }
+    }
+
+    [Theory]
+    [InlineData("Minimal", false)]
+    [InlineData("Compact", false)]
+    [InlineData("Normal", false)]
+    [InlineData("Detailed", true)]
+    [InlineData("Full", true)]
+    public void TextShowsReadableAssignmentsAndOnlyAddsLookupDetailsAtHigherLevels(string level, bool detailed)
+    {
+        var manifest = Analyze.Code("""
+            class C
+            {
+                void M(IOrganizationService service) => service.Delete("account", Guid.Empty);
+            }
+            """, ["account"]);
+        var service = new FakeService(q => q.EntityName == "systemuser" ? Page(new Entity("systemuser", UserId)) :
+            Page(q.LinkEntities[0].LinkToEntityName == "systemuserroles" ? Role(RootId) : Role(TeamId, team: true)));
+        var coverage = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = Resolve(service, Direct, TeamRole) });
+        Assert.Equal(1, coverage.Summary.Missing);
+        using var output = new StringWriter();
+        new TextManifestWriter(new ReportOptions(Enum.Parse<Detail>(level))).Write(manifest, coverage, output);
+        var text = output.ToString();
+        Assert.StartsWith("Live security roles:\n  User: jane@contoso.com", text);
+        Assert.Contains("Reader, Writer (--user: jane@contoso.com)", text);
+        if (detailed)
+        {
+            Assert.Contains($"User: jane@contoso.com (ID: {UserId:D})", text);
+            Assert.Contains($"Reader (root role ID: {RootId:D})\n      direct", text);
+            Assert.Contains($"Writer (root role ID: {TeamId:D})\n      team 'Entra group' (ID: {UserId:D})", text);
+            Assert.Contains("Roles read: 2026-11-23T12:00:00", text);
+            // The lookup details appear once, not repeated in section labels or missing-privilege rows.
+            Assert.Equal(2, text.Split("https://org.crm.dynamics.com/", StringSplitOptions.None).Length);
+        }
+        else
+        {
+            Assert.StartsWith("Live security roles:\n  User: jane@contoso.com\n    Reader: direct\n    Writer: team 'Entra group'\n\n", text);
+            Assert.DoesNotContain(UserId.ToString("D"), text);
+            Assert.DoesNotContain(RootId.ToString("D"), text);
+            Assert.DoesNotContain(TeamId.ToString("D"), text);
+            Assert.DoesNotContain("https://org.crm.dynamics.com/", text);
+            Assert.DoesNotContain("Roles read:", text);
+        }
+    }
+
+    [Fact]
+    public void RepeatedRoleKeepsBothDirectAndTeamSourcesOnOneReadableLine()
+    {
+        var service = new FakeService(q => q.EntityName == "systemuser" ? Page(new Entity("systemuser", UserId)) :
+            Page(Role(RootId, team: q.LinkEntities[0].LinkToEntityName == "teamroles")));
+        var roles = Resolve(service, Direct);
+        Assert.Equal(new[] { "User: jane@contoso.com", "  Reader: direct; team 'Entra group'" },
+            LiveRoleSources.Lines(roles, Detail.Minimal));
+    }
+
+    [Fact]
+    public void CallerUserHasDistinctReadableLabel()
+    {
+        var service = new FakeService(q => q.EntityName == "systemuser" ? Page(new Entity("systemuser", UserId)) :
+            q.LinkEntities[0].LinkToEntityName == "systemuserroles" ? Page(Role(RootId)) : Page());
+        var roles = new UserRoleResolver(service).Resolve("john@contoso.com", [Direct],
+            "https://org.crm.dynamics.com/", "--caller-user", ReadAt);
+        Assert.Equal(new[] { "Caller user: john@contoso.com", "  Reader: direct" },
+            LiveRoleSources.Lines(roles, Detail.Minimal));
+        Assert.Equal("Reader (--caller-user: john@contoso.com)", roles.ToString());
     }
 
     [Fact]

@@ -677,12 +677,12 @@ role must be present exactly once in the metadata; missing or duplicate definiti
 request to regenerate the metadata. Privileges still come from the downloaded files, so keep them
 up to date. This is static privilege-presence analysis, not proof of record-level access or depth.
 
-Reports record the user/id, environment URL, UTC read timestamp, and each role's source (direct or
-team name/id). JSON includes `liveRoles`, and SARIF includes `runs[].properties.liveRoles`, even
-when no privileges are missing. Live assignment data can change over time; offline output retains
-its existing deterministic behavior. Users explicitly impersonated by a constant id or a plugin
-step still use the `Users` configuration mapping; these options do not automatically fetch all
-impersonating users.
+Reports identify the user and role sources. `--detail detailed` and `--detail full` add IDs,
+the environment URL and the read timestamp; JSON and SARIF retain complete provenance.
+Live assignments can change over time, while offline output remains deterministic.
+
+Users explicitly impersonated by a constant id or a plugin step still use the `Users`
+configuration mapping; these options do not automatically fetch all impersonating users.
 
 ## Output
 
