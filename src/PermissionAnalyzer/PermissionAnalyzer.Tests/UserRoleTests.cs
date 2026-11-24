@@ -71,6 +71,19 @@ public class UserRoleTests
     }
 
     [Fact]
+    public void DelegationGrantedOnlyThroughTeamIsNotDirectlyAssigned()
+    {
+        var team = new RoleDefinition("Delegate team", TeamRole.Privileges,
+            new Dictionary<string, PrivilegeDepth> { [GlobalRequirement.ActOnBehalfOfAnotherUser] = PrivilegeDepth.Organization }, TeamId);
+        var service = new FakeService(q => q.EntityName == "systemuser" ? Page(new Entity("systemuser", UserId)) :
+            Page(q.LinkEntities[0].LinkToEntityName == "systemuserroles" ? Role(RootId) : Role(TeamId, team: true)));
+        var roles = Resolve(service, Direct, team);
+        Assert.Equal(PrivilegeDepth.Organization, roles.GlobalDepth(GlobalRequirement.ActOnBehalfOfAnotherUser));
+        Assert.Null(roles.DirectGlobalDepth(GlobalRequirement.ActOnBehalfOfAnotherUser));
+        Assert.True(roles.KnowsDirectGlobalPrivileges);
+    }
+
+    [Fact]
     public void UsesEmailOnlyWhenUpnNotFound()
     {
         var attributes = new List<string>();

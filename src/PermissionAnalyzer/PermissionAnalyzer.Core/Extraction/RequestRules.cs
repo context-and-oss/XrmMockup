@@ -34,25 +34,33 @@ internal sealed class RequestRules
         Rule("GrantAccess", On(SdkNames.Target, Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
         Rule("ModifyAccess", On(SdkNames.Target, Privilege.Share) with { AccessMask = "PrincipalAccess.AccessMask" }),
         Rule("RevokeAccess", On(SdkNames.Target, Privilege.Share)),
-        Rule("Merge", On(SdkNames.Target, Privilege.Read, Privilege.Write)) with { GlobalPrivileges = ["prvMerge"] },
+        Rule("Merge", On(SdkNames.Target, Privilege.Read, Privilege.Write)) with { GlobalPrivileges = ["prvMerge"], Enforced = false, Unresolved = ["Merge may transfer related records and lookup values from runtime data"] },
         Rule(
             "QualifyLead",
             On("LeadId", Privilege.Write),
-            OnTable("account", Privilege.Create) with { When = "CreateAccount" },
-            OnTable("contact", Privilege.Create) with { When = "CreateContact" },
-            OnTable("opportunity", Privilege.Create) with { When = "CreateOpportunity" }),
+            OnTable("account", Privilege.Create, Privilege.Append) with { When = "CreateAccount" },
+            OnTable("contact", Privilege.Create, Privilege.Append) with { When = "CreateContact" },
+            OnTable("opportunity", Privilege.Create, Privilege.Append) with { When = "CreateOpportunity" },
+            On("LeadId", Privilege.AppendTo) with { When = "CreateAccount" },
+            On("LeadId", Privilege.AppendTo) with { When = "CreateContact" },
+            On("LeadId", Privilege.AppendTo) with { When = "CreateOpportunity" },
+            On("OpportunityCustomerId", Privilege.AppendTo) with { When = "CreateOpportunity" },
+            On("OpportunityCurrencyId", Privilege.AppendTo) with { When = "CreateOpportunity" }) with
+        { Enforced = false, Unresolved = ["QualifyLead may copy additional lookup values from runtime lead data"] },
         Rule("SendEmail", OnTable("email", Privilege.Read, Privilege.Write)) with
         {
-            Assumption = "SendEmail sends the email as the calling user; sending it as another user needs prvSendAsUser",
+            Unresolved = ["SendEmail needs Read on the runtime regarding record and may need prvSendAsUser for its sender"],
         },
         // Closing a record creates its close activity, but the steps fire on the record, and for opportunities and
         // quotes on the Win or Lose message, as in XrmMockup
-        Rule("CloseIncident", On("IncidentResolution", Privilege.Create), OnTable("incident", Privilege.Write)) with { FiresOn = "incident" },
-        Rule("WinOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)) with { FiresOn = "opportunity", StepMessage = "Win" },
-        Rule("LoseOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)) with { FiresOn = "opportunity", StepMessage = "Lose" },
-        Rule("WinQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)) with { FiresOn = "quote", StepMessage = "Win" },
-        Rule("CloseQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)) with { FiresOn = "quote", StepMessage = "Lose" },
-        Rule("ReviseQuote", OnTable("quote", Privilege.Read, Privilege.Create)),
+        Rule("CloseIncident", On("IncidentResolution", Privilege.Create), OnTable("incident", Privilege.Write)) with { Enforced = false, FiresOn = "incident" },
+        Rule("WinOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)) with { Enforced = false, FiresOn = "opportunity", StepMessage = "Win" },
+        Rule("LoseOpportunity", On("OpportunityClose", Privilege.Create), OnTable("opportunity", Privilege.Write)) with { Enforced = false, FiresOn = "opportunity", StepMessage = "Lose" },
+        Rule("WinQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)) with { Enforced = false, FiresOn = "quote", StepMessage = "Win" },
+        Rule("CloseQuote", On("QuoteClose", Privilege.Create), OnTable("quote", Privilege.Write)) with { Enforced = false, FiresOn = "quote", StepMessage = "Lose" },
+        Rule("ReviseQuote", OnTable("quote", Privilege.Read, Privilege.Create, Privilege.AppendTo),
+            OnTable("quotedetail", Privilege.Create, Privilege.Append)) with
+        { Enforced = false, Unresolved = ["ReviseQuote copies runtime quote and line lookup values"] },
         Rule("InitializeFileBlocksUpload", On(SdkNames.Target, Privilege.Write)) with { Enforced = false },
         Rule("InitializeFileBlocksDownload", On(SdkNames.Target, Privilege.Read)) with { Enforced = false },
 
@@ -154,6 +162,8 @@ internal sealed class RequestRules
         var globals = new List<string>(rule.GlobalPrivileges);
         var assumptions = new List<string>();
         if (rule.Assumption is { } assumption) assumptions.Add(assumption);
+        if (!rule.Enforced) assumptions.Add($"XrmMockup does not enforce all privilege checks for message '{message}'");
+        var unresolved = new List<string>(rule.Unresolved);
         var requests = new List<string>();
         var missing = new List<string>();
         var messages = new List<string> { rule.StepMessage ?? message };
@@ -173,6 +183,7 @@ internal sealed class RequestRules
             missing.AddRange(expanded.Missing);
             globals.AddRange(expanded.GlobalPrivileges);
             assumptions.AddRange(expanded.Assumptions);
+            unresolved.AddRange(expanded.Unresolved);
             firesOn ??= expanded.FiresOn;
         }
         visiting.Remove(message);
@@ -184,7 +195,7 @@ internal sealed class RequestRules
             messages.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             globals.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g, StringComparer.Ordinal).ToList(),
             assumptions.Distinct(StringComparer.Ordinal).OrderBy(a => a, StringComparer.Ordinal).ToList(),
-            firesOn?.ToLowerInvariant());
+            firesOn?.ToLowerInvariant(), unresolved.Distinct(StringComparer.Ordinal).OrderBy(r => r, StringComparer.Ordinal).ToList());
         // A rule expanded inside a cycle misses the part of the cycle above it, so only complete ones are kept
         if (visiting.Count == 0) _expanded[message] = result;
         return result;
@@ -192,7 +203,7 @@ internal sealed class RequestRules
 
     private static RequestRule Rule(string message, params RuleCheck[] checks) => new(message) { Checks = checks };
 
-    private static RequestRule Global(string message, params string[] privileges) => new(message) { GlobalPrivileges = privileges };
+    private static RequestRule Global(string message, params string[] privileges) => new(message) { GlobalPrivileges = privileges, Enforced = false };
 
     private static RuleCheck On(string member, params Privilege[] privileges) => new(privileges) { Member = member };
 
@@ -219,7 +230,10 @@ internal sealed record ExpandedRule(
     IReadOnlyList<string> Messages,
     IReadOnlyList<string> GlobalPrivileges,
     IReadOnlyList<string> Assumptions,
-    string? FiresOn = null);
+    string? FiresOn = null, IReadOnlyList<string>? UnresolvedChecks = null)
+{
+    public IReadOnlyList<string> Unresolved => UnresolvedChecks ?? [];
+}
 
 /// <summary>
 /// The reasons a request isn't checked, built and recognized in one place, so the coverage summary can count them.

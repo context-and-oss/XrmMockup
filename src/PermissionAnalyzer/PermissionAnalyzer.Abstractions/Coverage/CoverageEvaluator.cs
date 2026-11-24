@@ -66,14 +66,14 @@ public static class CoverageEvaluator
     private const string PrincipalsSetting = "XrmMockup:Permissions:Principals";
     private const string UsersSetting = "XrmMockup:Permissions:Users";
 
-    public static CoverageReport Evaluate(Manifest manifest, CoverageOptions options) => Evaluate(manifest, options, requireKnownIdentities: false);
+    public static CoverageReport Evaluate(Manifest manifest, CoverageOptions options) => EvaluateCore(manifest, options);
 
-    /// <summary>SDK coverage must establish every non-SYSTEM identity, even for tables no role governs.</summary>
-    public static CoverageReport EvaluateForPermissionCheck(Manifest manifest, CoverageOptions options) => Evaluate(manifest, options, requireKnownIdentities: true);
+    /// <summary>Like CLI coverage, SDK coverage must establish every non-SYSTEM identity.</summary>
+    public static CoverageReport EvaluateForPermissionCheck(Manifest manifest, CoverageOptions options) => EvaluateCore(manifest, options);
 
-    private static CoverageReport Evaluate(Manifest manifest, CoverageOptions options, bool requireKnownIdentities)
+    private static CoverageReport EvaluateCore(Manifest manifest, CoverageOptions options)
     {
-        var notGoverned = new HashSet<string>(manifest.NotRoleGoverned ?? [], StringComparer.Ordinal);
+        var notGoverned = new HashSet<string>(manifest.TablesWithoutRoleMetadata ?? [], StringComparer.Ordinal);
         var principals = new Dictionary<string, RoleSet>(StringComparer.OrdinalIgnoreCase);
         foreach (var principal in options.Principals) principals[principal.Key] = principal.Value;
         var users = new Dictionary<string, RoleSet>(StringComparer.OrdinalIgnoreCase);
@@ -111,7 +111,7 @@ public static class CoverageEvaluator
             {
                 var identity = requirement.RunsAs with { Assumed = false };
                 var roles = IdentityOf(identity);
-                var result = Check(requirement, roles, notGoverned, options.Suppress, requireKnownIdentities);
+                var result = Check(requirement, roles, notGoverned, options.Suppress);
                 coverage.Add(requirement, result);
                 if (result.Status == CoverageStatus.Missing) AddMissing(missing, (requirement.Table, requirement.Privilege, identity, roles.Roles!.Key), roles.Roles, id);
             }
@@ -197,13 +197,13 @@ public static class CoverageEvaluator
         found.In.Add(id);
     }
 
-    private static RequirementCoverage Check(Requirement requirement, IdentityRoles identity, HashSet<string> notGoverned, IReadOnlyList<Suppression> suppress, bool requireKnownIdentities)
+    private static RequirementCoverage Check(Requirement requirement, IdentityRoles identity, HashSet<string> notGoverned, IReadOnlyList<Suppression> suppress)
     {
         if (requirement.RunsAs.Kind == RunsAsKind.System) return new RequirementCoverage(CoverageStatus.System);
-        if (requireKnownIdentities && identity.Roles is null) return new RequirementCoverage(CoverageStatus.NotChecked);
-        // No role can grant a table no role governs, whatever roles the identity has
-        if (notGoverned.Contains(requirement.Table)) return new RequirementCoverage(CoverageStatus.NotGoverned);
         if (identity.Roles is not { } roles) return new RequirementCoverage(CoverageStatus.NotChecked);
+        // Absence from downloaded roles is not evidence of a Dataverse security exemption.
+        if (notGoverned.Contains(requirement.Table)) return new RequirementCoverage(CoverageStatus.Unverifiable,
+            Reason: "table is absent from all supplied role metadata; its security exemption is not established");
         if (roles.Depth(requirement.Table, requirement.Privilege) is { } depth) return new RequirementCoverage(CoverageStatus.Granted, depth);
 
         return suppress.FirstOrDefault(s => s.Matches(requirement)) is { } suppression
@@ -215,8 +215,11 @@ public static class CoverageEvaluator
     {
         if (requirement.RunsAs.Kind == RunsAsKind.System) return new RequirementCoverage(CoverageStatus.System);
         if (identity.Roles is not { } roles) return new RequirementCoverage(CoverageStatus.NotChecked);
-        if (!roles.KnowsGlobalPrivileges) return new RequirementCoverage(CoverageStatus.Unverifiable);
-        if (roles.GlobalDepth(requirement.Privilege) is { } depth) return new RequirementCoverage(CoverageStatus.Granted, depth);
+        var direct = string.Equals(requirement.Privilege, GlobalRequirement.ActOnBehalfOfAnotherUser, StringComparison.OrdinalIgnoreCase);
+        if (!(direct ? roles.KnowsDirectGlobalPrivileges : roles.KnowsGlobalPrivileges))
+            return new RequirementCoverage(CoverageStatus.Unverifiable, Reason: "global privileges are unavailable in role metadata");
+        if ((direct ? roles.DirectGlobalDepth(requirement.Privilege) : roles.GlobalDepth(requirement.Privilege)) is { } depth)
+            return new RequirementCoverage(CoverageStatus.Granted, depth);
 
         return suppress.FirstOrDefault(s => s.Matches(requirement)) is { } suppression
             ? new RequirementCoverage(CoverageStatus.Suppressed, Reason: suppression.Reason)

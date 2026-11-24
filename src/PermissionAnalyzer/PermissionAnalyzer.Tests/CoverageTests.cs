@@ -186,16 +186,16 @@ public class CoverageTests
         var withoutCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Integration], "--role") });
         var actForUser = manifest.Entry("function:Test/ActForUser");
 
-        Assert.Equal(["contact:Delete as ImpersonatedCaller: NotChecked"], Results(withoutCallerRoles, actForUser));
+        Assert.Equal(["contact:Delete as ApplicationUser: Granted Organization", "contact:Delete as ImpersonatedCaller: NotChecked"], Results(withoutCallerRoles, actForUser));
         Assert.StartsWith("not checked: acts for the user in CallerId", withoutCallerRoles.For(actForUser).Identities.Single(i => i.RunsAs.Kind == RunsAsKind.ImpersonatedCaller).Note);
 
-        // The application user's roles don't count: the call runs with the impersonated user's privileges
+        // Both identities must grant the operation's privileges.
         var withCallerRoles = CoverageEvaluator.Evaluate(manifest, new CoverageOptions
         {
             Roles = RoleSet.Combine([Integration], "--role"),
             CallerRoles = RoleSet.Combine([Salesperson], "--caller-role"),
         });
-        Assert.Equal(["contact:Delete as ImpersonatedCaller: Missing"], Results(withCallerRoles, actForUser));
+        Assert.Equal(["contact:Delete as ApplicationUser: Granted Organization", "contact:Delete as ImpersonatedCaller: Missing"], Results(withCallerRoles, actForUser));
 
         // The roles come from metadata without global privileges, so the privilege to impersonate can't be checked
         Assert.Equal(["prvActOnBehalfOfAnotherUser as ApplicationUser: Unverifiable"], GlobalResults(withCallerRoles, actForUser));
@@ -315,7 +315,7 @@ public class CoverageTests
     }
 
     [Fact]
-    public void TablesNoRoleGovernsAreCovered()
+    public void TablesAbsentFromRoleMetadataAreUnverifiable()
     {
         var manifest = Analyze.Code("""
             public class P : Plugin
@@ -325,12 +325,12 @@ public class CoverageTests
             """, Governed);
         var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions { Roles = RoleSet.Combine([Salesperson], "--role") });
 
-        Assert.Equal(["ctx_log:Create as Caller: NotGoverned"], Results(report, Assert.Single(manifest.EntryPoints)));
-        Assert.True(report.Summary.Passed(strict: true));
+        Assert.Equal(["ctx_log:Create as Caller: Unverifiable"], Results(report, Assert.Single(manifest.EntryPoints)));
+        Assert.False(report.Summary.Passed(strict: true));
     }
 
     [Fact]
-    public void TablesNoRoleGovernsAreCoveredForIdentitiesWithoutRoles()
+    public void UnknownIdentitiesAreNotCheckedEvenWithoutTableMetadata()
     {
         var manifest = Analyze.Code("""
             public class P : Plugin
@@ -340,8 +340,8 @@ public class CoverageTests
             """, Governed);
         var report = CoverageEvaluator.Evaluate(manifest, new CoverageOptions());
 
-        Assert.Equal(["ctx_log:Create as Caller: NotGoverned"], Results(report, Assert.Single(manifest.EntryPoints)));
-        Assert.Equal(0, report.Summary.NotChecked);
+        Assert.Equal(["ctx_log:Create as Caller: NotChecked"], Results(report, Assert.Single(manifest.EntryPoints)));
+        Assert.Equal(1, report.Summary.NotChecked);
     }
 
     [Fact]
@@ -499,7 +499,7 @@ public class CoverageTests
         new TextManifestWriter().Write(manifest, report, output);
         var line = Assert.Single(output.ToString().Split('\n'), l => l.StartsWith("Not checked: ", StringComparison.Ordinal));
 
-        Assert.EndsWith("1 privilege not tied to a table (the role metadata predates them; regenerate it)", line);
+        Assert.EndsWith("1 privilege unverifiable (role metadata is incomplete; regenerate it)", line);
     }
 
     [Fact]
@@ -547,7 +547,7 @@ public class CoverageTests
         Assert.Matches(@"\n  · prvActOnBehalfOfAnotherUser +global +ApplicationUser +unverifiable +", text);
         Assert.Contains("  roles for ImpersonatedCaller: not checked: acts for the user in CallerId", text);
         Assert.Contains("Privileges not tied to a table: prvActOnBehalfOfAnotherUser\n", text);
-        Assert.Contains("1 privilege not tied to a table (the role metadata predates them; regenerate it)", text);
+        Assert.Contains("1 privilege unverifiable (role metadata is incomplete; regenerate it)", text);
     }
 
     [Fact]

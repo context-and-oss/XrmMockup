@@ -646,9 +646,8 @@ internal sealed class TableResolver(
     /// as <see cref="TableShape.LookupTarget"/>: the tables the lookups refer to, which need AppendTo.
     /// </summary>
     /// <remarks>
-    /// Only lookups set in the code are seen, and an entity from elsewhere, such as one that is retrieved, adds
-    /// nothing for those it already holds. Nothing is reported for such an entity here: its table is reported where
-    /// that can't be resolved. <c>ownerid</c> is left out, as XrmMockup leaves it out.
+    /// Lookups set in code are followed. Unknown contents, including retrieved entities, remain unresolved:
+    /// writing such a record may require Append and AppendTo even when its table is known. <c>ownerid</c> is left out, as XrmMockup leaves it out.
     /// </remarks>
     public TableResolution Lookups(IOperation? operation, TableShape shape)
     {
@@ -664,6 +663,9 @@ internal sealed class TableResolver(
 
             case IObjectCreationOperation creation when IsEntityLike(creation.Type):
                 return Set(creation, creation.Initializer is { } members ? Inside(members).SelectMany(node => SetLookup(node, IsImplicitReceiver)) : [], shape);
+
+            case ITypeParameterObjectCreationOperation creation:
+                return Set(creation, creation.Initializer is { } genericMembers ? Inside(genericMembers).SelectMany(node => SetLookup(node, IsImplicitReceiver)) : [], shape);
 
             // A collection of entities, such as EntityCollection or List<Entity>
             case IObjectCreationOperation creation:
@@ -681,7 +683,7 @@ internal sealed class TableResolver(
             case ILocalReferenceOperation local:
             {
                 var result = FromLocal(local, value => Lookups(value, shape), collection => Lookups(collection, shape),
-                    (node, symbol) => Added(node, symbol, IsEntityOrRecords, value => Lookups(value, shape)), silent: true);
+                    (node, symbol) => Added(node, symbol, IsEntityOrRecords, value => Lookups(value, shape)));
 
                 // Lookups set through the local, once it is no longer being resolved, so its table can be
                 return IsEntityLike(local.Type)
@@ -695,20 +697,20 @@ internal sealed class TableResolver(
             case IParameterReferenceOperation parameter:
             {
                 // The caller's lookups, and those set on the parameter here
-                var result = Unknown(op, "entity", shape, silent: true);
+                var result = Unknown(op, "lookup contents", shape);
                 return IsEntityLike(parameter.Type)
                     ? result.Union(Set(parameter, Root(parameter).DescendantsAndSelf().SelectMany(node => SetLookup(node, instance => IsParameter(instance, parameter.Parameter))), shape))
                     : result;
             }
 
             case IInvocationOperation invocation when IsSystemCall(invocation):
-                return Passthrough(invocation, IsEntityOrRecords, value => Lookups(value, shape), value => Lookups(value, shape)) ?? TableResolution.Empty;
+                return Passthrough(invocation, IsEntityOrRecords, value => Lookups(value, shape), value => Lookups(value, shape)) ?? Unknown(op, "lookup contents", shape);
 
             case { } when Branches(op) is { } branches:
                 return Union(branches, v => Lookups(v, shape));
 
             default:
-                return Unknown(op, "entity", shape, silent: true);
+                return Unknown(op, "lookup contents", shape);
         }
     }
 

@@ -87,7 +87,7 @@ public class LookupTests
     }
 
     [Fact]
-    public void RetrievedEntityAddsNoLookups()
+    public void RetrievedLookupContentsRemainUnresolved()
     {
         var method = Analyze.Method("""
             class C
@@ -102,11 +102,12 @@ public class LookupTests
             """);
 
         Assert.Equal(["account:Read", "account:Write"], method.Requirements());
-        Assert.Empty(method.Unresolved);
+        Assert.Contains(method.Unresolved, u => u.Privileges.Contains(Privilege.Append));
+        Assert.Contains(method.Unresolved, u => u.Privileges.Contains(Privilege.AppendTo));
     }
 
     [Fact]
-    public void DeconstructedEntityAddsOnlyTheLookupsSetOnIt()
+    public void DeconstructedEntityKeepsKnownLookupsAndReportsUnknownContents()
     {
         var method = Analyze.Method("""
             class C
@@ -126,7 +127,7 @@ public class LookupTests
             """);
 
         Assert.Equal(["account:Write", "account:AppendTo", "contact:Write", "contact:Append"], method.Requirements());
-        Assert.Empty(method.Unresolved);
+        Assert.Contains(method.Unresolved, u => u.Reason.Contains("deconstruction") && u.Privileges.Contains(Privilege.AppendTo));
     }
 
     [Fact]

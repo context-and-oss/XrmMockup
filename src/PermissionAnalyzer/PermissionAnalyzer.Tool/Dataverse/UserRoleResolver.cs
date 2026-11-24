@@ -44,7 +44,7 @@ internal sealed class UserRoleResolver(IOrganizationService service)
             .ToList();
         return RoleSet.Combine(assignments.Select(a => a.Role), "Dataverse",
             new LiveRoleSource(username, user.Id, environmentUrl, readAt.ToUniversalTime(), sources,
-                option == CliOptions.CallerUser.Primary));
+                option == CliOptions.CallerUser.Primary), assignments.Where(a => a.Source.TeamId is null).Select(a => a.Role));
     }
 
     private Entity FindUser(string username, CancellationToken cancellationToken)

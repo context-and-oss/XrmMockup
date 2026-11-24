@@ -35,9 +35,23 @@ public sealed class RoleSet
 
     internal LiveRoleSource? LiveSource { get; private set; }
 
-    internal static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, LiveRoleSource source)
+    private RoleSet? _directRoles;
+
+    /// <summary>Delegation cannot be inherited from teams. Explicit role lists represent direct assignments.</summary>
+    public PrivilegeDepth? DirectGlobalDepth(string privilege) => (_directRoles ?? this).GlobalDepth(privilege);
+    public bool KnowsDirectGlobalPrivileges => (_directRoles ?? this).KnowsGlobalPrivileges;
+
+    /// <summary>Combines all assignments while retaining the directly assigned roles for delegation checks.</summary>
+    public static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, IEnumerable<RoleDefinition> directRoles)
     {
         var set = Combine(roles, origin);
+        set._directRoles = Combine(directRoles, origin);
+        return set;
+    }
+
+    internal static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, LiveRoleSource source, IEnumerable<RoleDefinition> directRoles)
+    {
+        var set = Combine(roles, origin, directRoles);
         set.LiveSource = source;
         return set;
     }

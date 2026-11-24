@@ -50,9 +50,12 @@ internal static class AnalysisRunner
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
-            await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory, cancellationToken);
+            var projects = new List<LoadedProject>();
+            var incomplete = await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory,
+                cancellationToken, collectIncompleteSource: true, projects: projects);
 
-            var manifest = builder.Build(roles?.SelectMany(r => r.Privileges.Keys), request.Scope);
+            var manifest = builder.Build(request.NoRoles ? null : roles?.SelectMany(r => r.Privileges.Keys), request.Scope)
+                .WithDiagnostics(incomplete);
             if (request.Scope is not null && manifest.EntryPoints.Count == 0)
             {
                 throw new ToolException($"No entry point matches {request.Scope}");
@@ -87,7 +90,9 @@ internal static class AnalysisRunner
                 }
             }
 
-            var writer = ManifestWriters.Create(request.Format, request.Report, root, version);
+            var writer = request.Format == ReportFormat.Json
+                ? new JsonManifestWriter(request.Report.Filter, AnalysisProvenance.Create(settings, configuration.Permissions, projects, request.NoRoles))
+                : ManifestWriters.Create(request.Format, request.Report, root, version);
             if (request.Output is null)
             {
                 writer.Write(manifest, coverage, Console.Out);

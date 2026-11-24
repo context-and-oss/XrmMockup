@@ -140,6 +140,8 @@ public record RuleConfiguration
     /// </summary>
     public string? Assumption { get; init; }
 
+    public string[] Unresolved { get; init; } = [];
+
     /// <summary>
     /// Whether XrmMockup makes the checks. <c>true</c> when not set.
     /// </summary>

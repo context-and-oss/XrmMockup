@@ -67,6 +67,7 @@ internal static class RuleApplication
         {
             foreach (var global in rule.GlobalPrivileges) result.Add(TableResolution.Global(global, message));
             foreach (var assumption in rule.Assumptions) result.Add(TableResolution.Assumed(assumption));
+            foreach (var unresolved in rule.Unresolved) result.Add(TableResolution.Unresolved(unresolved));
             result.Add(members.Bypass(message, out var bypass));
             result.Add(Fired(message, rule, members, bypass));
         }

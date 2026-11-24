@@ -182,7 +182,7 @@ public class ExtractionTests
             class C { void M(IOrganizationService service, Entity target) => service.Update(target); }
             """);
 
-        var unresolved = Assert.Single(method.Unresolved);
+        var unresolved = Assert.Single(method.Unresolved, u => u.Privileges.Contains(Privilege.Write));
         Assert.Equal("Update", unresolved.Operation);
         Assert.Equal([Privilege.Write], unresolved.Privileges);
         Assert.Equal("entity comes from parameter 'target'", unresolved.Reason);
@@ -199,7 +199,7 @@ public class ExtractionTests
             }
             """);
 
-        Assert.Equal("entity comes from inputs[\"Target\"]", Assert.Single(method.Unresolved).Reason);
+        Assert.Equal("entity comes from inputs[\"Target\"]", Assert.Single(method.Unresolved, u => u.Privileges.Contains(Privilege.Write)).Reason);
     }
 
     [Fact]
