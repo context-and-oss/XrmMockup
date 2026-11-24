@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
 * Add: Pass an actual user to verify their access (#390)
+* Add: Add reusable permission analysis snapshots (#392)
 * Fix: Fix permission analyzer impersonation coverage and incomplete-analysis reporting (#391)
 <!-- END GENERATED RELEASE NOTES -->
 
