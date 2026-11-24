@@ -1,4 +1,5 @@
 using System.Reflection;
+using XrmMockup.PermissionAnalyzer.Tool.Dataverse;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using XrmMockup.PermissionAnalyzer.Core.Analysis;
@@ -36,10 +37,11 @@ internal static class AnalysisRunner
             var settings = AnalysisSettings.Resolve(request.Solution, request.Metadata, configuration, request.Exclude, request.PluginSolutions);
 
             var roles = LoadRoles(settings.MetadataDirectory, logger);
+            var liveRoles = await DataverseRoleLookup.ResolveAsync(request, configuration, roles, loggerFactory, cancellationToken);
             // Role names are checked before the slow part, so a typo fails fast
             var coverageOptions = request.NoRoles
                 ? null
-                : CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, request.FailOnMissing);
+                : CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, request.FailOnMissing, liveRoles.User, liveRoles.Caller);
 
             var root = Path.GetDirectoryName(settings.Target)!;
             var metadataFile = settings.MetadataDirectory is { } fileDirectory ? LoadMetadataFile(fileDirectory, logger) : null;

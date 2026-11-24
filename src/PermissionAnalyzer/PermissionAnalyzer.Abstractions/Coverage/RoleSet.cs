@@ -33,6 +33,15 @@ public sealed class RoleSet
     /// </summary>
     public string Origin { get; }
 
+    internal LiveRoleSource? LiveSource { get; private set; }
+
+    internal static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, LiveRoleSource source)
+    {
+        var set = Combine(roles, origin);
+        set.LiveSource = source;
+        return set;
+    }
+
     public static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin)
     {
         var names = new SortedSet<string>(StringComparer.Ordinal);
@@ -83,5 +92,12 @@ public sealed class RoleSet
     public PrivilegeDepth? GlobalDepth(string privilege) =>
         _globalPrivileges is not null && _globalPrivileges.TryGetValue(privilege, out var depth) ? depth : null;
 
-    public override string ToString() => $"{string.Join(", ", Names)} ({Origin})";
+    // Group by the live identity independently of its concise display label.
+    internal string Key => LiveSource is { } source
+        ? $"{string.Join(", ", Names)}; {source.EnvironmentUrl}; {source.UserId:D}; {source.IsCaller}"
+        : ToString();
+
+    public override string ToString() => LiveSource is not null
+        ? string.Join(", ", Names)
+        : $"{string.Join(", ", Names)} ({Origin})";
 }

@@ -681,9 +681,8 @@ conventions:
   file; command-line paths are relative to the current directory.
 - Without `--solution` or `Solution`, the tool uses the single `*.sln`/`*.slnx` in
   the current directory.
-- The tool makes no Dataverse connection (a future `--user` would be the exception,
-  §10), so it ignores `DataverseUrl` and
-  `DataverseCredentialType`.
+- The tool stays offline unless `--user` or `--caller-user` is specified. These options reuse
+  the metadata tool's `DataverseUrl` and `DataverseCredentialType` settings.
 
 The section holds what static analysis can't know:
 
@@ -971,7 +970,7 @@ it is built:
   editor's column order like `Missing privileges`, plus JSON; Markdown and SARIF probably don't
   need it.
 
- `--user <username>` (e.g.
+**Implemented: live user role lookup.** `--user <username>` (e.g.
 `--user jane@contoso.com`) looks the user up in Dataverse and checks against the roles they
 actually hold, instead of a hand-written `--role` list:
 
@@ -985,20 +984,20 @@ actually hold, instead of a hand-written `--role` list:
   different id. A role that isn't in `Metadata/` is an error that suggests regenerating the
   metadata, so the check never silently runs against fewer roles than the user has.
 - The output names each role and where it comes from (direct, or which team).
-- The same lookup serves impersonated calls: a `--caller-user <username>` option would give
+- The same lookup serves impersonated calls: `--caller-user <username>` gives
   the roles of the end user that app code acts for through `CallerId`, instead of a
   hand-written `--caller-role` list. The impersonating identity still needs
   `prvActOnBehalfOfAnotherUser` (§6.2).
 
-Things to settle before building it:
+Implementation boundaries and remaining extensions:
 
-- It is the first feature that connects to Dataverse. It would reuse the metadata tool's
+- It is the first feature that connects to Dataverse. It reuses the metadata tool's
   connection settings (`DataverseUrl`, `DataverseCredentialType`, `--credential-type`).
-  Only a run with `--user` connects; every other run stays offline (goal in §2, §6.3).
-- The result depends on live data, so it is not deterministic over time. The output should
-  record the environment URL, the user and when the roles were read. A `--save-roles` option
+  Only a run with `--user` or `--caller-user` connects; every other run stays offline (goal in §2, §6.3).
+- The result depends on live data, so it is not deterministic over time. The output records
+  the environment URL, the user and when the roles were read. A `--save-roles` option
   could write the resolved role list to a file, so a later run can reproduce the check
-  without connecting.
+  without connecting (saving roles remains a future extension).
 - Whether to use the user's business unit, and the business units of the teams, once depth
   matters (see minimum required depth above).
 - The signed-in identity needs read access to `systemuser`, `team` and `role`.

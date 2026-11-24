@@ -45,6 +45,14 @@ internal sealed class TextManifestWriter(ReportOptions? options = null) : IManif
 
         public void Write()
         {
+            if (LiveRoleSources.Sets(manifest, coverage) is { } liveRoles)
+            {
+                writer.Write("Live security roles:\n");
+                foreach (var roles in liveRoles)
+                    foreach (var line in LiveRoleSources.Lines(roles, _detail)) writer.Write($"  {line}\n");
+                writer.Write('\n');
+            }
+
             if (_detail <= Detail.Compact) Needs(manifest, coverage, _filter, _detail == Detail.Compact, writer);
             else Sections();
 

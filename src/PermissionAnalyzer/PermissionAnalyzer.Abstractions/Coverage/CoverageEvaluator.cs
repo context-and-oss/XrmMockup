@@ -113,7 +113,7 @@ public static class CoverageEvaluator
                 var roles = IdentityOf(identity);
                 var result = Check(requirement, roles, notGoverned, options.Suppress, requireKnownIdentities);
                 coverage.Add(requirement, result);
-                if (result.Status == CoverageStatus.Missing) AddMissing(missing, (requirement.Table, requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
+                if (result.Status == CoverageStatus.Missing) AddMissing(missing, (requirement.Table, requirement.Privilege, identity, roles.Roles!.Key), roles.Roles, id);
             }
 
             foreach (var requirement in manifestSection.GlobalRequirements)
@@ -122,7 +122,7 @@ public static class CoverageEvaluator
                 var roles = IdentityOf(identity);
                 var result = Check(requirement, roles, options.Suppress);
                 globalCoverage.Add(requirement, result);
-                if (result.Status == CoverageStatus.Missing) AddMissing(missingGlobal, (requirement.Privilege, identity, roles.Roles!.ToString()), roles.Roles, id);
+                if (result.Status == CoverageStatus.Missing) AddMissing(missingGlobal, (requirement.Privilege, identity, roles.Roles!.Key), roles.Roles, id);
             }
 
             var needsRole = manifestSection.Unresolved.Where(u => u.RunsAs.Kind != RunsAsKind.System).ToList();

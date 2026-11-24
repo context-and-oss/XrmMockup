@@ -97,6 +97,33 @@ internal static class CliOptions
         public const string Description = "Security role of the caller and the application user, by name. Repeatable; roles combine. Replaces XrmMockup:Permissions:Principals";
     }
 
+    internal static class User
+    {
+        public const string Primary = "--user";
+        public const string Description = "Check caller and application-user privileges against a Dataverse user's direct and team roles, by UPN or email";
+    }
+
+    internal static class CallerUser
+    {
+        public const string Primary = "--caller-user";
+        public const string Description = "Dataverse user that app code impersonates through CallerId, by UPN or email";
+    }
+
+    internal static class DataverseUrl
+    {
+        public const string Primary = "--dataverse-url";
+        public const string Alias = "-u";
+        public const string Description = "Dataverse environment URL; overrides DataverseUrl in configuration";
+    }
+
+    internal static class CredentialType
+    {
+        public const string Primary = "--credential-type";
+        public const string Alias = "-t";
+        public const string Description = "Azure credential: browser (default), devicecode or azcli";
+        public static readonly string[] AllowedValues = ["browser", "devicecode", "azcli"];
+    }
+
     internal static class CallerRole
     {
         public const string Primary = "--caller-role";

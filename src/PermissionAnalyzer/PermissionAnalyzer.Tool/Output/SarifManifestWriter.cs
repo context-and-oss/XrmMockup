@@ -72,7 +72,8 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
         var document = new SarifDocument(
             "https://json.schemastore.org/sarif-2.1.0.json",
             "2.1.0",
-            [new RunDocument(new ToolDocument(new DriverDocument("xrmmockup-permissions", version, "https://github.com/delegateas/XrmMockup", Rules)), results)]);
+            [new RunDocument(new ToolDocument(new DriverDocument("xrmmockup-permissions", version, "https://github.com/delegateas/XrmMockup", Rules)), results,
+                LiveRoleSources.Of(manifest, coverage) is { } liveRoles ? new RunProperties(liveRoles) : null)]);
 
         writer.Write(JsonSerializer.Serialize(document, Options));
         writer.Write('\n');
@@ -212,7 +213,9 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
         string Version,
         IReadOnlyList<RunDocument> Runs);
 
-    private sealed record RunDocument(ToolDocument Tool, IReadOnlyList<ResultDocument> Results);
+    private sealed record RunDocument(ToolDocument Tool, IReadOnlyList<ResultDocument> Results, RunProperties? Properties);
+
+    private sealed record RunProperties(IReadOnlyList<string> LiveRoles);
 
     private sealed record ToolDocument(DriverDocument Driver);
 

@@ -20,9 +20,11 @@ internal static class CoverageSetup
         IReadOnlyList<string> roleNames,
         IReadOnlyList<string> callerRoleNames,
         PermissionsConfiguration configuration,
-        bool requireRoles)
+        bool requireRoles,
+        RoleSet? userRoles = null,
+        RoleSet? callerUserRoles = null)
     {
-        var given = roleNames.Count > 0 || callerRoleNames.Count > 0;
+        var given = roleNames.Count > 0 || callerRoleNames.Count > 0 || userRoles is not null || callerUserRoles is not null;
         if (!given && configuration.Principals.Count == 0 && configuration.Users.Count == 0)
         {
             if (!requireRoles) return null;
@@ -41,10 +43,10 @@ internal static class CoverageSetup
         var catalog = new RoleCatalog(roles);
         return new CoverageOptions
         {
-            Roles = roleNames.Count > 0 ? Resolve(catalog, roleNames, CliOptions.Role.Primary, CliOptions.Role.Primary) : null,
-            CallerRoles = callerRoleNames.Count > 0 ? Resolve(catalog, callerRoleNames, CliOptions.CallerRole.Primary, CliOptions.CallerRole.Primary) : null,
-            // --role replaces the principals, so a stale mapping among them doesn't stop the run
-            Principals = roleNames.Count > 0 ? new Dictionary<string, RoleSet>(StringComparer.OrdinalIgnoreCase) : configuration.Principals
+            Roles = userRoles ?? (roleNames.Count > 0 ? Resolve(catalog, roleNames, CliOptions.Role.Primary, CliOptions.Role.Primary) : null),
+            CallerRoles = callerUserRoles ?? (callerRoleNames.Count > 0 ? Resolve(catalog, callerRoleNames, CliOptions.CallerRole.Primary, CliOptions.CallerRole.Primary) : null),
+            // --role and --user replace the principals, so a stale mapping among them doesn't stop the run
+            Principals = roleNames.Count > 0 || userRoles is not null ? new Dictionary<string, RoleSet>(StringComparer.OrdinalIgnoreCase) : configuration.Principals
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
                 .ToDictionary(
                     p => p.Key,
