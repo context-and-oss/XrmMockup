@@ -12,11 +12,23 @@ internal static class CliOptions
         public const string Description = "Solution (.sln or .slnx) or project (.csproj) to analyze. A project is analyzed with the projects it references. Default: XrmMockup:Permissions:Solution, else the single solution in the current directory";
     }
 
+    internal static class Snapshot
+    {
+        public const string Primary = "--snapshot";
+        public const string Description = "Query a saved analysis snapshot without loading source. --metadata replaces only its role catalog";
+    }
+
+    internal static class SaveSnapshot
+    {
+        public const string Primary = "--save-snapshot";
+        public const string Description = "Save the complete extracted graph and analysis metadata for later queries. Requirements-only by default; explicit role/user or failure options enable coverage";
+    }
+
     internal static class Metadata
     {
         public const string Primary = "--metadata";
         public const string Alias = "-m";
-        public const string Description = "XrmMockup metadata folder. Default: XrmMockup:Permissions:MetadataDirectory, else XrmMockup:Metadata:OutputDirectory, else ./Metadata next to the configuration when it exists";
+        public const string Description = "XrmMockup metadata folder. Default: XrmMockup:Permissions:MetadataDirectory, else XrmMockup:Metadata:OutputDirectory, else ./Metadata next to the configuration when it exists. With --snapshot, reads only SecurityRoles and overrides the embedded role catalog";
     }
 
     internal static class Exclude

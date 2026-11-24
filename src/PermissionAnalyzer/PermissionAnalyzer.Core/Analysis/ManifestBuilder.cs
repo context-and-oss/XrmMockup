@@ -18,7 +18,7 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// <param name="lookups">
 /// The lookup columns in the metadata, which give the tables a lookup can refer to when the code doesn't say.
 /// </param>
-public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null, IEnumerable<LookupColumn>? lookups = null)
+public sealed partial class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null, IEnumerable<LookupColumn>? lookups = null)
 {
     /// <summary>Copies extracted source summaries, replacing check-time plugin and lookup metadata.
     /// The graph is read-only during Build. Loaded compilations and metadata-dependent summaries are reused;

@@ -109,11 +109,14 @@ internal sealed class RequestRules
     private readonly Dictionary<string, ExpandedRule> _expanded = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="rules">Rules that replace the built-in rule for their message, or add one.</param>
-    public RequestRules(IEnumerable<RequestRule>? rules = null)
+    public RequestRules(IEnumerable<RequestRule>? rules = null, IEnumerable<RequestRule>? builtIn = null)
     {
-        foreach (var rule in BuiltIn) _builtIn[rule.Message] = rule;
+        foreach (var rule in builtIn ?? BuiltIn) _builtIn[rule.Message] = rule;
         foreach (var rule in rules ?? []) _configured[rule.Message] = rule;
     }
+
+    internal IReadOnlyList<RequestRule> BuiltInDefinitions => _builtIn.Values.OrderBy(r => r.Message, StringComparer.Ordinal).ToList();
+    internal IReadOnlyList<RequestRule> CustomDefinitions => _configured.Values.OrderBy(r => r.Message, StringComparer.Ordinal).ToList();
 
     /// <summary>
     /// The message of a request type: <c>AssignRequest</c> is <c>Assign</c>. Only a type name has the suffix to

@@ -9,6 +9,7 @@ using XrmMockup.PermissionAnalyzer.Tool.Metadata;
 using XrmMockup.PermissionAnalyzer.Tool.Options;
 using XrmMockup.PermissionAnalyzer.Tool.Output;
 using XrmMockup.PermissionAnalyzer.Tool.Workspace;
+using XrmMockup.PermissionAnalyzer.Tool.Snapshots;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 
@@ -34,27 +35,59 @@ internal static class AnalysisRunner
         try
         {
             var configuration = ConfigReader.Read(request.Config);
-            var settings = AnalysisSettings.Resolve(request.Solution, request.Metadata, configuration, request.Exclude, request.PluginSolutions);
-
-            var roles = LoadRoles(settings.MetadataDirectory, logger);
+            var noRoles = request.RequirementsOnly;
+            // Snapshot replay must not resolve projects, metadata for extraction, or source files.
+            var snapshot = request.Snapshot is { } snapshotPath ? AnalysisSnapshot.Read(snapshotPath) : null;
+            var settings = snapshot is null
+                ? AnalysisSettings.Resolve(request.Solution, request.Metadata, configuration, request.Exclude, request.PluginSolutions)
+                : null;
+            var roles = snapshot is null ? LoadRoles(settings!.MetadataDirectory, logger)
+                : request.Metadata is { } roleDirectory ? LoadRoles(Path.GetFullPath(roleDirectory), logger)
+                : snapshot.RoleDefinitions();
             var liveRoles = await DataverseRoleLookup.ResolveAsync(request, configuration, roles, loggerFactory, cancellationToken);
-            // Role names are checked before the slow part, so a typo fails fast
-            var coverageOptions = request.NoRoles
+            // Role names are checked before the slow part, so a typo fails fast.
+            var coverageOptions = noRoles
                 ? null
                 : CoverageSetup.Create(roles, request.Roles, request.CallerRoles, configuration.Permissions, request.FailOnMissing, liveRoles.User, liveRoles.Caller);
 
-            var root = Path.GetDirectoryName(settings.Target)!;
-            var metadataFile = settings.MetadataDirectory is { } fileDirectory ? LoadMetadataFile(fileDirectory, logger) : null;
-            var builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), metadataFile?.Lookups);
-            if (settings.MetadataDirectory is { } metadataDirectory) AddMetadata(builder, metadataDirectory, metadataFile?.PluginSteps ?? [], logger);
+            var root = snapshot is null ? Path.GetDirectoryName(settings!.Target)! : Path.GetDirectoryName(Path.GetFullPath(request.Snapshot!))!;
+            ManifestBuilder builder;
+            IReadOnlyList<UnresolvedOperation> incomplete;
+            AnalysisProvenance? inputs;
+            if (snapshot is not null)
+            {
+                builder = ManifestBuilder.Restore(root, snapshot.Graph);
+                incomplete = snapshot.Diagnostics;
+                inputs = snapshot.Inputs;
+                logger.LogInformation("Loaded complete analysis snapshot from {Path}; analysis metadata and request rules are frozen", request.Snapshot);
+                if (configuration.Permissions.Rules.Length > 0)
+                    logger.LogWarning("Configured request rules are ignored during snapshot replay; recreate the snapshot to change analysis inputs");
+            }
+            else
+            {
+                var metadataFile = settings!.MetadataDirectory is { } fileDirectory ? LoadMetadataFile(fileDirectory, logger) : null;
+                builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), metadataFile?.Lookups);
+                if (settings.MetadataDirectory is { } metadataDirectory) AddMetadata(builder, metadataDirectory, metadataFile?.PluginSteps ?? [], logger);
+                builder.AddEntryMethods(configuration.Permissions.EntryPoints);
+                var projects = new List<LoadedProject>();
+                incomplete = await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory,
+                    cancellationToken, collectIncompleteSource: true, projects: projects);
+                inputs = request.Format == ReportFormat.Json
+                    ? AnalysisProvenance.Create(settings, configuration.Permissions, projects, noRoles) : null;
+                if (request.SaveSnapshot is { } savePath)
+                {
+                    // Capture before adding query-specific entry methods/operations or evaluating any scope.
+                    var artifact = AnalysisSnapshot.Create(builder,
+                        AnalysisProvenance.Create(settings, configuration.Permissions, projects, noRoles: true),
+                        incomplete, roles, version, SarifManifestWriter.RepositoryPath(root));
+                    await artifact.SaveAsync(savePath, cancellationToken);
+                    logger.LogInformation("Wrote complete analysis snapshot to {Path}", Path.GetFullPath(savePath));
+                }
+            }
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
 
-            var projects = new List<LoadedProject>();
-            var incomplete = await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory,
-                cancellationToken, collectIncompleteSource: true, projects: projects);
-
-            var manifest = builder.Build(request.NoRoles ? null : roles?.SelectMany(r => r.Privileges.Keys), request.Scope)
+            var manifest = builder.Build(noRoles ? null : roles?.SelectMany(r => r.Privileges.Keys), request.Scope)
                 .WithDiagnostics(incomplete);
             if (request.Scope is not null && manifest.EntryPoints.Count == 0)
             {
@@ -91,8 +124,10 @@ internal static class AnalysisRunner
             }
 
             var writer = request.Format == ReportFormat.Json
-                ? new JsonManifestWriter(request.Report.Filter, AnalysisProvenance.Create(settings, configuration.Permissions, projects, request.NoRoles))
-                : ManifestWriters.Create(request.Format, request.Report, root, version);
+                ? new JsonManifestWriter(request.Report.Filter, inputs)
+                : snapshot is not null && request.Format == ReportFormat.Sarif
+                    ? new SarifManifestWriter(request.Report.Filter, snapshot.SourceRoot, version)
+                    : ManifestWriters.Create(request.Format, request.Report, root, version);
             if (request.Output is null)
             {
                 writer.Write(manifest, coverage, Console.Out);
@@ -194,6 +229,7 @@ internal static class AnalysisRunner
             return null;
         }
 
+        if (!Directory.Exists(metadataDirectory)) throw new ToolException($"Metadata folder not found: {metadataDirectory}");
         var roles = RoleLoader.Load(metadataDirectory);
         if (roles.Count == 0)
         {

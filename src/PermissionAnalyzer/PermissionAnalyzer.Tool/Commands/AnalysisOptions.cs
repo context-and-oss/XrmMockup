@@ -11,6 +11,8 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Commands;
 internal sealed class AnalysisOptions
 {
     private readonly Option<string?> _solution = new(CliOptions.Solution.Primary, CliOptions.Solution.Alias) { Description = CliOptions.Solution.Description };
+    private readonly Option<string?> _snapshot = new(CliOptions.Snapshot.Primary) { Description = CliOptions.Snapshot.Description };
+    private readonly Option<string?> _saveSnapshot = new(CliOptions.SaveSnapshot.Primary) { Description = CliOptions.SaveSnapshot.Description };
     private readonly Option<string?> _metadata = new(CliOptions.Metadata.Primary, CliOptions.Metadata.Alias) { Description = CliOptions.Metadata.Description };
     private readonly Option<string[]> _exclude = new(CliOptions.Exclude.Primary, CliOptions.Exclude.Alias) { Description = CliOptions.Exclude.Description };
     private readonly Option<string[]> _pluginSolution = new(CliOptions.PluginSolution.Primary) { Description = CliOptions.PluginSolution.Description };
@@ -63,13 +65,34 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _user, _callerUser, _dataverseUrl, _credentialType, _noRoles, _failOnMissing, _strict })
+        foreach (var option in new Option[] { _solution, _snapshot, _saveSnapshot, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _user, _callerUser, _dataverseUrl, _credentialType, _noRoles, _failOnMissing, _strict })
         {
             command.Options.Add(option);
         }
 
         command.Validators.Add(result =>
         {
+            if (result.GetResult(_snapshot) is not null)
+            {
+                foreach (var sourceConflict in new Option[] { _solution, _exclude, _pluginSolution, _saveSnapshot }.Where(o => result.GetResult(o) is not null))
+                    result.AddError($"{CliOptions.Snapshot.Primary} can't be used with {sourceConflict.Name}; source inputs are frozen in the snapshot.");
+            }
+            foreach (var option in new[] { _snapshot, _saveSnapshot })
+                if (result.GetResult(option) is not null && string.IsNullOrWhiteSpace(result.GetValue(option)))
+                    result.AddError($"{option.Name} needs a file path.");
+            foreach (var option in new[] { _snapshot, _saveSnapshot })
+                if (result.GetValue(option) is { } artifact && !string.IsNullOrWhiteSpace(artifact) &&
+                    result.GetValue(_output) is { } output && !string.IsNullOrWhiteSpace(output))
+                {
+                    try
+                    {
+                        if (string.Equals(Path.GetFullPath(artifact), Path.GetFullPath(output),
+                            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                            result.AddError($"{CliOptions.Output.Primary} must not overwrite the snapshot file.");
+                    }
+                    catch (ArgumentException) { result.AddError("Invalid snapshot or report file path."); }
+                }
+
             var scopes = new Option[] { _plugin, _customApi, _function, _entry, _operation }.Count(o => result.GetResult(o) is not null);
             if (scopes > 1)
             {
@@ -154,7 +177,9 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_user),
             parseResult.GetValue(_callerUser),
             parseResult.GetValue(_dataverseUrl),
-            parseResult.GetValue(_credentialType));
+            parseResult.GetValue(_credentialType),
+            parseResult.GetValue(_snapshot),
+            parseResult.GetValue(_saveSnapshot));
     }
 
     /// <summary>
@@ -193,7 +218,15 @@ internal sealed record AnalysisRequest(
     string? User = null,
     string? CallerUser = null,
     string? DataverseUrl = null,
-    string? CredentialType = null);
+    string? CredentialType = null,
+    string? Snapshot = null,
+    string? SaveSnapshot = null)
+{
+    // Capture is analysis-first. Configured coverage must not require --no-roles just to save a graph.
+    // Explicit coverage/failure options still opt in, including configured roles with --strict.
+    public bool RequirementsOnly => NoRoles || SaveSnapshot is not null && Roles.Count == 0 && CallerRoles.Count == 0
+        && User is null && CallerUser is null && !FailOnMissing && !Strict;
+}
 
 /// <summary>
 /// The user operation of <c>--operation</c>, with the columns of <c>--attributes</c> when given.
