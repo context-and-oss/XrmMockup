@@ -9,6 +9,17 @@ public sealed class RoleDefinition(
     IReadOnlyDictionary<string, IReadOnlyDictionary<Privilege, PrivilegeDepth>> privileges,
     IReadOnlyDictionary<string, PrivilegeDepth>? globalPrivileges = null)
 {
+    public RoleDefinition(string name,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<Privilege, PrivilegeDepth>> privileges,
+        IReadOnlyDictionary<string, PrivilegeDepth>? globalPrivileges, Guid? roleId)
+        : this(name, privileges, globalPrivileges)
+    {
+        RoleId = roleId;
+    }
+
+    /// <summary>The root role id in Dataverse, when loaded from metadata.</summary>
+    public Guid? RoleId { get; }
+
     public string Name { get; } = name;
 
     /// <summary>

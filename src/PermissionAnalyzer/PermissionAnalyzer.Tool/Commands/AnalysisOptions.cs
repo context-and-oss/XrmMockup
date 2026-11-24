@@ -26,6 +26,10 @@ internal sealed class AnalysisOptions
     private readonly Option<string[]> _callerRole = new(CliOptions.CallerRole.Primary) { Description = CliOptions.CallerRole.Description };
     private readonly Option<bool> _noRoles = new(CliOptions.NoRoles.Primary) { Description = CliOptions.NoRoles.Description };
     private readonly Option<bool> _failOnMissing = new(CliOptions.FailOnMissing.Primary) { Description = CliOptions.FailOnMissing.Description };
+    private readonly Option<string> _user = new(CliOptions.User.Primary) { Description = CliOptions.User.Description };
+    private readonly Option<string> _callerUser = new(CliOptions.CallerUser.Primary) { Description = CliOptions.CallerUser.Description };
+    private readonly Option<string> _dataverseUrl = new(CliOptions.DataverseUrl.Primary, CliOptions.DataverseUrl.Alias) { Description = CliOptions.DataverseUrl.Description };
+    private readonly Option<string> _credentialType = new(CliOptions.CredentialType.Primary, CliOptions.CredentialType.Alias) { Description = CliOptions.CredentialType.Description };
     private readonly Option<bool> _strict = new(CliOptions.Strict.Primary) { Description = CliOptions.Strict.Description };
     private readonly Option<string[]> _table = new(CliOptions.Table.Primary) { Description = CliOptions.Table.Description };
     private readonly Option<string[]> _privilege = new(CliOptions.Privilege.Primary) { Description = CliOptions.Privilege.Description };
@@ -36,6 +40,7 @@ internal sealed class AnalysisOptions
 
     public AnalysisOptions()
     {
+        _credentialType.AcceptOnlyFromAmong(CliOptions.CredentialType.AllowedValues);
         _format = new Option<string>(CliOptions.Format.Primary, CliOptions.Format.Alias)
         {
             Description = CliOptions.Format.Description,
@@ -58,7 +63,7 @@ internal sealed class AnalysisOptions
     /// </summary>
     public void AddTo(Command command)
     {
-        foreach (var option in new Option[] { _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _noRoles, _failOnMissing, _strict })
+        foreach (var option in new Option[] { _solution, _metadata, _exclude, _pluginSolution, _config, _format, _output, _detail, _table, _privilege, _runsAs, _basis, _plugin, _customApi, _function, _entry, _operation, _attributes, _role, _callerRole, _user, _callerUser, _dataverseUrl, _credentialType, _noRoles, _failOnMissing, _strict })
         {
             command.Options.Add(option);
         }
@@ -79,10 +84,21 @@ internal sealed class AnalysisOptions
             {
                 result.AddError($"{CliOptions.Attributes.Primary} needs {CliOptions.Operation.Primary}.");
             }
-            if (result.GetValue(_noRoles) && new Option[] { _role, _callerRole, _failOnMissing, _strict }.FirstOrDefault(o => result.GetResult(o) is not null) is { } conflict)
+            if (result.GetValue(_noRoles) && new Option[] { _role, _callerRole, _user, _callerUser, _failOnMissing, _strict }.FirstOrDefault(o => result.GetResult(o) is not null) is { } conflict)
             {
                 result.AddError($"{CliOptions.NoRoles.Primary} can't be used with {conflict.Name}, which needs roles.");
             }
+
+            if (result.GetResult(_user) is not null && result.GetResult(_role) is not null)
+                result.AddError($"{CliOptions.User.Primary} can't be used with {CliOptions.Role.Primary}.");
+            if (result.GetResult(_callerUser) is not null && result.GetResult(_callerRole) is not null)
+                result.AddError($"{CliOptions.CallerUser.Primary} can't be used with {CliOptions.CallerRole.Primary}.");
+            foreach (var option in new[] { _user, _callerUser })
+                if (result.GetResult(option) is not null && string.IsNullOrWhiteSpace(result.GetValue(option)))
+                    result.AddError($"{option.Name} needs a UPN or email.");
+            if (result.GetResult(_user) is null && result.GetResult(_callerUser) is null &&
+                new Option[] { _dataverseUrl, _credentialType }.FirstOrDefault(o => result.GetResult(o) is not null) is { } connectionOption)
+                result.AddError($"{connectionOption.Name} needs {CliOptions.User.Primary} or {CliOptions.CallerUser.Primary}.");
 
             foreach (var name in Values(result.GetValue(_runsAs)).Where(n => ParseRunsAs(n) is null))
             {
@@ -134,7 +150,11 @@ internal sealed class AnalysisOptions
                     Values(parseResult.GetValue(_table)),
                     Values(parseResult.GetValue(_privilege)),
                     Values(parseResult.GetValue(_runsAs)).Select(n => ParseRunsAs(n)!.Value).Distinct().ToList(),
-                    Values(parseResult.GetValue(_basis)).Select(n => BasisNames.Parse(n)!.Value).Distinct().ToList())));
+                    Values(parseResult.GetValue(_basis)).Select(n => BasisNames.Parse(n)!.Value).Distinct().ToList())),
+            parseResult.GetValue(_user),
+            parseResult.GetValue(_callerUser),
+            parseResult.GetValue(_dataverseUrl),
+            parseResult.GetValue(_credentialType));
     }
 
     /// <summary>
@@ -169,7 +189,11 @@ internal sealed record AnalysisRequest(
     bool NoRoles,
     bool FailOnMissing,
     bool Strict,
-    ReportOptions Report);
+    ReportOptions Report,
+    string? User = null,
+    string? CallerUser = null,
+    string? DataverseUrl = null,
+    string? CredentialType = null);
 
 /// <summary>
 /// The user operation of <c>--operation</c>, with the columns of <c>--attributes</c> when given.

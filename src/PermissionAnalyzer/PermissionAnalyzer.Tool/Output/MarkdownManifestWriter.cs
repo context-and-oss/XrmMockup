@@ -30,6 +30,13 @@ internal sealed partial class MarkdownManifestWriter(ReportFilter? filter = null
             if (ReportText.NotChecked(coverage.Summary) is { } notChecked) writer.Write($"> [!WARNING]\n> {Text(notChecked)}\n\n");
         }
 
+        if (LiveRoleSources.Of(manifest, coverage) is { } liveRoles)
+        {
+            writer.Write("#### Live security roles\n\n");
+            foreach (var roles in liveRoles) writer.Write($"- {Text(roles)}\n");
+            writer.Write('\n');
+        }
+
         foreach (var block in RoleChanges.Of(manifest, coverage, _filter))
         {
             writer.Write($"#### {Text(block.Heading)}\n\n");

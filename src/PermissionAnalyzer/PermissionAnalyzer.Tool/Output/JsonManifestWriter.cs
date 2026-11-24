@@ -69,7 +69,8 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
                 .ToList(),
             coverage?.Summary is { } summary
                 ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.UnresolvedWorkflow, summary.Unverifiable, summary.Truncated, summary.Incomplete)
-                : null);
+                : null,
+            LiveRoleSources.Of(manifest, coverage));
 
         writer.Write(JsonSerializer.Serialize(document, Options));
         writer.Write('\n');
@@ -120,7 +121,8 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
         IReadOnlyList<MethodDocument> Unreached,
         IReadOnlyList<string>? NotRoleGoverned,
         IReadOnlyList<MissingDocument>? Missing,
-        ResultDocument? Result);
+        ResultDocument? Result,
+        IReadOnlyList<string>? LiveRoles);
 
     private sealed record MissingDocument(
         string? Table,

@@ -114,6 +114,10 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 | `--attributes` | | The columns the `--operation` sets, such as `name,statecode`. Comma-separated or repeatable |
 | `--role` | `-r` | Check the requirements against these roles (see [Checking against roles](#checking-against-roles)). Repeatable; roles combine. Replaces `Principals` |
 | `--caller-role` | | Roles of the user that app code acts for through `CallerId`. Repeatable |
+| `--user` | | Look up a Dataverse user by UPN or email and check against their direct and team roles. Replaces `--role` and `Principals` |
+| `--caller-user` | | Look up the Dataverse user app code impersonates through `CallerId`, instead of `--caller-role` |
+| `--dataverse-url` | `-u` | Environment URL for live user lookup; overrides the root `DataverseUrl` setting |
+| `--credential-type` | `-t` | Authentication for live user lookup: `browser` (default), `devicecode` or `azcli`; overrides `DataverseCredentialType` |
 | `--no-roles` | | Only list what the code needs, without checking it against `Principals` and `Users` in `appsettings.json` |
 | `--fail-on-missing` | | Exit with `1` when the roles don't grant a privilege the code needs (see [Failing a build](#failing-a-build)) |
 | `--strict` | | Like `--fail-on-missing`, and also fail on what couldn't be checked |
@@ -122,7 +126,7 @@ Use at most one of `--plugin`, `--custom-api`, `--function`, `--entry` and `--op
 point is listed. A scope that matches nothing is an error. Type names may be simple or full and are
 matched case-insensitively.
 
-Without roles to check against (no `--role` or `--caller-role`, and nothing analyzed matches `Principals`
+Without roles to check against (no `--role`, `--caller-role`, `--user` or `--caller-user`, and nothing analyzed matches `Principals`
 or `Users`), or with `--no-roles`, the output has no role data, so it only changes when the code or the
 metadata changes. That is the output to commit and diff.
 
@@ -187,10 +191,10 @@ Each requirement is checked against the roles of the identity it runs as:
 
 | Runs as | Checked against |
 |---------|-----------------|
-| `Caller` | `--role` |
-| `ApplicationUser` | `--role`, else the entry point's function app in `Principals` |
+| `Caller` | `--user` or `--role` |
+| `ApplicationUser` | `--user` or `--role`, else the entry point's function app in `Principals` |
 | `User` | The user's roles in `Users` |
-| `ImpersonatedCaller` | `--caller-role`: the call runs with the privileges of the user in `CallerId` |
+| `ImpersonatedCaller` | `--caller-user` or `--caller-role`: the call runs with the privileges of the user in `CallerId` |
 | `System` | Nothing; SYSTEM needs no role |
 
 - Repeated roles combine as they do in Dataverse: a privilege is granted when any of them grants it,
@@ -564,7 +568,7 @@ names:
 | `ExcludeProjects` | Projects to leave out, such as test projects. See below |
 | `PluginSolutions` | Solutions or projects with plugin code that the analyzed code fires, used for plugin cascades only. `--plugin-solution` adds to these. See [Plugin code in another solution](#plugin-code-in-another-solution) |
 | `EntryPoints` | Extra methods to analyze as entry points, by full name, such as code called from outside the solution. `--entry` adds a method to these and also limits the report to the `--entry` methods. A name that matches no method is reported as a warning |
-| `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when `--role` isn't given. A key that matches no analyzed assembly or function is logged as a warning |
+| `Principals` | The application user's roles per function app, by assembly name, or per function as `<assembly>/<function>` (which wins). Used when neither `--role` nor `--user` is given. A key that matches no analyzed assembly or function is logged as a warning |
 | `Users` | The roles of specific users by user id (the `systemuserid`, in any GUID format), such as the impersonating user of a plugin step or the owner of a background workflow. `Name` is shown in the output. A key that isn't a GUID is an error, and one no analyzed operation runs as is logged as a warning |
 | `Suppress` | Missing privileges to accept, with the reason. Leave out `Privilege` to accept every privilege on the table, or leave out `Table` to accept a privilege not tied to a table by its name. Suppressed privileges are shown but don't fail `--fail-on-missing` |
 | `Rules` | Rules for requests passed to `Execute`, which replace the built-in rule for their message or add one. See below |
@@ -638,6 +642,47 @@ The metadata folder is also where plugin step registrations are read from (`Meta
 When the metadata folder contains `SecurityRoles/`, the output also lists the required tables that no
 role mentions. XrmMockup doesn't check privileges on those tables, so tests pass even when no role
 grants them. `--role`, `--caller-role` and the roles in `Principals` and `Users` are looked up in this folder, by name.
+
+### Checking a Dataverse user's actual roles
+
+```bash
+xrmmockup-permissions --plugin AccountPostPlugin --user jane@contoso.com \
+  --metadata ./Metadata --dataverse-url https://your-org.crm4.dynamics.com --fail-on-missing
+
+# App identity and the end user it impersonates are checked separately
+xrmmockup-permissions --function ProcessOrder --user integration@contoso.com \
+  --caller-user jane@contoso.com --credential-type azcli --strict
+```
+
+Only `--user` or `--caller-user` connects to Dataverse. Other runs remain offline, even if
+connection settings are present. Neither option runs the analyzed code or changes Dataverse data.
+`--user` cannot be combined with `--role`; `--caller-user` cannot be combined with `--caller-role`;
+neither can be combined with `--no-roles`. Connection flags require one of the user options.
+
+Authentication uses the metadata tool's **root-level** `DataverseUrl` and `DataverseCredentialType`
+settings and the same configuration-file/environment/CLI precedence. Legacy `DATAVERSE_URL` and
+`DATAVERSE_CREDENTIAL_TYPE` settings are also supported. Browser authentication is the default;
+use `devicecode` or `azcli` where appropriate. See the metadata tool's
+[connection documentation](../../MetadataGen/MetadataGenerator.Tool/README.md#configuration).
+The signed-in identity needs read access to users, teams, membership and role assignments.
+
+The lookup first matches `systemuser.domainname` (UPN), then `internalemailaddress` only if no
+UPN matches. An unknown or ambiguous user, or a user with no assigned roles, is an error (exit 2).
+It collects direct roles and roles assigned to teams in the user's Dataverse `teammembership`,
+including Microsoft Entra group teams; it does not independently query Microsoft Graph for membership.
+
+Assignments are matched to the downloaded definitions by `parentrootroleid` (or `roleid` for a
+root role), **not by name**. This handles business-unit copies and duplicate names. Every assigned
+role must be present exactly once in the metadata; missing or duplicate definitions fail with a
+request to regenerate the metadata. Privileges still come from the downloaded files, so keep them
+up to date. This is static privilege-presence analysis, not proof of record-level access or depth.
+
+Reports record the user/id, environment URL, UTC read timestamp, and each role's source (direct or
+team name/id). JSON includes `liveRoles`, and SARIF includes `runs[].properties.liveRoles`, even
+when no privileges are missing. Live assignment data can change over time; offline output retains
+its existing deterministic behavior. Users explicitly impersonated by a constant id or a plugin
+step still use the `Users` configuration mapping; these options do not automatically fetch all
+impersonating users.
 
 ## Output
 
