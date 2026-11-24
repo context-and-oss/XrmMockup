@@ -26,5 +26,12 @@ internal sealed class LookupColumns
     public IReadOnlyCollection<string> TargetsOf(string table, string column) =>
         _targets.TryGetValue(Key(table, column), out var targets) ? targets : [];
 
+    internal IReadOnlyList<LookupColumn> Columns => _targets.OrderBy(p => p.Key, StringComparer.Ordinal)
+        .Select(p =>
+        {
+            var parts = p.Key.Split('\n');
+            return new LookupColumn(parts[0].ToLowerInvariant(), parts[1].ToLowerInvariant(), p.Value.ToList());
+        }).ToList();
+
     private static string Key(string table, string column) => table + "\n" + column;
 }

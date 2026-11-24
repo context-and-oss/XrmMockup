@@ -83,6 +83,77 @@ in another method shows the call path from the entry point after it, such as
 - `Not reached from any entry point` lists methods that make service calls but that no entry point
   calls. Add them with `--entry` or `EntryPoints` if something outside the solution calls them.
 
+## Analyze once, query many times
+
+Save an **analysis snapshot** to skip project loading, compilation and source extraction on subsequent runs:
+
+```bash
+xrmmockup-permissions --solution App.slnx --save-snapshot permissions.snapshot.json
+
+xrmmockup-permissions --snapshot permissions.snapshot.json --operation "Update account" --attributes name --role "Integration App" --strict
+xrmmockup-permissions --snapshot permissions.snapshot.json --operation "Create contact" --attributes parentcustomerid --role "Salesperson"
+xrmmockup-permissions --snapshot permissions.snapshot.json --function ProcessOrder --detail full --no-roles
+xrmmockup-permissions --snapshot permissions.snapshot.json --entry Contoso.Sync.Importer.Run --no-roles
+```
+
+A snapshot saves the **whole extracted graph**, not just the selected entry point or filtered report.
+Even if capture uses `--plugin`, `--operation`, `--entry`, `--table` or another report filter, subsequent
+queries can select other entry points or construct new operation/attribute combinations. Project exclusions
+and the set of loaded source/plugin projects are still capture-time boundaries: code that was never loaded
+cannot be queried. Configured entry methods are retained; ad hoc `--entry` and `--operation` queries aren't.
+Saving also writes a requirements-only report by default; **`--no-roles` is not needed** for capture.
+Configured `Principals`, `Users` and suppressions do not apply to that default report. An explicit `--role`,
+`--caller-role`, `--user`, `--caller-user`, `--fail-on-missing` or `--strict` opts into coverage for the capture
+run, using the normal CLI/configuration role resolution. `--output` selects a separate report file, not the
+snapshot file. Normal analysis and snapshot replay retain their existing configured-role behavior; use
+`--no-roles` there only to override configured coverage.
+
+Replay supports all existing scope, report, role and failure options. Each query evaluates the saved graph
+and cascades afresh, then checks role coverage; it does **not** load or compile the original source. The
+snapshot can be queried from another directory or after the original projects are removed. All formats,
+report filters and `--fail-on-missing`/`--strict` retain their normal semantics. Source-loading/compilation
+failures remain unresolved during replay; a snapshot cannot turn an incomplete extraction into a passing
+strict check.
+
+### Frozen analysis inputs and fresh roles
+
+Snapshots contain request rules (including built-in rules), lookup-column targets, plugin registrations,
+workflow registrations and privilege/custom API catalogs. These inputs are **frozen**. For example,
+`contact.parentcustomerid` can reference `account` or `contact`; those targets determine `AppendTo`
+requirements when an operation sets the lookup. Adding a lookup, changing its target tables, changing
+plugin filters/impersonation or changing a custom API's execute privilege requires a new snapshot.
+The static-analysis limitations still apply: a snapshot is not runtime execution or proof of record access.
+
+Downloaded role definitions are included when available, even for requirements-only capture, so replay
+can check `--role` offline. They are a point-in-time baseline, not current live role assignments. To use
+updated grants, pass an explicit metadata directory:
+
+```bash
+xrmmockup-permissions --snapshot permissions.snapshot.json --metadata ./CurrentMetadata --role "Integration App" --strict
+```
+
+On replay **only `SecurityRoles/` is read from `--metadata`**; it does not replace the snapshot's lookup or
+plugin metadata. Without that option, the embedded role catalog is used (configured/default metadata
+paths are not resolved). Role catalog gaps are recomputed for each check, never reused from old coverage.
+`--config` supplies current principal/user role mappings, suppressions and opt-in live connection settings;
+source project settings are ignored, configured request rules are ignored with a warning, and configured
+entry methods can select additional saved methods. `--user`/`--caller-user` still perform a fresh live lookup,
+matched to the selected role catalog by role ID; authentication is never stored in the snapshot.
+
+### Snapshot format and freshness
+
+Snapshots are deterministic, versioned JSON artifacts with kind `xrmmockup-permissions-snapshot` and a
+separate snapshot schema version. They preserve unresolved facts, execution identities, source locations,
+call bindings, source-loading diagnostics and capture provenance. Unknown schemas, malformed snapshots
+and ordinary `--format json` reports are rejected: a report is not a graph snapshot.
+
+Replay describes the **captured code and analysis metadata**, not necessarily your current checkout or
+environment. Source/configuration/metadata fingerprints describe the capture; replay does not need or
+re-read those files to validate freshness. Recapture when analysis inputs change. Snapshots may contain
+sensitive table/role inventories, plugin impersonation IDs, source paths, diagnostics and extracted source literals; treat them as project artifacts and review them
+before sharing. Connection configuration, authentication tokens and live user assignments are not captured.
+Source literals are not secret-scrubbed: secrets embedded in analyzed code could be present in graph facts.
+
 ## Usage
 
 ```bash
@@ -95,7 +166,9 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
-| `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/`. Default: `MetadataDirectory`, then `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` next to the configuration file when it exists |
+| `--save-snapshot` | | Save the complete extracted analysis to a file for later queries. Requirements-only report by default; explicit role/user or failure options opt into coverage. The snapshot is independent of scope, filters, roles and format |
+| `--snapshot` | | Query a saved snapshot without loading source. Supports every scope, including new operations and explicit methods; cannot combine with `--solution`, `--exclude`, `--plugin-solution` or `--save-snapshot` |
+| `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/`. Default: `MetadataDirectory`, then `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` next to the configuration file when it exists. With `--snapshot`, reads only `SecurityRoles/`; default: the embedded role catalog |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
 | `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
 | `--config` | `-c` | Configuration file; `appsettings.{DOTNET_ENVIRONMENT}.json` in the same folder applies over it (see [Configuration](#configuration)). Default: `appsettings.json` in the current directory, when it exists |

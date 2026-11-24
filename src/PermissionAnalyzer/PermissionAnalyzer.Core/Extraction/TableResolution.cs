@@ -30,6 +30,23 @@ internal sealed class TableResolution
     private TableResolution? _columns;
     private PluginBypass _bypass;
 
+    // Snapshot reconstruction keeps unknown slots, return bindings and trigger facts intact. Do not
+    // flatten this into resolved tables: those bindings are evaluated separately for every replay scenario.
+    internal static TableResolution Restore(IEnumerable<string> tables, IEnumerable<string> reasons,
+        IEnumerable<string> lookupTargets, IEnumerable<TableSlot> slots, IEnumerable<ReturnedTables> returns,
+        IReadOnlyDictionary<string, TableResolution> fired, IEnumerable<GlobalNeed> globals,
+        IEnumerable<string> assumptions, TableResolution? columns, PluginBypass bypass)
+    {
+        var result = new TableResolution();
+        result._tables.UnionWith(tables); result._reasons.UnionWith(reasons);
+        result._lookupTargets.UnionWith(lookupTargets); result._slots.UnionWith(slots);
+        result._returns.UnionWith(returns); result._globals.UnionWith(globals);
+        result._assumptions.UnionWith(assumptions);
+        foreach (var pair in fired) result._fired.Add(pair.Key, pair.Value);
+        result._columns = columns; result._bypass = bypass;
+        return result;
+    }
+
     public IReadOnlyCollection<string> Tables => _tables;
 
     /// <summary>

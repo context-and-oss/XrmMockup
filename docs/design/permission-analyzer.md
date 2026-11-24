@@ -21,6 +21,9 @@ neither dotnet tool is bundled into Core.
 Pipeline: load compilations → discover entry points → extract method summaries →
 evaluate reachable calls and plugin/workflow triggers → build manifest → check roles.
 Source graphs can be reused; SDK metadata, roles and assignments are read at check time.
+The CLI can persist a complete extracted graph with frozen analysis metadata and query it without Roslyn
+source loading. Replay evaluates operations/cascades and coverage afresh, retaining source diagnostics.
+Its versioned snapshot format is separate from JSON reports; see the CLI's snapshot documentation.
 Checks never mutate mockup state or run automatically during CRUD.
 
 ## Analysis contract
