@@ -41,11 +41,28 @@ async function chooseCaller() {
 }
 
 describe('Connected user lookup', () => {
+  it('prefills the connection form from the resolved session settings while remaining offline', async () => {
+    const api = mockApi({ ...catalog, userLookup: { available: true, environmentUrl: 'https://configured.crm.dynamics.com', credentialType: 'devicecode' } });
+    render(<App api={api} />);
+    const toggle = await screen.findByRole('button', { name: 'Connect to Dataverse' });
+    await waitFor(() => expect(toggle).toBeEnabled()); fireEvent.click(toggle);
+    expect(screen.getByLabelText('Environment URL')).toHaveValue('https://configured.crm.dynamics.com');
+    expect(screen.getByLabelText('Sign-in method')).toHaveValue('devicecode');
+    expect(api.connectUsers).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(api.connectUsers).toHaveBeenCalledWith('https://configured.crm.dynamics.com', 'devicecode'));
+  });
+
   it('connects only on explicit action and selects calling and impersonated identities separately', async () => {
     const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
     expect(api.connectUsers).not.toHaveBeenCalled(); expect(api.searchUsers).not.toHaveBeenCalled();
     await connect();
-    expect(within(screen.getByRole('generic', { name: 'Connected Dataverse user' })).getByText('Bob Example')).toBeInTheDocument();
+    const identity = screen.getByRole('generic', { name: 'Connected Dataverse user' });
+    expect(within(identity).getByText('Bob Example')).toBeInTheDocument();
+    expect(within(identity).getByText('bob@example.com')).toBeInTheDocument();
+    expect(identity.parentElement).toHaveTextContent(url);
+    expect(screen.queryByText('Signed in as')).not.toBeInTheDocument();
+    expect(screen.queryByText(/This account performs the user lookups/)).not.toBeInTheDocument();
     expect(api.resolveUser).not.toHaveBeenCalled();
     expect(api.connectUsers).toHaveBeenCalledWith(url, 'browser');
     await chooseCaller(); expect(api.resolveUser).toHaveBeenCalledWith(alice.id, false);
@@ -104,7 +121,7 @@ describe('Connected user lookup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.not.objectContaining({ userSelection: expect.anything() })));
     expect(api.disconnectUsers).toHaveBeenCalledOnce();
-    expect(screen.queryByText('Signed in as')).not.toBeInTheDocument();
+    expect(screen.queryByRole('generic', { name: 'Connected Dataverse user' })).not.toBeInTheDocument();
   });
 
   it('skips live identities for requirements-only queries, and restores them when coverage resumes', async () => {
@@ -124,7 +141,7 @@ describe('Connected user lookup', () => {
   it('restores connection status after a reload without reconnecting, and disallows lookup in fixed requirements-only sessions', async () => {
     const api = mockApi(); api.usersConnection.mockResolvedValue({ connected: true, environmentUrl: url, connectedUser: bob });
     const view = render(<App api={api} />); await screen.findByText('Connected for user lookup'); expect(api.connectUsers).not.toHaveBeenCalled();
-    expect(screen.getByText('Signed in as')).toBeInTheDocument();
+    expect(screen.getByRole('generic', { name: 'Connected Dataverse user' })).toHaveTextContent('Bob Examplebob@example.com');
     expect(api.resolveUser).not.toHaveBeenCalled();
     view.unmount(); const fixed = mockApi({ ...catalog, requirementsOnly: true }); render(<App api={fixed} />); await screen.findByText('Build a query');
     expect(screen.queryByRole('button', { name: 'Connect to Dataverse' })).not.toBeInTheDocument(); expect(fixed.usersConnection).not.toHaveBeenCalled();

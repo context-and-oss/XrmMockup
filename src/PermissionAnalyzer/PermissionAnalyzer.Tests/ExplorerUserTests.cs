@@ -260,6 +260,31 @@ public class ExplorerUserTests
         Assert.True(lifetime.Disposed); Assert.False(users.Status.Connected);
     }
 
+    [Theory]
+    [InlineData("", "https://configured.crm.dynamics.com", "devicecode")]
+    [InlineData("--dataverse-url https://override.crm.dynamics.com", "https://override.crm.dynamics.com", "devicecode")]
+    [InlineData("--credential-type azcli", "https://configured.crm.dynamics.com", "azcli")]
+    [InlineData("--dataverse-url https://override.crm.dynamics.com --credential-type browser", "https://override.crm.dynamics.com", "browser")]
+    [InlineData("-u https://override.crm.dynamics.com -t azcli", "https://override.crm.dynamics.com", "azcli")]
+    public void ExplorerDefaultsApplyConfigurationThenCliOverridesWithoutConnecting(string arguments, string expectedUrl, string expectedCredential)
+    {
+        var root = new RootCommand(); var options = new AnalysisOptions(); options.AddTo(root);
+        var parsed = root.Parse("--explore --snapshot model.json " + arguments);
+        Assert.Empty(parsed.Errors);
+        var settings = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
+            ["DataverseUrl"] = "https://configured.crm.dynamics.com", ["DataverseCredentialType"] = "devicecode"
+        }).Build();
+        var merged = DataverseRoleLookup.CreateConnectionConfiguration(options.Read(parsed), new LoadedConfiguration(".", new(), null, settings));
+        try {
+            using var users = new ExplorerUsers([Reader], merged, NullLoggerFactory.Instance, _ => throw new Exception("Must not connect"));
+            var data = JsonSerializer.SerializeToElement(users.Options);
+            Assert.Equal(expectedUrl, data.GetProperty("environmentUrl").GetString());
+            Assert.Equal(expectedCredential, data.GetProperty("credentialType").GetString());
+            Assert.False(users.Status.Connected);
+        }
+        finally { (merged as IDisposable)?.Dispose(); (settings as IDisposable)?.Dispose(); }
+    }
+
     [Fact]
     public void ConnectionOptionsDoNotExposeConfiguredCredentials()
     {

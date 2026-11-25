@@ -89,6 +89,15 @@ sign-in on that machine, or follow device-code instructions in its terminal. Not
 After sign-in, the analyzer runs **WhoAmI** and shows the connected account’s name and sign-in address.
 This account performs lookups; it does not automatically become the calling or impersonated user.
 
+The form defaults to the root-level `DataverseUrl` and `DataverseCredentialType` settings from
+`appsettings.json` (including environment-specific and environment-variable overrides). With `--explore`,
+`--dataverse-url` / `-u` and `--credential-type` / `-t` override those defaults without requiring a user
+argument or starting authentication. You can still edit both values in the form before connecting.
+
+```bash
+xrmmockup-permissions --snapshot permissions.snapshot.json --explore --dataverse-url https://your-org.crm.dynamics.com --credential-type azcli
+```
+
 - **Look up calling user** searches enabled/disabled users by the beginning of their name, email, or
   sign-in name. Select an enabled user to use their direct and team role assignments instead of explicit
   role selection.

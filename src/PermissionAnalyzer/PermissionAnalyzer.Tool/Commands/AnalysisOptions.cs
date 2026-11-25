@@ -133,7 +133,7 @@ internal sealed class AnalysisOptions
             foreach (var option in new[] { _user, _callerUser })
                 if (result.GetResult(option) is not null && string.IsNullOrWhiteSpace(result.GetValue(option)))
                     result.AddError($"{option.Name} needs a UPN or email.");
-            if (result.GetResult(_user) is null && result.GetResult(_callerUser) is null &&
+            if (!result.GetValue(_explore) && result.GetResult(_user) is null && result.GetResult(_callerUser) is null &&
                 new Option[] { _dataverseUrl, _credentialType }.FirstOrDefault(o => result.GetResult(o) is not null) is { } connectionOption)
                 result.AddError($"{connectionOption.Name} needs {CliOptions.User.Primary} or {CliOptions.CallerUser.Primary}.");
 

@@ -601,7 +601,8 @@ separate, explicit **Connect to Dataverse** action and selectors for calling and
 see the [user lookup guide](../src/PermissionAnalyzer/PermissionAnalyzer.Tool/README.md#look-up-calling-and-impersonated-users). Other runs remain offline, even if
 connection settings are present. Neither option runs the analyzed code or changes Dataverse data.
 `--user` cannot be combined with `--role`; `--caller-user` cannot be combined with `--caller-role`;
-neither can be combined with `--no-roles`. Connection flags require one of the user options.
+neither can be combined with `--no-roles`. Connection flags require one of the user options for CLI reports. With `--explore`, they instead
+prefill the connection form; no user argument is required and no authentication starts automatically.
 
 Authentication uses the metadata tool's **root-level** `DataverseUrl` and `DataverseCredentialType`
 settings and the same configuration-file/environment/CLI precedence. Legacy `DATAVERSE_URL` and

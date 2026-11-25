@@ -37,16 +37,16 @@ export function UserConnection({ api, options, connection, disabled, onChange, o
   }
   return <section className={styles.connection} aria-label="Dataverse user lookup">
     <div className={styles.heading}><div><h3>{connection?.connected ? 'Connected for user lookup' : 'Optional · Look up Dataverse users'}</h3>
-      <p>{connection?.connected ? connection.environmentUrl : 'Use live user assignments with the security-role definitions loaded in this session.'}</p></div>
+      {connection?.connected ? <div className={styles.connectionDetails}>
+        <span>{connection.environmentUrl}</span>
+        {connection.connectedUser && <span className={styles.identity} aria-label="Connected Dataverse user">
+          <strong>{connection.connectedUser.name}</strong>
+          <span>{connection.connectedUser.upn || connection.connectedUser.email || connection.connectedUser.id}</span>
+        </span>}
+      </div> : <p>Use live user assignments with the security-role definitions loaded in this session.</p>}</div>
       {connection?.connected ? <button type="button" className={ui.textButton} disabled={loading || disabled || busy} onClick={disconnect}>{busy ? 'Disconnecting…' : 'Disconnect'}</button> :
         <button type="button" className={ui.textButton} aria-expanded={expanded} aria-controls="user-connection-settings" disabled={loading || disabled || busy || !options.available} onClick={() => setExpanded(!expanded)}>{expanded ? 'Hide connection' : 'Connect to Dataverse'}</button>}
     </div>
-    {connection?.connected && connection.connectedUser && <div className={styles.identity} aria-label="Connected Dataverse user">
-      <span className={styles.identityLabel}>Signed in as</span>
-      <strong>{connection.connectedUser.name}</strong>
-      <span>{connection.connectedUser.upn || connection.connectedUser.email || connection.connectedUser.id}</span>
-      <p className={ui.hint}>This account performs the user lookups. Calling and impersonated users for permission checks are selected separately.</p>
-    </div>}
     {!options.available && <p className={ui.hint}>User lookup requires a local role catalog. Restart with role metadata or a saved analysis that contains roles.</p>}
     {expanded && !connection?.connected && <div id="user-connection-settings" className={styles.settings}>
       <div><label htmlFor="dataverse-url">Environment URL</label><input id="dataverse-url" type="url" value={url} placeholder="https://your-org.crm.dynamics.com" disabled={busy || disabled} onChange={event => setUrl(event.target.value)} /></div>
@@ -57,6 +57,5 @@ export function UserConnection({ api, options, connection, disabled, onChange, o
     </div>}
     {busy && <p role="status" className={ui.hint}>{connection?.connected ? 'Disconnecting and clearing live user selections…' : 'Complete sign-in in the local browser or analyzer terminal. Authentication may take a moment.'}</p>}
     {error && <p role="alert" className={ui.error}>{error}</p>}
-    {connection?.connected && <p className={ui.hint}>Read-only user and role-assignment lookup. Privilege definitions and analysis still come from the saved/local model; this does not prove record access.</p>}
   </section>;
 }

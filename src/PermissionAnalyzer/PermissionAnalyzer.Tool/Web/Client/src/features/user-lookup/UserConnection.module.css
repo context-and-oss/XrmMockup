@@ -47,26 +47,33 @@
   }
 }
 
-.identity {
-  margin-top: 14px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--white);
+.connectionDetails {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--grey);
   font-size: 12px;
 
-  > span, > strong {
-    display: block;
+  > span {
+    min-width: 0;
     overflow-wrap: anywhere;
   }
+}
+
+.identity {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 
   > strong {
-    margin: 4px 0;
+    color: var(--black);
     font-weight: 500;
   }
 
-  .identityLabel {
-    color: var(--grey);
-    font-size: 10px;
+  > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }

@@ -96,7 +96,9 @@ internal static class AnalysisRunner
 
             if (request.Web)
             {
-                using var explorerUsers = new ExplorerUsers(roles, configuration.ConnectionConfiguration, loggerFactory);
+                var explorerConnection = DataverseRoleLookup.CreateConnectionConfiguration(request, configuration);
+                using var explorerConnectionLifetime = explorerConnection as IDisposable;
+                using var explorerUsers = new ExplorerUsers(roles, explorerConnection, loggerFactory);
                 var model = new SecurityModel(root, snapshot?.Graph ?? builder.Extracted(), incomplete, roles,
                     configuration.Permissions, coverageOptions, inputs, request.NoRoles, columns, explorerUsers);
                 await SecurityWebHost.RunAsync(model, request.Port, logger, cancellationToken, address => BrowserLauncher.Open(address, logger));
