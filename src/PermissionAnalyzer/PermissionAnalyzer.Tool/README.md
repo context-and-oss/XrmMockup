@@ -67,6 +67,13 @@ The builder can be collapsed while you inspect results. Editing a query does not
 a notice identifies results from the previous run. **Role catalog** searches individual role grants.
 **Download JSON** exports the last completed query's report.
 
+Toggle result badges (such as **Granted**, **Missing**, or **Unresolved**) to focus on one or more finding
+types. **Filter columns** searches table, privilege, identity, basis, and coverage; these filters combine
+with AND. Click a table heading to cycle ascending, descending, and original order. Display filters and
+sorting apply across the result sections without rerunning the query or changing analysis totals or the
+JSON export. **Clear result filters** restores all loaded rows. Completeness warnings remain visible;
+matching sections retain their diagnostics. A new query result resets these display controls.
+
 The explorer is read-only and local. It does not run your code or change Dataverse. Inputs are loaded
 once; restart the CLI to refresh them. Choose scopes, filters, and reports in the UI rather than combining
 `--explore` with CLI query/report options such as `--operation`, `--format`, or `--strict`.

@@ -173,10 +173,10 @@ describe('React security explorer', () => {
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
     expect(screen.getByRole('button', { name: 'Run query' })).toBeDisabled();
     expect(screen.getByText('Choose a target to run this query.')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('These results and the JSON download are from the last run');
+    expect(screen.getByText(/These results and the JSON download are from the last run/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/These results and the JSON download are from the last run/)).not.toBeInTheDocument());
     expect(screen.getByText('Last run: Update account + cascades')).toBeInTheDocument();
   });
 
