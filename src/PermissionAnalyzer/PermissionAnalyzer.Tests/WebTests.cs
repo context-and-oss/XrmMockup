@@ -72,24 +72,36 @@ public class WebTests
         .SelectMany(e => e.GetProperty("requirements").EnumerateArray());
 
     [Theory]
-    [InlineData("--web --port 9000 --snapshot model.json", true)]
-    [InlineData("--web --solution App.csproj --metadata Metadata --role Reader --save-snapshot model.json", true)]
-    [InlineData("--web --no-roles", true)]
+    [InlineData("--explore --port 9000 --snapshot model.json", true)]
+    [InlineData("--explore --solution App.csproj --metadata Metadata --role Reader --save-snapshot model.json", true)]
+    [InlineData("--explore --no-roles", true)]
+    [InlineData("--web", false)]
     [InlineData("--port 9000", false)]
-    [InlineData("--web --port 0", false)]
-    [InlineData("--web --port 65536", false)]
-    [InlineData("--web --output report.json", false)]
-    [InlineData("--web --format json", false)]
-    [InlineData("--web --table account", false)]
-    [InlineData("--web --operation \"Update account\"", false)]
-    [InlineData("--web --strict", false)]
-    public void WebOptionsAreValidated(string arguments, bool valid)
+    [InlineData("--explore --port 0", false)]
+    [InlineData("--explore --port 65536", false)]
+    [InlineData("--explore --output report.json", false)]
+    [InlineData("--explore --format json", false)]
+    [InlineData("--explore --table account", false)]
+    [InlineData("--explore --operation \"Update account\"", false)]
+    [InlineData("--explore --strict", false)]
+    public void ExploreOptionsAreValidated(string arguments, bool valid)
     {
         var options = new AnalysisOptions();
         var root = new RootCommand(); options.AddTo(root);
         var parsed = root.Parse(arguments);
         Assert.Equal(valid, parsed.Errors.Count == 0);
         if (valid) { var request = options.Read(parsed); Assert.True(request.Web); Assert.InRange(request.Port, 1, 65535); }
+    }
+
+    [Theory]
+    [InlineData("--port 9000", "--port requires --explore.")]
+    [InlineData("--explore --output report.json", "--explore can't be used with --output; choose query options in the UI.")]
+    public void InvalidExplorerOptionsReportExpectedErrors(string arguments, string error)
+    {
+        var options = new AnalysisOptions();
+        var root = new RootCommand(); options.AddTo(root);
+        var parsed = root.Parse(arguments);
+        Assert.Contains(parsed.Errors, e => e.Message == error);
     }
 
     [Fact]

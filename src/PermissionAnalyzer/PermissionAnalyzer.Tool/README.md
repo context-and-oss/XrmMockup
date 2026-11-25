@@ -83,22 +83,22 @@ in another method shows the call path from the entry point after it, such as
 - `Not reached from any entry point` lists methods that make service calls but that no entry point
   calls. Add them with `--entry` or `EntryPoints` if something outside the solution calls them.
 
-## Local web UI
+## Permission explorer
 
-Start a read-only security explorer from the permission CLI:
+Explore permissions interactively in your browser with a read-only local explorer.
 
 ```bash
 # Load source and checked-in metadata once
-xrmmockup-permissions --web --solution Contoso.slnx --metadata ./Metadata
+xrmmockup-permissions --explore --solution Contoso.slnx --metadata ./Metadata
 
 # Open an existing snapshot without project loading or source files
-xrmmockup-permissions --web --snapshot permissions.snapshot.json
+xrmmockup-permissions --explore --snapshot permissions.snapshot.json
 
 # Override snapshot roles, choose startup roles, and use another port
-xrmmockup-permissions --web --snapshot permissions.snapshot.json --metadata ./Metadata --role "Salesperson" --port 9000
+xrmmockup-permissions --explore --snapshot permissions.snapshot.json --metadata ./Metadata --role "Salesperson" --port 9000
 
 # Capture source for future offline sessions while starting the UI
-xrmmockup-permissions --web --solution Contoso.slnx --metadata ./Metadata --save-snapshot permissions.snapshot.json
+xrmmockup-permissions --explore --solution Contoso.slnx --metadata ./Metadata --save-snapshot permissions.snapshot.json
 ```
 
 Open the address printed by the CLI in your browser (default: `http://127.0.0.1:8765/`).
@@ -156,10 +156,10 @@ npm test
 npm run build
 ```
 
-For hot-reload development, first start the CLI with `--web` on its default port **8765**, then run
+For hot-reload development, first start the CLI with `--explore` on its default port **8765**, then run
 `npm run dev` from the frontend directory and open `http://127.0.0.1:5173/`. Vite's loopback-only dev
 server proxies `/api` to the CLI, retaining the session token and rewriting Host/Origin for the local
-backend. Production `--web` serves only the embedded Vite build; it never starts Vite or an npm process.
+backend. Production `--explore` serves only the embedded Vite build; it never starts Vite or an npm process.
 
 ## Analyze once, query many times
 
@@ -243,8 +243,8 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 
 | Option | Alias | Description |
 |--------|-------|-------------|
-| `--web` | | Start the local security-model web UI; load source or a snapshot once and query interactively (see [Local web UI](#local-web-ui)) |
-| `--port` | | Web UI port, 1–65535 (default: 8765). Requires `--web`; binding remains IPv4 loopback only |
+| `--explore` | | Explore permissions interactively in your browser; load source or a snapshot once and query interactively (see [Permission explorer](#permission-explorer)) |
+| `--port` | | Local permission explorer port, 1–65535 (default: 8765). Requires `--explore`; binding remains IPv4 loopback only |
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
 | `--save-snapshot` | | Save the complete extracted analysis to a file for later queries. Requirements-only report by default; explicit role/user or failure options opt into coverage. The snapshot is independent of scope, filters, roles and format |
 | `--snapshot` | | Query a saved snapshot without loading source. Supports every scope, including new operations and explicit methods; cannot combine with `--solution`, `--exclude`, `--plugin-solution` or `--save-snapshot` |

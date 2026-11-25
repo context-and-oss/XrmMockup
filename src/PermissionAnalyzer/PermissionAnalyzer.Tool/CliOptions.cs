@@ -5,16 +5,16 @@ namespace XrmMockup.PermissionAnalyzer.Tool;
 /// </summary>
 internal static class CliOptions
 {
-    internal static class Web
+    internal static class Explore
     {
-        public const string Primary = "--web";
-        public const string Description = "Serve a local web UI for repeated security-model queries. Loads source or --snapshot once; Ctrl+C stops the server";
+        public const string Primary = "--explore";
+        public const string Description = "Explore permissions interactively in your browser. Loads source or --snapshot once; Ctrl+C stops the server";
     }
 
     internal static class Port
     {
         public const string Primary = "--port";
-        public const string Description = "Loopback web UI port (default: 8765). Requires --web";
+        public const string Description = "Local permission explorer port (default: 8765). Requires --explore";
     }
 
     internal static class Solution
