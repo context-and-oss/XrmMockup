@@ -95,7 +95,8 @@ describe('React security explorer', () => {
     fireEvent.click(screen.getByText('Choose application / caller roles'));
     expect(screen.getByLabelText('Search application / caller roles')).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'custom-api' } });
-    expect(document.querySelector('#targets option')?.getAttribute('value')).toBe('ctx_Run');
+    fireEvent.focus(screen.getByLabelText('Target name'));
+    expect(screen.getByRole('option', { name: 'ctx_Run' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Target name'), { target: { value: 'ctx_Run' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenCalledWith(expect.objectContaining({ scope: 'custom-api', target: 'ctx_Run', noRoles: true, roles: [] })));

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { Catalog, Query, Scope } from './model';
 import { values } from './model';
 import { RolePicker } from './RolePicker';
+import { SuggestionPicker } from './SuggestionPicker';
 
 interface Props {
   model: Catalog;
@@ -105,14 +106,12 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
           <p id="scope-help" className="hint clause-hint">{scopeHints[scope]}</p>
           {scope !== 'all' && <div className="query-clause"><span className="clause-word" aria-hidden="true">For</span><div className="clause-field">
             <label htmlFor="target">{scope === 'operation' ? 'Table logical name' : scope === 'plugin' ? 'Plugin type[:message[:stage]]' : 'Target name'}</label>
-            <input id="target" list="targets" required value={target} onChange={event => setTarget(event.target.value)}
+            <SuggestionPicker key={scope} id="target" label={scope === 'operation' ? 'Tables' : 'Targets'} options={suggestions} required disabled={busy} value={target} onChange={setTarget}
               placeholder={scope === 'operation' ? 'Choose or enter a table…' : scope === 'plugin' ? 'AccountPostPlugin:Update' : scope === 'method' ? 'Contoso.Importer.Run' : 'Choose or enter a target…'} />
-            <datalist id="targets">{[...new Set(suggestions)].map(value => <option key={value} value={value} />)}</datalist>
           </div></div>}
           {scope === 'operation' && <>
             <div className="query-clause"><span className="clause-word" aria-hidden="true">When</span><div className="clause-field"><label htmlFor="message">Message</label>
-              <input id="message" list="messages" required value={message} onChange={event => setMessage(event.target.value)} />
-              <datalist id="messages">{['Create', 'Update', 'Delete', 'Retrieve', 'RetrieveMultiple', 'Assign', 'Share', 'Associate', 'Disassociate'].map(value => <option key={value} value={value} />)}</datalist>
+              <SuggestionPicker id="message" label="Messages" options={['Create', 'Update', 'Delete', 'Retrieve', 'RetrieveMultiple', 'Assign', 'Share', 'Associate', 'Disassociate']} required disabled={busy} value={message} onChange={setMessage} />
             </div><div className="clause-field"><label htmlFor="attributes">Changed columns <span className="muted">(optional)</span></label>
               <input id="attributes" value={attributes} onChange={event => setAttributes(event.target.value)} placeholder="name, ownerid" aria-describedby="attributes-help" />
             </div></div>
@@ -139,8 +138,7 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
         </section>
       </div>
       <details className="filter-disclosure" open={filtersOpen} onToggle={event => setFiltersOpen(event.currentTarget.open)}><summary><span className="step-number" aria-hidden="true">3</span>Report filters <span className="optional-label">{filterCount ? `${filterCount} values applied` : 'Optional'}</span></summary>
-        <div className="filter-fields"><div><label htmlFor="tables">Tables</label><input id="tables" list="table-names" value={tables} onChange={event => setTables(event.target.value)} placeholder="account, contact" />
-          <datalist id="table-names">{model.tables.map(table => <option key={table} value={table} />)}</datalist></div>
+        <div className="filter-fields"><div><label htmlFor="tables">Tables</label><input id="tables" value={tables} onChange={event => setTables(event.target.value)} placeholder="account, contact" /></div>
           <div><label htmlFor="privileges">Privileges</label><input id="privileges" value={privileges} onChange={event => setPrivileges(event.target.value)} placeholder="Read, Write, prvCustomPrivilege" /></div>
           <button type="button" className="text-button" disabled={!filterCount} onClick={() => { setTables(''); setPrivileges(''); }}>Clear filters</button>
         </div><p className="hint">Comma-separated. Filters narrow displayed rows, not whole-analysis counts.</p>
