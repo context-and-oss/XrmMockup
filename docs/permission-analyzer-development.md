@@ -43,6 +43,7 @@ src/
     query-builder/           Query form, column/role pickers, and query summaries
     results/                 Result tables, finding filters, and sorting
     role-catalog/            Role grant browser
+    user-lookup/             Opt-in connection and live identity selectors
   shared/
     api/                     Wire types and the session-aware API client
     components/SuggestionPicker/  Reusable editable combobox
@@ -70,5 +71,9 @@ assets. Tests should prefer roles and accessible names over generated CSS-module
 
 The browser UI is a local client of the CLI, not a separate deployed service. Preserve the
 loopback-only binding, same-origin checks, session token, read-only model, and frozen analysis
-inputs when changing it. Snapshots and reports are separate contracts; do not use a report as
+inputs when changing it. Live user lookup is an explicit opt-in read-only exception to the offline API:
+credentials stay in the .NET backend, user searches are bounded, and selected identities are represented
+by session-held handles—not browser-submitted role sets. Query evaluation and connection operations
+share a gate so disconnect cannot race coverage evaluation. Direct/team provenance must survive into
+coverage; live selections and credentials never enter snapshots. Snapshots and reports are separate contracts; do not use a report as
 a replayable graph.

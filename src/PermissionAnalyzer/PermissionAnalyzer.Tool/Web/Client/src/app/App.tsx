@@ -2,7 +2,7 @@ import styles from './App.module.css';
 import ui from '../shared/ui/ui.module.css';
 import { cx } from '../shared/ui/classNames';
 import { useEffect, useState } from 'react';
-import type { Catalog, Query, Report } from '../shared/api/types';
+import type { Catalog, Query, Report, UserLookupApi } from '../shared/api/types';
 import { PermissionApi } from '../shared/api/PermissionApi';
 import { QueryForm } from '../features/query-builder/QueryForm';
 import { queryDescription, queryContextDescription } from '../features/query-builder/queryDescription';
@@ -11,7 +11,7 @@ import { RoleCatalog } from '../features/role-catalog/RoleCatalog';
 import { uiMessage } from '../shared/presentation/labels';
 
 const defaultApi = new PermissionApi();
-interface Props { api?: Pick<PermissionApi, 'catalog' | 'query'> }
+interface Props { api?: Pick<PermissionApi, 'catalog' | 'query'> & Partial<UserLookupApi> }
 const errorMessage = (error: unknown) => error instanceof Error ? uiMessage(error.message) : 'Unexpected error.';
 
 export function App({ api = defaultApi }: Props) {
@@ -21,6 +21,7 @@ export function App({ api = defaultApi }: Props) {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [draftSignature, setDraftSignature] = useState('');
+  const [lastContext, setLastContext] = useState('');
   const [lastQuery, setLastQuery] = useState<Query>();
   const stale = !!report && !!lastQuery && draftSignature !== JSON.stringify(lastQuery);
   const [view, setView] = useState<'query' | 'roles'>('query');
@@ -33,8 +34,8 @@ export function App({ api = defaultApi }: Props) {
     return () => { active = false; };
   }, [api]);
 
-  async function query(query: Query) {
-    setBusy(true); setError(''); setReport(undefined); setFailed(false); setLastQuery(query);
+  async function query(query: Query, description?: string) {
+    setBusy(true); setError(''); setReport(undefined); setFailed(false); setLastQuery(query); setLastContext(description || '');
     try { setReport(await api.query(query)); }
     catch (error) { setError(errorMessage(error)); setFailed(true); }
     finally { setBusy(false); }
@@ -62,9 +63,9 @@ export function App({ api = defaultApi }: Props) {
         {tab === 'query' ? 'Query permissions' : 'Role catalog'}</button>)}</nav>
       {model && <>
         <section className={styles.workspace} hidden={view !== 'query'}>
-          <QueryForm model={model} busy={busy} onQuery={query} onDraftChange={setDraftSignature} />
+          <QueryForm model={model} busy={busy} onQuery={query} onDraftChange={setDraftSignature} userApi={api} />
           <section className={styles.results} aria-labelledby="results-title"><div className={styles.resultsHeading}><div><p className={ui.eyebrow}>ANALYSIS</p><h2 id="results-title">Query results</h2></div><button className={ui.secondary} disabled={!report || busy} onClick={download}>Download JSON</button></div>
-            {report && lastQuery && <div className={styles.lastRun}><p>Last run: {queryDescription(lastQuery)}</p><p>{queryContextDescription(lastQuery, model)}</p></div>}
+            {report && lastQuery && <div className={styles.lastRun}><p>Last run: {queryDescription(lastQuery)}</p><p>{lastContext || queryContextDescription(lastQuery, model)}</p></div>}
             {failed && error && <p className={ui.error} role="alert">{error}</p>}
             {stale && <p className={styles.staleNotice} role="status">Query changed. These results and the JSON download are from the last run. Run the query again to refresh.</p>}
             {busy ? <div className={cx(ui.surface, ui.empty)} role="status">Evaluating query…</div> : report ? <ReportView report={report} /> : failed ? <div className={cx(ui.surface, ui.empty)}>The query failed. Adjust the query and try again.</div> :

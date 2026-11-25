@@ -5,7 +5,23 @@ export interface Grant { table: string | null; privilege: string; depth: string 
 export interface Role { name: string; roleId: string | null; globalPrivilegesKnown: boolean; grants: Grant[] }
 export interface ColumnDefinition { logicalName: string; displayName: string | null }
 export interface TableColumnCatalog { table: string; displayName: string | null; columns: ColumnDefinition[] }
+export type CredentialType = 'browser' | 'devicecode' | 'azcli';
+export interface UserLookupOptions { available: boolean; environmentUrl: string; credentialType: CredentialType }
+export interface UserConnection { connected: boolean; environmentUrl: string | null }
+export interface DataverseUser { id: string; name: string; email: string | null; upn: string | null; disabled: boolean }
+export interface UserSelection {
+  selectionId: string; user: DataverseUser; environmentUrl: string; readAt: string; roles: string[]; isCaller: boolean;
+  assignments: { roleName: string; rootRoleId: string; teamName: string | null; teamId: string | null }[];
+}
+export interface UserLookupApi {
+  usersConnection: () => Promise<UserConnection>;
+  connectUsers: (environmentUrl: string, credentialType: CredentialType) => Promise<UserConnection>;
+  disconnectUsers: () => Promise<UserConnection>;
+  searchUsers: (search: string) => Promise<DataverseUser[]>;
+  resolveUser: (userId: string, isCaller: boolean) => Promise<UserSelection>;
+}
 export interface Catalog {
+  userLookup?: UserLookupOptions | null;
   columnCatalog?: TableColumnCatalog[];
   requirementsOnly: boolean;
   incomplete: boolean;
@@ -16,6 +32,8 @@ export interface Catalog {
   methods: string[];
 }
 export interface Query {
+  userSelection?: string;
+  callerUserSelection?: string;
   scope: Scope;
   target?: string | null;
   message?: string | null;

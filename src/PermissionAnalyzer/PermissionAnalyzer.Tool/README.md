@@ -80,6 +80,33 @@ The explorer is read-only and local. It does not run your code or change Dataver
 once; restart the CLI to refresh them. Choose scopes, filters, and reports in the UI rather than combining
 `--explore` with CLI query/report options such as `--operation`, `--format`, or `--strict`.
 
+### Look up calling and impersonated users
+
+Select **Connect to Dataverse** in the query builder, enter your environment URL, and choose browser,
+device-code, or existing Azure CLI sign-in. Authentication runs in the local analyzer: complete browser
+sign-in on that machine, or follow device-code instructions in its terminal. Nothing connects automatically.
+
+- **Look up calling user** searches enabled/disabled users by the beginning of their name, email, or
+  sign-in name. Select an enabled user to use their direct and team role assignments instead of explicit
+  role selection.
+- Expand **Impersonated caller roles** and select **Look up impersonated user** when app code acts for
+  another user. Both identities are checked separately; team membership does not grant direct delegation.
+  Users fixed by plugin/workflow registrations keep their captured identities; this selector does not
+  replace registration metadata.
+- The selected user's assignments show their lookup time and source teams. **Refresh assignments** reads
+  them again. **Use role selection instead** returns that identity to offline role selection.
+- **Disconnect** clears live selections. The saved analysis and previously displayed report remain unchanged.
+
+User lookup reads live **assignments**, but privilege definitions still come from this session's local
+metadata/snapshot. Missing or duplicate role definitions fail the lookup—refresh your metadata rather
+than treating that as successful coverage. A selected user's assignments are held for this session and
+are not refreshed automatically by each query. Neither credentials nor live selections are saved in a
+snapshot. Query report exports can include user/assignment provenance; treat them as private.
+
+This works with snapshot-only or snapshot-plus-metadata sessions that include role definitions. Fixed
+requirements-only sessions cannot connect. The explorer remains loopback-only and never executes your
+analyzed code or writes Dataverse records.
+
 ## Save once, explore offline
 
 A snapshot saves the complete analysis so future sessions do not need the source project or another
@@ -114,7 +141,7 @@ xrmmockup-permissions --snapshot permissions.snapshot.json --operation "Update a
 
 Keep snapshots private: they can contain source paths, extracted literals, user IDs, and security-model
 details. Secrets embedded in analyzed source are not scrubbed. Snapshot replay is offline unless you
-explicitly request live user lookup with `--user` or `--caller-user`.
+explicitly connect for user lookup in the explorer or request it with `--user` or `--caller-user`.
 
 ## Common CLI queries
 
@@ -205,7 +232,8 @@ Configured paths are relative to the configuration file. CLI options override co
 For application/user role mappings, accepted exceptions, request rules, and project exclusions, see the
 [configuration reference](https://github.com/delegateas/XrmMockup/blob/main/docs/permission-analyzer-reference.md#configuration).
 
-Only `--user` or `--caller-user` connects to Dataverse. These options read current direct/team assignments
+For CLI reports, only `--user` or `--caller-user` connects to Dataverse. The explorer also offers the
+explicit connection and user lookup described above. These options read current direct/team assignments
 and match them to your downloaded role definitions; keep metadata current. They cannot be combined with
 `--role` or `--caller-role`, respectively. See
 [live user role lookup](https://github.com/delegateas/XrmMockup/blob/main/docs/permission-analyzer-reference.md#checking-a-dataverse-users-actual-roles)

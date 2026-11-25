@@ -96,8 +96,9 @@ internal static class AnalysisRunner
 
             if (request.Web)
             {
+                using var explorerUsers = new ExplorerUsers(roles, configuration.ConnectionConfiguration, loggerFactory);
                 var model = new SecurityModel(root, snapshot?.Graph ?? builder.Extracted(), incomplete, roles,
-                    configuration.Permissions, coverageOptions, inputs, request.NoRoles, columns);
+                    configuration.Permissions, coverageOptions, inputs, request.NoRoles, columns, explorerUsers);
                 await SecurityWebHost.RunAsync(model, request.Port, logger, cancellationToken);
                 return ExitCodes.Success;
             }

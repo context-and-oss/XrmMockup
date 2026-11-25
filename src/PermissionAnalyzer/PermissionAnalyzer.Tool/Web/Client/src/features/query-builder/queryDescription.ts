@@ -1,4 +1,4 @@
-import type { Catalog, Query, Scope } from '../../shared/api/types';
+import type { Catalog, Query, Scope, UserSelection } from '../../shared/api/types';
 
 export const scopeLabels: Record<Scope, string> = {
   all: 'All entry points & unreached methods', operation: 'Table operation + cascades',
@@ -10,12 +10,12 @@ export function queryDescription(query: Query): string {
   return `${scopeLabels[query.scope]} · ${query.target || 'Choose a target'}`;
 }
 
-export function queryContextDescription(query: Query, model: Catalog): string {
+export function queryContextDescription(query: Query, model: Catalog, callingUser?: UserSelection, impersonatedUser?: UserSelection): string {
   const roles = query.roles?.length ? query.roles : model.defaults.roles;
   const callerRoles = query.callerRoles?.length ? query.callerRoles : model.defaults.callerRoles;
   return [
-    query.noRoles ? 'Requirements only · no role coverage' : `Coverage: ${roles.join(' + ') || 'session defaults'}`,
-    !query.noRoles && callerRoles.length ? `Impersonated caller: ${callerRoles.join(' + ')}` : '',
+    query.noRoles ? 'Requirements only · no role coverage' : query.userSelection ? `Calling user: ${callingUser?.user.name || 'Selected Dataverse user'} · ${callingUser?.roles.join(' + ') || 'live assignments'}` : `Coverage: ${roles.join(' + ') || 'session defaults'}`,
+    !query.noRoles && query.callerUserSelection ? `Impersonated user: ${impersonatedUser?.user.name || 'Selected Dataverse user'} · ${impersonatedUser?.roles.join(' + ') || 'live assignments'}` : !query.noRoles && callerRoles.length ? `Impersonated caller: ${callerRoles.join(' + ')}` : '',
     query.scope === 'operation' && query.attributes?.length ? `Changed columns: ${query.attributes.join(', ')}` : '',
     query.tables?.length ? `Report tables: ${query.tables.join(', ')}` : '',
     query.privileges?.length ? `Report privileges: ${query.privileges.join(', ')}` : '',

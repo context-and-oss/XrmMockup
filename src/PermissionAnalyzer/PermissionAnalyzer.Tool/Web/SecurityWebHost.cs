@@ -9,10 +9,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using XrmMockup.PermissionAnalyzer.Tool.Dataverse;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Web;
 
-/// <summary>Loopback-only server. No files, credentials or live calls are exposed by the API.</summary>
+/// <summary>Loopback-only server. Credentials remain server-side. Live read-only user lookup is explicitly opt-in.</summary>
 internal static class SecurityWebHost
 {
     private const int MaximumBodyBytes = 64 * 1024;
@@ -20,6 +21,7 @@ internal static class SecurityWebHost
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         RespectNullableAnnotations = true,
+        RespectRequiredConstructorParameters = true,
         MaxDepth = 16
     };
 
@@ -93,7 +95,7 @@ internal static class SecurityWebHost
             await WriteAsync(response, JsonSerializer.Serialize(new { token }, JsonOptions), cancellationToken);
             return;
         }
-        if (path is not ("/api/model" or "/api/query"))
+        if (path is not ("/api/model" or "/api/query" or "/api/users/status" or "/api/users/connect" or "/api/users/disconnect" or "/api/users/search" or "/api/users/resolve"))
         {
             await ErrorAsync(response, 404, "Not found.", cancellationToken);
             return;
@@ -108,9 +110,17 @@ internal static class SecurityWebHost
             await WriteAsync(response, catalog, cancellationToken);
             return;
         }
-        if (request.Method != "POST" || path != "/api/query")
+        if (request.Method == "GET" && path == "/api/users/status")
         {
-            response.Headers.Allow = path == "/api/model" ? "GET" : "POST";
+            await evaluation.WaitAsync(cancellationToken);
+            try { await WriteAsync(response, JsonSerializer.Serialize(model.Users.Status, JsonOptions), cancellationToken); }
+            catch (ToolException ex) { await ErrorAsync(response, 400, ex.Message, cancellationToken); }
+            finally { evaluation.Release(); }
+            return;
+        }
+        if (request.Method != "POST" || path is "/api/model" or "/api/users/status")
+        {
+            response.Headers.Allow = path is "/api/model" or "/api/users/status" ? "GET" : "POST";
             await ErrorAsync(response, 405, "Method not allowed.", cancellationToken);
             return;
         }
@@ -130,11 +140,28 @@ internal static class SecurityWebHost
                 if (body.Length + count > MaximumBodyBytes) throw new QueryTooLargeException();
                 body.Write(buffer, 0, count);
             }
-            var query = JsonSerializer.Deserialize<SecurityQuery>(body.ToArray(), JsonOptions)
-                ?? throw new JsonException("A query object is required.");
             await evaluation.WaitAsync(cancellationToken);
             JsonElement result;
-            try { result = model.Query(query); }
+            try
+            {
+                T Read<T>() => JsonSerializer.Deserialize<T>(body.ToArray(), JsonOptions) ?? throw new JsonException("An object is required.");
+                // Authentication, live reads, and query evaluation are serialized for the
+                // session so that reconnect/disconnect cannot replace an in-use identity.
+                result = path switch
+                {
+                    "/api/query" => model.Query(Read<SecurityQuery>()),
+                    "/api/users/connect" => JsonSerializer.SerializeToElement(await model.Users.ConnectAsync(Read<UserConnectionRequest>(), cancellationToken), JsonOptions),
+                    "/api/users/search" => JsonSerializer.SerializeToElement(await model.Users.SearchAsync(Read<UserSearchRequest>().Search, cancellationToken), JsonOptions),
+                    "/api/users/resolve" => JsonSerializer.SerializeToElement(await model.Users.ResolveAsync(Read<UserResolveRequest>(), cancellationToken), JsonOptions),
+                    "/api/users/disconnect" => Disconnect(),
+                    _ => throw new InvalidOperationException("Unknown API operation")
+                };
+                JsonElement Disconnect()
+                {
+                    if (Read<Dictionary<string, JsonElement>>().Count != 0) throw new JsonException("Disconnect requires an empty object.");
+                    return JsonSerializer.SerializeToElement(model.Users.Disconnect(), JsonOptions);
+                }
+            }
             finally { evaluation.Release(); }
             await WriteAsync(response, result.GetRawText(), cancellationToken);
         }
@@ -145,7 +172,7 @@ internal static class SecurityWebHost
         catch (Exception ex) when (ex is not (OperationCanceledException or IOException))
         {
             logger.LogError(ex, "Security model query failed");
-            await ErrorAsync(response, 500, "Query failed. Check the CLI log for details.", cancellationToken);
+            await ErrorAsync(response, 500, "Request failed. Check the local analyzer log for details.", cancellationToken);
         }
     }
 

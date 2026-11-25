@@ -6,6 +6,7 @@ using XrmMockup.PermissionAnalyzer.Tool.Commands;
 using XrmMockup.PermissionAnalyzer.Tool.Options;
 using XrmMockup.PermissionAnalyzer.Tool.Output;
 using XrmMockup.PermissionAnalyzer.Tool.Metadata;
+using XrmMockup.PermissionAnalyzer.Tool.Dataverse;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Web;
 
@@ -13,14 +14,17 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Web;
 internal sealed class SecurityModel(string root, ExtractedAnalysis graph,
     IReadOnlyList<UnresolvedOperation> diagnostics, IReadOnlyList<RoleDefinition>? roles,
     PermissionsConfiguration configuration, CoverageOptions? defaults, AnalysisProvenance? inputs,
-    bool requirementsOnly = false, IReadOnlyList<TableColumnCatalog>? columnCatalog = null)
+    bool requirementsOnly = false, IReadOnlyList<TableColumnCatalog>? columnCatalog = null, ExplorerUsers? users = null)
 {
+    internal ExplorerUsers Users => !requirementsOnly && users is not null ? users : throw new ToolException("Connected user lookup is unavailable in this session.");
+
     internal object Catalog()
     {
         var manifest = Builder().Build(requirementsOnly ? null : roles?.SelectMany(r => r.Privileges.Keys)).WithDiagnostics(diagnostics);
         return new
         {
             requirementsOnly,
+            userLookup = !requirementsOnly ? users?.Options : null,
             incomplete = manifest.Incomplete,
             defaults = new { roles = defaults?.Roles?.Names ?? [], callerRoles = defaults?.CallerRoles?.Names ?? [],
                 roleOrigin = defaults?.Roles?.Origin, callerRoleOrigin = defaults?.CallerRoles?.Origin },
@@ -61,14 +65,14 @@ internal sealed class SecurityModel(string root, ExtractedAnalysis graph,
         if (query.Scope == "method") builder.AddEntryMethods([query.Target!]);
         if (query.Scope == "operation") builder.AddOperation(query.Message!, query.Target!, query.Attributes.Length == 0 ? null : query.Attributes);
         var noRoles = requirementsOnly || query.NoRoles;
-        if (requirementsOnly && (query.Roles.Length > 0 || query.CallerRoles.Length > 0))
+        if (requirementsOnly && (query.Roles.Length > 0 || query.CallerRoles.Length > 0 || query.UserSelection is not null || query.CallerUserSelection is not null))
             throw new ToolException("This session was started with --no-roles.");
         var manifest = builder.Build(noRoles ? null : roles?.SelectMany(r => r.Privileges.Keys), scope).WithDiagnostics(diagnostics);
         if (scope is not null && manifest.EntryPoints.Count == 0) throw new ToolException($"No entry point matches {scope}");
         // Empty selections retain startup/configured identities. Explicit selections replace only their identity.
         var selected = noRoles ? null : CoverageSetup.Create(roles, query.Roles, query.CallerRoles, configuration,
-            requireRoles: false, query.Roles.Length == 0 ? defaults?.Roles : null,
-            query.CallerRoles.Length == 0 ? defaults?.CallerRoles : null);
+            requireRoles: false, query.UserSelection is { } userId ? Users.Selection(userId, false) : query.Roles.Length == 0 ? defaults?.Roles : null,
+            query.CallerUserSelection is { } callerId ? Users.Selection(callerId, true) : query.CallerRoles.Length == 0 ? defaults?.CallerRoles : null);
         var coverage = selected is null ? null : CoverageEvaluator.Evaluate(manifest, selected);
         if (selected?.Roles is null && selected?.CallerRoles is null && coverage?.UsesConfiguredRoles == false) coverage = null;
         var filter = new ReportFilter(query.Tables, query.Privileges, [], []);
@@ -90,7 +94,7 @@ internal sealed class SecurityModel(string root, ExtractedAnalysis graph,
 
 internal sealed record SecurityQuery(string Scope = "all", string? Target = null, string? Message = null,
     string[]? Attributes = null, string[]? Roles = null, string[]? CallerRoles = null,
-    string[]? Tables = null, string[]? Privileges = null, bool NoRoles = false)
+    string[]? Tables = null, string[]? Privileges = null, bool NoRoles = false, string? UserSelection = null, string? CallerUserSelection = null)
 {
     public string[] Attributes { get; init; } = Attributes ?? [];
     public string[] Roles { get; init; } = Roles ?? [];
@@ -109,6 +113,10 @@ internal sealed record SecurityQuery(string Scope = "all", string? Target = null
             if (values.Length > 100 || values.Any(v => string.IsNullOrWhiteSpace(v) || v.Length > 1024))
                 throw new ToolException("Query lists must contain at most 100 nonempty values, each at most 1024 characters.");
         if ((Target?.Length ?? 0) > 1024 || (Message?.Length ?? 0) > 1024) throw new ToolException("Query target is too long.");
-        if (NoRoles && (Roles.Length > 0 || CallerRoles.Length > 0)) throw new ToolException("Requirements-only queries cannot select roles.");
+        foreach (var selection in new[] { UserSelection, CallerUserSelection })
+            if (selection is not null && (selection.Length != 32 || !selection.All(Uri.IsHexDigit))) throw new ToolException("Invalid user selection. Look up the user again.");
+        if (UserSelection is not null && Roles.Length > 0 || CallerUserSelection is not null && CallerRoles.Length > 0)
+            throw new ToolException("Choose either a live user or explicit roles for each identity.");
+        if (NoRoles && (Roles.Length > 0 || CallerRoles.Length > 0 || UserSelection is not null || CallerUserSelection is not null)) throw new ToolException("Requirements-only queries cannot select roles.");
     }
 }

@@ -596,7 +596,9 @@ xrmmockup-permissions --function ProcessOrder --user integration@contoso.com \
   --caller-user jane@contoso.com --credential-type azcli --strict
 ```
 
-Only `--user` or `--caller-user` connects to Dataverse. Other runs remain offline, even if
+For command-line reports, only `--user` or `--caller-user` connects to Dataverse. The explorer has a
+separate, explicit **Connect to Dataverse** action and selectors for calling and impersonated users;
+see the [user lookup guide](../src/PermissionAnalyzer/PermissionAnalyzer.Tool/README.md#look-up-calling-and-impersonated-users). Other runs remain offline, even if
 connection settings are present. Neither option runs the analyzed code or changes Dataverse data.
 `--user` cannot be combined with `--role`; `--caller-user` cannot be combined with `--caller-role`;
 neither can be combined with `--no-roles`. Connection flags require one of the user options.
@@ -803,7 +805,9 @@ paths are not resolved). Role catalog gaps are recomputed for each check, never 
 `--config` supplies current principal/user role mappings, suppressions and opt-in live connection settings;
 source project settings are ignored, configured request rules are ignored with a warning, and configured
 entry methods can select additional saved methods. `--user`/`--caller-user` still perform a fresh live lookup,
-matched to the selected role catalog by role ID; authentication is never stored in the snapshot.
+matched to the selected role catalog by role ID; authentication is never stored in the snapshot. The
+explorer can also connect on demand, hold direct/team assignments for selected identities, and refresh
+them explicitly; these selections are session-only and do not alter the snapshot.
 
 ### Snapshot format and freshness
 
