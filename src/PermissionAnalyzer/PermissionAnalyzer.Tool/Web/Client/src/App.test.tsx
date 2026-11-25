@@ -11,6 +11,7 @@ const catalog: Catalog = {
     { name: 'Reader', roleId: null, globalPrivilegesKnown: false, grants: [{ table: 'account', privilege: 'Read', depth: 'User' }] },
     { name: '<script>alert(1)</script>', roleId: null, globalPrivilegesKnown: true, grants: [{ table: null, privilege: 'prvCustom', depth: 'Organization' }] },
   ],
+  columnCatalog: [{ table: 'account', displayName: 'Account', columns: [{ logicalName: 'name', displayName: 'Account name' }, { logicalName: 'ownerid', displayName: 'Owner' }] }, { table: 'contact', displayName: 'Contact', columns: [{ logicalName: 'fullname', displayName: 'Full name' }] }],
   tables: ['account', 'contact'], methods: ['App.Run'],
   entryPoints: [{ id: 'custom-api:ctx_Run', kind: 'CustomApi', type: 'P' }],
 };
@@ -38,7 +39,10 @@ describe('React security explorer', () => {
     expect(screen.getByText(/Defaults: Reader \(Dataverse\)/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
     fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
-    fireEvent.change(screen.getByLabelText(/Changed columns/), { target: { value: 'name, ownerid' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Changed columns (optional)' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Account name (name)' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Owner (ownerid)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenCalledWith(expect.objectContaining({
       scope: 'operation', target: 'account', message: 'Update', attributes: ['name', 'ownerid'], roles: [], callerRoles: [],
@@ -176,17 +180,19 @@ describe('React security explorer', () => {
     expect(screen.getByText('Last run: Update account + cascades')).toBeInTheDocument();
   });
 
-  it('preserves operation inputs across scopes without sending hidden operation constraints', async () => {
+  it('clears table-specific columns across scopes without sending hidden operation constraints', async () => {
     const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
     fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
-    fireEvent.change(screen.getByLabelText(/Changed columns/), { target: { value: 'name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Changed columns (optional)' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Account name (name)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'method' } });
     fireEvent.change(screen.getByLabelText('Target name'), { target: { value: 'App.Run' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'method', target: 'App.Run', message: null, attributes: [] })));
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
-    expect(screen.getByLabelText(/Changed columns/)).toHaveValue('name');
+    expect(screen.queryByRole('button', { name: 'Remove column name' })).not.toBeInTheDocument();
   });
 
   it('clears optional filters and resets to the session starting point', async () => {
@@ -224,6 +230,40 @@ describe('React security explorer', () => {
     expect(within(caller).getByRole('checkbox', { name: 'Reader' })).toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ noRoles: false, roles: ['Reader'], callerRoles: ['Reader'] })));
+  });
+
+  it('clears changed columns on table changes and keeps an empty selection as unknown', async () => {
+    const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
+    expect(screen.getByRole('button', { name: 'Changed columns (optional)' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Changed columns (optional)' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Account name (name)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'contact' } });
+    expect(screen.queryByRole('button', { name: 'Remove column name' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Changed columns (optional)' }));
+    expect(screen.getByRole('checkbox', { name: 'Full name (fullname)' })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'Account name (name)' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ target: 'contact', attributes: [] })));
+  });
+
+  it('supports old catalogs with manual columns without submitting on Enter', async () => {
+    const api = mockApi({ ...catalog, columnCatalog: undefined }); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
+    fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Changed columns (optional)' }));
+    expect(screen.getByText(/No column catalog for this table/)).toBeInTheDocument();
+    const search = screen.getByLabelText('Search columns by display or logical name');
+    fireEvent.change(search, { target: { value: 'ctx_custom' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(api.query).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Remove column ctx_custom' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ attributes: ['ctx_custom'] })));
   });
 
   it('sends the session token through the typed API and surfaces server errors', async () => {

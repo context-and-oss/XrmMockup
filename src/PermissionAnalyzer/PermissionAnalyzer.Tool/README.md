@@ -109,8 +109,12 @@ installation is required to run the packaged CLI; the React/TypeScript frontend 
 
 **Query permissions** supports all entry points and unreached methods, individual plugin types/steps,
 custom APIs, Azure Functions, explicit methods, and synthetic table operations with plugin/workflow
-cascades. For operations, changed columns determine which filtered Update steps run; leaving columns
-blank treats them as unknown. Combine application/caller roles and separately choose impersonated
+cascades. For operations, **Changed columns** is a table-scoped multi-select. Search display or logical
+names, select columns with checkboxes, and remove selected chips individually. The query sends logical
+names. A new table clears the selection. With no selection, changed columns are **unknown**, not an
+empty set of changes; filtered Update steps may be included. Manual logical-name entry remains available
+when a table's catalog is missing or incomplete. Column catalogs are presentation data, not validation
+of the saved graph or evidence of access. Combine application/caller roles and separately choose impersonated
 caller roles using searchable checkboxes; no Ctrl/Cmd multi-selection is needed. No selection uses
 startup CLI/configured defaults; **Use session defaults** clears an explicit role selection.
 **Requirements only** skips coverage.
@@ -227,19 +231,44 @@ updated grants, pass an explicit metadata directory:
 xrmmockup-permissions --snapshot permissions.snapshot.json --metadata ./CurrentMetadata --role "Integration App" --strict
 ```
 
-On replay **only `SecurityRoles/` is read from `--metadata`**; it does not replace the snapshot's lookup or
-plugin metadata. Without that option, the embedded role catalog is used (configured/default metadata
+On ordinary report replay **only `SecurityRoles/` is read from `--metadata`**. In **`--explore`** mode,
+entity metadata is also read to populate the UI's column picker. Supplied tables replace the saved
+column catalog for those tables; tables absent from supplied entity metadata keep their saved catalog.
+This presentation override **does not replace the snapshot's lookup, plugin, workflow, or request-rule
+inputs**. Recreate the snapshot to refresh analysis semantics. Without that option, the embedded role catalog is used (configured/default metadata
 paths are not resolved). Role catalog gaps are recomputed for each check, never reused from old coverage.
 `--config` supplies current principal/user role mappings, suppressions and opt-in live connection settings;
 source project settings are ignored, configured request rules are ignored with a warning, and configured
 entry methods can select additional saved methods. `--user`/`--caller-user` still perform a fresh live lookup,
 matched to the selected role catalog by role ID; authentication is never stored in the snapshot.
 
+### Offline column picker workflows
+
+```bash
+# Capture once, including local table/column metadata; then use the snapshot alone.
+xrmmockup-permissions --solution App.slnx --metadata ./Metadata --save-snapshot permissions.snapshot.json
+xrmmockup-permissions --snapshot permissions.snapshot.json --explore
+
+# Supplement an empty catalog or refresh picker labels/columns from local metadata.
+# Analysis rules and registrations remain frozen; explicit --metadata also replaces the role catalog.
+xrmmockup-permissions --snapshot permissions.snapshot.json --metadata ./Metadata --explore
+```
+
+These picker workflows require no live Dataverse connection or source loading during replay. Do not add
+`--user` or `--caller-user` if you want an entirely offline session: those existing options request live
+role lookup. A snapshot captured without entity metadata has an empty column catalog. Catalog tables
+are added to the UI's table suggestions, even when no role grant or analyzed code references them.
+
 ### Snapshot format and freshness
 
 Snapshots are deterministic, versioned JSON artifacts with kind `xrmmockup-permissions-snapshot` and a
 separate snapshot schema version. They preserve unresolved facts, execution identities, source locations,
-call bindings, source-loading diagnostics and capture provenance. Unknown schemas, malformed snapshots
+call bindings, source-loading diagnostics and capture provenance. Newly captured snapshots use **schema
+version 1**, which includes a lightweight table/column catalog (logical names and available display
+labels) from the metadata read at capture. Only this snapshot schema is supported. Snapshots captured
+without entity metadata contain an empty column catalog; use manual entry or provide `--metadata`
+alongside `--explore` for suggestions.
+Unknown schemas, malformed snapshots
 and ordinary `--format json` reports are rejected: a report is not a graph snapshot.
 
 Replay describes the **captured code and analysis metadata**, not necessarily your current checkout or
@@ -265,7 +294,7 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
 | `--save-snapshot` | | Save the complete extracted analysis to a file for later queries, then stop. Explicit query/report options also produce a report; `--explore` starts the explorer. The snapshot is independent of scope, filters, roles and format |
 | `--snapshot` | | Query a saved snapshot without loading source. Supports every scope, including new operations and explicit methods; cannot combine with `--solution`, `--exclude`, `--plugin-solution` or `--save-snapshot` |
-| `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/`. Default: `MetadataDirectory`, then `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` next to the configuration file when it exists. With `--snapshot`, reads only `SecurityRoles/`; default: the embedded role catalog |
+| `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/`. Default: `MetadataDirectory`, then `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` next to the configuration file when it exists. With `--snapshot`, overrides roles from `SecurityRoles/`; `--explore` also uses entity metadata for column suggestions, without changing the saved analysis. Default: embedded roles and column catalog |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
 | `--plugin-solution` | | A solution or project with plugin code that the analyzed code fires but doesn't include, used for plugin cascades only (see [Plugin code in another solution](#plugin-code-in-another-solution)). Repeatable |
 | `--config` | `-c` | Configuration file; `appsettings.{DOTNET_ENVIRONMENT}.json` in the same folder applies over it (see [Configuration](#configuration)). Default: `appsettings.json` in the current directory, when it exists |

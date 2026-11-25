@@ -5,6 +5,7 @@ using XrmMockup.PermissionAnalyzer.Core.Model;
 using XrmMockup.PermissionAnalyzer.Tool.Commands;
 using XrmMockup.PermissionAnalyzer.Tool.Options;
 using XrmMockup.PermissionAnalyzer.Tool.Output;
+using XrmMockup.PermissionAnalyzer.Tool.Metadata;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Web;
 
@@ -12,7 +13,7 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Web;
 internal sealed class SecurityModel(string root, ExtractedAnalysis graph,
     IReadOnlyList<UnresolvedOperation> diagnostics, IReadOnlyList<RoleDefinition>? roles,
     PermissionsConfiguration configuration, CoverageOptions? defaults, AnalysisProvenance? inputs,
-    bool requirementsOnly = false)
+    bool requirementsOnly = false, IReadOnlyList<TableColumnCatalog>? columnCatalog = null)
 {
     internal object Catalog()
     {
@@ -32,8 +33,10 @@ internal sealed class SecurityModel(string root, ExtractedAnalysis graph,
                     .Concat((r.GlobalPrivileges ?? new Dictionary<string, PrivilegeDepth>())
                         .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new Grant(null, p.Key, p.Value.ToString()))).ToList()
             }).ToList(),
+            columnCatalog = columnCatalog ?? [],
             tables = manifest.Sections.SelectMany(s => s.Requirements.Select(r => r.Table))
                 .Concat((roles ?? []).SelectMany(r => r.Privileges.Keys))
+                .Concat((columnCatalog ?? []).Select(t => t.Table))
                 .Distinct(StringComparer.Ordinal).OrderBy(t => t, StringComparer.Ordinal).ToList(),
             entryPoints = manifest.EntryPoints.Select(e => new { e.Id, kind = e.Kind.ToString(), e.Type }).ToList(),
             methods = graph.Nodes.Where(n => !n.IsConstructor && n.Id == n.Member).Select(n => n.Member).Distinct(StringComparer.Ordinal)

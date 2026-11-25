@@ -4,6 +4,7 @@ import type { Catalog, Query, Scope } from './model';
 import { values } from './model';
 import { RolePicker } from './RolePicker';
 import { SuggestionPicker } from './SuggestionPicker';
+import { ColumnPicker } from './ColumnPicker';
 
 interface Props {
   model: Catalog;
@@ -47,7 +48,7 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
   const [scope, setScope] = useState<Scope>('all');
   const [target, setTarget] = useState('');
   const [message, setMessage] = useState('Update');
-  const [attributes, setAttributes] = useState('');
+  const [attributes, setAttributes] = useState<string[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
   const [callerRoles, setCallerRoles] = useState<string[]>([]);
   const [noRoles, setNoRoles] = useState(model.requirementsOnly);
@@ -66,7 +67,7 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
   const draft: Query = {
     scope, target: scope === 'all' ? null : target.trim() || null,
     message: scope === 'operation' ? message.trim() || null : null,
-    attributes: scope === 'operation' ? values(attributes) : [],
+    attributes: scope === 'operation' ? attributes : [],
     roles: noRoles ? [] : roles, callerRoles: noRoles ? [] : callerRoles,
     noRoles, tables: values(tables), privileges: values(privileges),
   };
@@ -78,7 +79,7 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
   const effectiveCallerRoles = callerRoles.length ? callerRoles : model.defaults.callerRoles;
 
   function reset() {
-    setScope('all'); setTarget(''); setMessage('Update'); setAttributes('');
+    setScope('all'); setTarget(''); setMessage('Update'); setAttributes([]);
     setRoles([]); setCallerRoles([]); setNoRoles(model.requirementsOnly);
     setTables(''); setPrivileges(''); setCollapsed(false);
     setRolePickerOpen(false); setCallerPickerOpen(false); setFiltersOpen(false);
@@ -100,22 +101,23 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
         <section className="builder-step" aria-labelledby="scope-title">
           <h3 id="scope-title"><span className="step-number" aria-hidden="true">1</span>What do you want to analyze?</h3>
           <div className="query-clause"><span className="clause-word" aria-hidden="true">Analyze</span><div className="clause-field"><label htmlFor="scope">Scope</label>
-            <select id="scope" value={scope} aria-describedby="scope-help" onChange={event => { setScope(event.target.value as Scope); setTarget(''); }}>
+            <select id="scope" value={scope} aria-describedby="scope-help" onChange={event => { setScope(event.target.value as Scope); setTarget(''); setAttributes([]); }}>
               {Object.entries(scopeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
             </select></div></div>
           <p id="scope-help" className="hint clause-hint">{scopeHints[scope]}</p>
           {scope !== 'all' && <div className="query-clause"><span className="clause-word" aria-hidden="true">For</span><div className="clause-field">
             <label htmlFor="target">{scope === 'operation' ? 'Table logical name' : scope === 'plugin' ? 'Plugin type[:message[:stage]]' : 'Target name'}</label>
-            <SuggestionPicker key={scope} id="target" label={scope === 'operation' ? 'Tables' : 'Targets'} options={suggestions} required disabled={busy} value={target} onChange={setTarget}
+            <SuggestionPicker key={scope} id="target" label={scope === 'operation' ? 'Tables' : 'Targets'} options={suggestions} required disabled={busy} value={target} onChange={value => { if (value.trim().toLowerCase() !== target.trim().toLowerCase()) setAttributes([]); setTarget(value); }}
               placeholder={scope === 'operation' ? 'Choose or enter a table…' : scope === 'plugin' ? 'AccountPostPlugin:Update' : scope === 'method' ? 'Contoso.Importer.Run' : 'Choose or enter a target…'} />
           </div></div>}
           {scope === 'operation' && <>
             <div className="query-clause"><span className="clause-word" aria-hidden="true">When</span><div className="clause-field"><label htmlFor="message">Message</label>
               <SuggestionPicker id="message" label="Messages" options={['Create', 'Update', 'Delete', 'Retrieve', 'RetrieveMultiple', 'Assign', 'Share', 'Associate', 'Disassociate']} required disabled={busy} value={message} onChange={setMessage} />
-            </div><div className="clause-field"><label htmlFor="attributes">Changed columns <span className="muted">(optional)</span></label>
-              <input id="attributes" value={attributes} onChange={event => setAttributes(event.target.value)} placeholder="name, ownerid" aria-describedby="attributes-help" />
             </div></div>
-            <p id="attributes-help" className="hint clause-hint">Leave columns empty for unknown columns; filtered Update steps may be included.</p>
+            <div className="query-clause"><span className="clause-word" aria-hidden="true">With</span><div className="clause-field"><p className="column-field-label">Changed columns <span className="muted">(optional)</span></p>
+              <ColumnPicker key={target.trim().toLowerCase()} table={target.trim()} catalog={model.columnCatalog?.find(t => t.table.toLowerCase() === target.trim().toLowerCase())} selected={attributes} disabled={busy} onChange={setAttributes} />
+            </div></div>
+            <p id="attributes-help" className="hint clause-hint">No selection means unknown changed columns, not “no changes”; filtered Update steps may be included. Column suggestions do not refresh the saved analysis.</p>
           </>}
         </section>
         <section className="builder-step context-step" aria-labelledby="context-title">

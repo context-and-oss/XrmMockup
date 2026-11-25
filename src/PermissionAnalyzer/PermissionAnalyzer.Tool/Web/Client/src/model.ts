@@ -3,7 +3,10 @@ export type Identity = 'Caller' | 'User' | 'ApplicationUser' | 'ImpersonatedCall
 export type CoverageStatus = 'granted' | 'missing' | 'not-checked' | 'not-governed' | 'suppressed' | 'system' | 'unverifiable';
 export interface Grant { table: string | null; privilege: string; depth: string }
 export interface Role { name: string; roleId: string | null; globalPrivilegesKnown: boolean; grants: Grant[] }
+export interface ColumnDefinition { logicalName: string; displayName: string | null }
+export interface TableColumnCatalog { table: string; displayName: string | null; columns: ColumnDefinition[] }
 export interface Catalog {
+  columnCatalog?: TableColumnCatalog[];
   requirementsOnly: boolean;
   incomplete: boolean;
   defaults: { roles: string[]; callerRoles: string[]; roleOrigin?: string | null; callerRoleOrigin?: string | null };

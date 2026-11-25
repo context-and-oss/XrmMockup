@@ -282,6 +282,7 @@ public class SnapshotTests
             var snapshot = AnalysisSnapshot.Read(snapshotPath);
             Assert.NotEmpty(snapshot.Inputs.Projects);
             Assert.Null(snapshot.Roles);
+            Assert.Empty(snapshot.ColumnCatalog!);
             Assert.DoesNotContain(snapshot.Graph.Entries, e => e.Kind == EntryPointKind.Operation);
             using (var captureReport = JsonDocument.Parse(await File.ReadAllTextAsync(report))) {
                 Assert.False(captureReport.RootElement.TryGetProperty("result", out _));
@@ -317,6 +318,9 @@ public class SnapshotTests
             Assert.NotEmpty(captured.Inputs.Projects);
             Assert.NotEmpty(captured.Graph.Nodes);
             Assert.NotEmpty(captured.RoleDefinitions()!);
+            var accountColumns = captured.ColumnCatalog!.Single(t => t.Table == "account").Columns;
+            Assert.Contains(accountColumns, c => c.LogicalName == "name");
+            Assert.Contains(accountColumns, c => c.LogicalName == "ownerid");
 
             var capture = new[] { "--solution", project, "--metadata", TestMetadata.DirectoryPath,
                 "--config", config, "--save-snapshot", snapshotPath, "--operation", "WhoAmI systemuser",
