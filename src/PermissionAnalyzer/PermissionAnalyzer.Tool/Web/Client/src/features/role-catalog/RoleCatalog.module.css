@@ -1,0 +1,68 @@
+.catalogToolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  margin: 28px 0;
+
+  > div {
+    min-width: 0;
+  }
+
+  p {
+    font-size: 12px;
+    margin-bottom: 0;
+  }
+
+  label {
+    width: 320px;
+    max-width: 100%;
+    flex-shrink: 0;
+    margin: 0;
+  }
+
+  input {
+    margin-top: 8px;
+  }
+
+  @media (max-width: 800px) {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 18px;
+
+    label {
+      width: 100%;
+    }
+  }
+}
+
+.catalogCard {
+  border-radius: 20px;
+  margin: 0 0 16px;
+  overflow: hidden;
+
+  summary {
+    padding: 22px 24px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  summary::marker {
+    color: var(--purple);
+  }
+
+  p {
+    padding: 0 24px 16px;
+  }
+
+  @media (max-width: 600px) {
+    table {
+      min-width: 420px;
+    }
+
+    summary {
+      padding: 18px;
+    }
+  }
+}

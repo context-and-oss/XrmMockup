@@ -1,0 +1,301 @@
+.header {
+  min-height: 80px;
+  background: var(--white);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 4vw;
+
+  @media (max-width: 600px) {
+    min-height: 72px;
+    gap: 16px;
+  }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+
+  @media (max-width: 600px) {
+    flex-wrap: wrap;
+    gap: 2px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.productName {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -.6px;
+
+  @media (max-width: 600px) {
+    font-size: 18px;
+  }
+}
+
+.productDivider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  flex-shrink: 0;
+
+  @media (max-width: 600px) {
+    display: none;
+  }
+}
+
+.productDescription {
+  color: var(--muted);
+  font-size: 13px;
+
+  @media (max-width: 600px) {
+    font-size: 10px;
+  }
+}
+
+.local {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--grey);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.main {
+  max-width: 1540px;
+  margin: auto;
+  padding: 40px 4vw 20px;
+
+  @media (max-width: 800px) {
+    padding-top: 28px;
+  }
+}
+
+.heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 32px;
+  align-items: center;
+  margin-bottom: 28px;
+
+  > div {
+    min-width: 0;
+  }
+
+  @media (max-width: 1100px) {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 22px;
+  }
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 10px 0 0;
+}
+
+.stats {
+  display: flex;
+  gap: 26px;
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+
+  @media (max-width: 1100px) {
+    gap: 28px;
+  }
+
+  @media (max-width: 600px) {
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+}
+
+.stat {
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+
+  strong {
+    display: block;
+    font-size: 30px;
+    line-height: 1.3;
+    font-weight: 300;
+    color: var(--ink);
+    margin-bottom: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 1100px) {
+    &:first-child {
+      border-left: 0;
+      padding-left: 0;
+    }
+  }
+
+  @media (max-width: 600px) {
+    padding-left: 16px;
+
+    strong {
+      font-size: 26px;
+    }
+  }
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 22px;
+  background: var(--white);
+  border-radius: 18px;
+  color: var(--grey);
+  font-size: 12px;
+  line-height: 1.6;
+
+  p {
+    margin: 0;
+  }
+
+  strong {
+    color: var(--black);
+    font-weight: 500;
+  }
+
+  p > span {
+    white-space: normal;
+  }
+
+  @media (max-width: 600px) {
+    padding: 16px;
+    gap: 10px;
+  }
+}
+
+.noticeIcon {
+  width: 24px;
+  height: 24px;
+  color: var(--purple);
+  flex-shrink: 0;
+}
+
+.nav {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--line);
+  margin: 24px 0 28px;
+
+  @media (max-width: 600px) {
+    gap: 24px;
+  }
+}
+
+.tab {
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  padding: 14px 0;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0;
+
+  &.active {
+    color: var(--purple);
+    border-bottom-color: var(--purple);
+  }
+
+  &:hover {
+    color: var(--purple);
+  }
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.results {
+  min-width: 0;
+}
+
+.resultsHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin: 4px 4px 22px;
+
+  p {
+    margin-bottom: 6px;
+  }
+
+  h2 {
+    margin: 0;
+  }
+}
+
+.footer {
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  margin-top: 36px;
+  padding: 22px 0;
+  line-height: 1.7;
+}
+
+.skipLink {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  left: 12px;
+  padding: 12px 18px;
+  background: var(--purple);
+  color: var(--white);
+  border-radius: 8px;
+  transform: translateY(-200%);
+
+  &:focus {
+    transform: translateY(0);
+  }
+}
+
+.lastRun {
+  font-size: 12px;
+  color: var(--grey);
+  margin: -8px 4px 16px;
+  overflow-wrap: anywhere;
+
+  p {
+    margin: 4px 0;
+  }
+
+  p + p {
+    font-size: 11px;
+  }
+}
+
+.staleNotice {
+  background: var(--purple-tint);
+  border-left: 3px solid var(--purple);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: var(--grey);
+  font-size: 12px;
+  font-weight: 400;
+}

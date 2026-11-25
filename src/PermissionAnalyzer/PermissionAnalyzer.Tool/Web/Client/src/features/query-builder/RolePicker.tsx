@@ -1,3 +1,6 @@
+import styles from './RolePicker.module.css';
+import ui from '../../shared/ui/ui.module.css';
+import { cx } from '../../shared/ui/classNames';
 import { useState } from 'react';
 
 interface Props {
@@ -17,19 +20,19 @@ export function RolePicker({ id, label, names, selected, disabled, onChange }: P
   function toggle(name: string) {
     onChange(names.filter(value => value === name ? !selected.includes(value) : selected.includes(value)));
   }
-  return <fieldset className="role-picker" disabled={disabled}>
+  return <fieldset className={styles.rolePicker} disabled={disabled}>
     <legend>{label}</legend>
-    <label className="sr-only" htmlFor={`${id}-search`}>Search {label.toLowerCase()}</label>
+    <label className={ui.srOnly} htmlFor={`${id}-search`}>Search {label.toLowerCase()}</label>
     <input id={`${id}-search`} type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search roles…" />
-    <div className="role-options">
-      {matches.map(name => <label className="check role-option" key={name}>
+    <div className={styles.roleOptions}>
+      {matches.map(name => <label className={cx(ui.check, styles.roleOption)} key={name}>
         <input type="checkbox" checked={selected.includes(name)} onChange={() => toggle(name)} />
         <span>{name}</span>
       </label>)}
-      {!matches.length && <p className="hint">{names.length ? 'No roles match. Try another search.' : 'No security roles loaded.'}</p>}
+      {!matches.length && <p className={ui.hint}>{names.length ? 'No roles match. Try another search.' : 'No security roles loaded.'}</p>}
     </div>
-    <div className="role-picker-footer"><span>{selected.length} explicitly selected</span>
-      <button type="button" className="text-button" disabled={!selected.length} onClick={() => onChange([])}>Use session defaults</button>
+    <div className={styles.rolePickerFooter}><span>{selected.length} explicitly selected</span>
+      <button type="button" className={ui.textButton} disabled={!selected.length} onClick={() => onChange([])}>Use session defaults</button>
     </div>
   </fieldset>;
 }

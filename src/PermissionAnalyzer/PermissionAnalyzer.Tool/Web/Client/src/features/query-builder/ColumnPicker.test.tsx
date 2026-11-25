@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ColumnPicker } from './ColumnPicker';
-import type { TableColumnCatalog } from './model';
+import type { TableColumnCatalog } from '../../shared/api/types';
 
 const catalog: TableColumnCatalog = { table: 'account', displayName: 'Account', columns: [
   { logicalName: 'name', displayName: 'Account name' }, { logicalName: 'ownerid', displayName: 'Owner' },

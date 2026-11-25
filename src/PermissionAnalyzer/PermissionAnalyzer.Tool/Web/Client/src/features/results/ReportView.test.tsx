@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ReportView } from './ReportView';
-import type { Report, Requirement, Section } from './model';
+import type { Report, Requirement, Section } from '../../shared/api/types';
 
 const requirement = (table: string | undefined, privilege: string, coverage: Requirement['coverage'], extra: Partial<Requirement> = {}): Requirement =>
   ({ table, privilege, coverage, runsAs: 'Caller', basis: 'direct', sources: [], ...extra });

@@ -28,5 +28,5 @@ export default defineConfig({
       },
     },
   },
-  test: { environment: 'jsdom', env: { NODE_ENV: 'test' }, setupFiles: ['./src/test-setup.ts'] },
+  test: { environment: 'jsdom', env: { NODE_ENV: 'test' }, setupFiles: ['./src/testing/setup.ts'] },
 });

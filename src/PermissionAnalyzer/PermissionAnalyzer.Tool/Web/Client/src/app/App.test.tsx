@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App';
-import { PermissionApi } from './model';
-import type { Catalog, Report } from './model';
+import { PermissionApi } from '../shared/api/PermissionApi';
+import type { Catalog, Report } from '../shared/api/types';
 
 const catalog: Catalog = {
   requirementsOnly: false, incomplete: false,

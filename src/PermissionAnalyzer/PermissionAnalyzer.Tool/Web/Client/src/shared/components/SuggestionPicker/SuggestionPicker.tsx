@@ -1,3 +1,5 @@
+import styles from './SuggestionPicker.module.css';
+import { cx } from '../../ui/classNames';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -99,29 +101,29 @@ export function SuggestionPicker({ id, label, value, options, placeholder, requi
     }
   }
 
-  return <div className="suggestion-picker" ref={root}>
+  return <div className={styles.suggestionPicker} ref={root}>
     <input ref={input} id={id} role="combobox" type="text" value={value} required={required} disabled={disabled}
       placeholder={placeholder} autoComplete="off" spellCheck={false}
       aria-autocomplete="list" aria-expanded={expanded} aria-controls={expanded ? listId : undefined}
       aria-activedescendant={expanded && active >= 0 && visible[active] ? `${id}-option-${active}` : undefined}
       onFocus={() => { setOpen(true); setBrowsing(true); setActive(-1); }} onClick={() => setOpen(true)} onBlur={() => { setOpen(false); setActive(-1); }}
       onChange={event => { onChange(event.target.value); setBrowsing(false); setOpen(true); setActive(-1); }} onKeyDown={keyDown} />
-    <button type="button" className="suggestion-trigger" aria-label={`${expanded ? 'Hide' : 'Show'} ${label.toLowerCase()} suggestions`}
+    <button type="button" className={styles.suggestionTrigger} aria-label={`${expanded ? 'Hide' : 'Show'} ${label.toLowerCase()} suggestions`}
       disabled={disabled} tabIndex={-1} aria-expanded={expanded} aria-controls={expanded ? listId : undefined}
       onPointerDown={event => event.preventDefault()} onClick={() => { input.current?.focus(); setBrowsing(true); setOpen(!expanded); setActive(-1); }}>
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={expanded ? 'm6 12 4-4 4 4' : 'm6 8 4 4 4-4'} /></svg>
     </button>
-    {expanded && createPortal(<div ref={popup} className="suggestion-popup" style={position}>
-      <div className="suggestion-caption">{label}<span aria-live="polite" aria-atomic="true">{matches.length} {matches.length === 1 ? 'match' : 'matches'}</span></div>
-      <div id={listId} role="listbox" aria-label={`${label} suggestions`} className="suggestion-list">
+    {expanded && createPortal(<div ref={popup} className={styles.suggestionPopup} style={position}>
+      <div className={styles.suggestionCaption}>{label}<span aria-live="polite" aria-atomic="true">{matches.length} {matches.length === 1 ? 'match' : 'matches'}</span></div>
+      <div id={listId} role="listbox" aria-label={`${label} suggestions`} className={styles.suggestionList}>
         {visible.map((option, index) => <div key={option} id={`${id}-option-${index}`} role="option"
-          aria-selected={value === option} className={`suggestion-option ${active === index ? 'is-active' : ''}`}
+          aria-selected={value === option} className={cx(styles.suggestionOption, active === index && styles.isActive)}
           onPointerDown={event => event.preventDefault()} onClick={() => choose(option)}>
           <span>{option}</span>{value === option && <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 10 4 4 8-8" /></svg>}
         </div>)}
       </div>
-      {!visible.length && <p className="suggestion-empty">{options.length ? 'No matching suggestions.' : 'No suggestions in the loaded model.'} You can still use the value you enter.</p>}
-      <div className="suggestion-footer">{matches.length > visible.length ? 'Showing the first 80 matches. Keep typing to narrow the list.' : 'Type to search, or enter your own value.'}</div>
+      {!visible.length && <p className={styles.suggestionEmpty}>{options.length ? 'No matching suggestions.' : 'No suggestions in the loaded model.'} You can still use the value you enter.</p>}
+      <div className={styles.suggestionFooter}>{matches.length > visible.length ? 'Showing the first 80 matches. Keep typing to narrow the list.' : 'Type to search, or enter your own value.'}</div>
     </div>, document.body)}
   </div>;
 }

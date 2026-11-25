@@ -32,6 +32,35 @@ For hot-reload development, first start the CLI with `--explore` on its default 
 server proxies `/api` to the CLI, retaining the session token and rewriting Host/Origin for the local
 backend. Production `--explore` serves only the embedded Vite build; it never starts Vite or an npm process.
 
+## Web client organization
+
+The React client lives in `src/PermissionAnalyzer/PermissionAnalyzer.Tool/Web/Client/src/`:
+
+```text
+src/
+  app/                       Application shell and integration tests
+  features/
+    query-builder/           Query form, column/role pickers, and query summaries
+    results/                 Result tables, finding filters, and sorting
+    role-catalog/            Role grant browser
+  shared/
+    api/                     Wire types and the session-aware API client
+    components/SuggestionPicker/  Reusable editable combobox
+    ui/                      Shared CSS-module primitives and class-name helper
+  styles/global.css          Brand tokens, resets, and element defaults only
+  testing/                   Test setup
+  main.tsx                   Client entry point
+```
+
+Colocate component styles and tests with their component. Use `*.module.css` for local styles;
+shared surfaces, buttons, hints, accessibility utilities, and table defaults belong in
+`shared/ui/ui.module.css`. Keep domain-specific states in the owning feature. Use native CSS nesting
+for descendants, hover/selection states, and responsive overrides where it makes ownership clearer.
+Avoid selectors that reach into another component's module: pass a class or use an owned structural
+selector instead. Shared table defaults use `:where()` so local table states can override them.
+
+Vite still emits one `styles.css` resource for the packaged CLI; CSS modules do not add extra served
+assets. Tests should prefer roles and accessible names over generated CSS-module class names.
 
 ## Architecture and contracts
 

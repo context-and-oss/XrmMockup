@@ -1,5 +1,8 @@
+import styles from './ReportView.module.css';
+import ui from '../../shared/ui/ui.module.css';
+import { cx } from '../../shared/ui/classNames';
 import { useState } from 'react';
-import type { Report, Requirement, Source } from './model';
+import type { Report, Requirement, Source } from '../../shared/api/types';
 
 type Column = 'table' | 'privilege' | 'identity' | 'basis' | 'coverage';
 type Category = 'granted' | 'missing' | 'not-checked' | 'unresolved' | 'unverifiable' | 'truncated' | 'suppressed' | 'system' | 'not-governed';
@@ -18,8 +21,8 @@ function value(requirement: Requirement, column: Column) {
 }
 function Sources({ sources }: { sources: Source[] }) {
   if (!sources.length) return null;
-  return <details className="sources"><summary>{sources.length} source{sources.length === 1 ? '' : 's'}</summary>
-    {sources.map((source, index) => <div key={index} className="source">{source.file}:{source.line}:{source.column}
+  return <details className={styles.sources}><summary>{sources.length} source{sources.length === 1 ? '' : 's'}</summary>
+    {sources.map((source, index) => <div key={index} className={styles.source}>{source.file}:{source.line}:{source.column}
       {source.path.length > 0 && <div>{source.path.join(' → ')}</div>}
     </div>)}
   </details>;
@@ -64,28 +67,28 @@ function Results({ report }: { report: Report }) {
   }
   function clear() { setSelected([]); setFilters(emptyFilters); }
 
-  return <div className="report-view">
-    <div className="summary" role="group" aria-label="Filter results by finding">
+  return <div>
+    <div className={styles.summary} role="group" aria-label="Filter results by finding">
       {counts.filter(([label, count]) => count || label === 'Granted' || label === 'Missing').map(([label, count, style, category]) =>
-        <button type="button" key={label} className={`pill result-filter ${style}`} aria-pressed={selected.includes(category)} onClick={() => toggle(category)}>
-          <span aria-hidden="true" className="filter-check">{selected.includes(category) ? '✓' : '+'}</span>{count} {label}</button>)}
-      {!report.result && <span className="pill">Requirements only · no role coverage</span>}
-      {report.analysis.incomplete && <span className="pill warn">Incomplete analysis — do not treat as a pass</span>}
-      {report.analysis.reportFilter && <span className="pill">Filtered rows · counts cover whole analysis</span>}
-      {!!report.tablesWithoutRoleMetadata?.length && <span className="pill warn">No role metadata: {report.tablesWithoutRoleMetadata.join(', ')}</span>}
+        <button type="button" key={label} className={cx(styles.pill, styles.resultFilter, styles[style])} aria-pressed={selected.includes(category)} onClick={() => toggle(category)}>
+          <span aria-hidden="true" className={styles.filterCheck}>{selected.includes(category) ? '✓' : '+'}</span>{count} {label}</button>)}
+      {!report.result && <span className={styles.pill}>Requirements only · no role coverage</span>}
+      {report.analysis.incomplete && <span className={cx(styles.pill, styles.warn)}>Incomplete analysis — do not treat as a pass</span>}
+      {report.analysis.reportFilter && <span className={styles.pill}>Filtered rows · counts cover whole analysis</span>}
+      {!!report.tablesWithoutRoleMetadata?.length && <span className={cx(styles.pill, styles.warn)}>No role metadata: {report.tablesWithoutRoleMetadata.join(', ')}</span>}
     </div>
-    <div className="result-toolbar">
-      <div><p className="result-count" role="status" aria-label="Result row count">Showing {shownRows} of {totalRows} loaded requirement rows{selected.length > 0 && ' · Finding filters active'}</p>
-        <p className="hint">Toggle badges to combine findings. Column filters combine with AND. Counts and JSON stay unchanged; diagnostics remain in matching sections.</p></div>
-      <div className="result-toolbar-actions"><button className="secondary" type="button" aria-expanded={filterOpen} aria-controls="result-column-filters" onClick={() => setFilterOpen(!filterOpen)}>{filterOpen ? 'Hide column filters' : 'Filter columns'}</button>
-        {hasFilters && <button className="text-button" type="button" onClick={clear}>Clear result filters</button>}</div>
+    <div className={styles.resultToolbar}>
+      <div><p className={styles.resultCount} role="status" aria-label="Result row count">Showing {shownRows} of {totalRows} loaded requirement rows{selected.length > 0 && ' · Finding filters active'}</p>
+        <p className={ui.hint}>Toggle badges to combine findings. Column filters combine with AND. Counts and JSON stay unchanged; diagnostics remain in matching sections.</p></div>
+      <div className={styles.resultToolbarActions}><button className={ui.secondary} type="button" aria-expanded={filterOpen} aria-controls="result-column-filters" onClick={() => setFilterOpen(!filterOpen)}>{filterOpen ? 'Hide column filters' : 'Filter columns'}</button>
+        {hasFilters && <button className={ui.textButton} type="button" onClick={clear}>Clear result filters</button>}</div>
     </div>
-    {filterOpen && <fieldset id="result-column-filters" className="result-column-filters"><legend className="sr-only">Result column filters</legend>
+    {filterOpen && <fieldset id="result-column-filters" className={styles.resultColumnFilters}><legend className={ui.srOnly}>Result column filters</legend>
       {columns.map(([column, label]) => <div key={column}><label htmlFor={`result-filter-${column}`}>{label}</label>
         <input id={`result-filter-${column}`} type="search" value={filters[column]} onChange={event => setFilters({ ...filters, [column]: event.target.value })}
           placeholder={column === 'coverage' ? 'Status, depth, or reason…' : `Filter ${label.toLowerCase()}…`} /></div>)}
     </fieldset>}
-    {!views.some(view => view.visible) && <div className="empty"><h3>No matching results</h3><p>Try another finding or clear the column filters. The analysis totals above have not changed.</p></div>}
+    {!views.some(view => view.visible) && <div className={cx(ui.surface, ui.empty)}><h3>No matching results</h3><p>Try another finding or clear the column filters. The analysis totals above have not changed.</p></div>}
     {views.filter(view => view.visible).map(({ section, rows, truncated }) => {
       const warnings = [
         ...(truncated ? ['Analysis truncated for this section.'] : []),
@@ -93,28 +96,28 @@ function Results({ report }: { report: Report }) {
         ...section.assumptions.map(value => `Assumption: ${value.reason} (${value.source.file}:${value.source.line})`),
         ...(section.triggers?.length ? [`Triggers: ${section.triggers.join(', ')}`] : []),
       ];
-      return <article className="section-card" key={section.id}>
-        <div className="section-head"><h3>{section.id}</h3><p>{section.kind || 'Unreached method'}</p>
+      return <article className={cx(ui.surface, styles.sectionCard)} key={section.id}>
+        <div className={styles.sectionHead}><h3>{section.id}</h3><p>{section.kind || 'Unreached method'}</p>
           {section.roles?.map((identity, index) => <p key={index}>{identity.runsAs}{identity.userId && ` (${identity.userId})`}: {identity.roles?.join(' + ') || identity.note || 'Not checked'}{identity.origin && ` · ${identity.origin}`}</p>)}
           <p>{rows.length} of {section.requirements.length} requirement rows</p>
         </div>
-        <div className="table-wrap" role="region" aria-label={`${section.id} requirements`} tabIndex={0}><table>
+        <div className={ui.tableWrap} role="region" aria-label={`${section.id} requirements`} tabIndex={0}><table className={ui.table}>
           <thead><tr>{columns.map(([column, label]) => <th key={column} scope="col" aria-sort={sort?.column === column ? sort.direction : 'none'}>
-            <button className="table-sort" type="button" onClick={() => sortColumn(column)} aria-label={`Sort by ${label.toLowerCase()}`}>
+            <button className={styles.tableSort} type="button" onClick={() => sortColumn(column)} aria-label={`Sort by ${label.toLowerCase()}`}>
               {label}<span aria-hidden="true">{sort?.column === column ? sort.direction === 'ascending' ? '↑' : '↓' : '↕'}</span></button>
           </th>)}</tr></thead>
           <tbody>{rows.map(({ requirement, index }) => <tr key={index}>
             <td>{requirement.table || 'Global'}<Sources sources={requirement.sources} /></td>
             <td>{requirement.privilege}</td><td>{value(requirement, 'identity')}</td><td>{requirement.basis}</td>
-            <td><span className={`badge ${status(requirement)}`}>{requirement.coverage?.status || 'Not checked'}</span>
-              {requirement.coverage?.depth && <div className="hint">{requirement.coverage.depth}</div>}
-              {requirement.coverage?.reason && <div className="hint">{requirement.coverage.reason}</div>}
+            <td><span className={cx(styles.badge, styles[status(requirement)])}>{requirement.coverage?.status || 'Not checked'}</span>
+              {requirement.coverage?.depth && <div className={ui.hint}>{requirement.coverage.depth}</div>}
+              {requirement.coverage?.reason && <div className={ui.hint}>{requirement.coverage.reason}</div>}
             </td>
           </tr>)}
-          {!rows.length && <tr><td colSpan={columns.length} className="no-result-rows">{section.requirements.length ? 'No requirement rows match these filters. Section diagnostics are shown below.' : 'No requirements in this view.'}</td></tr>}
+          {!rows.length && <tr><td colSpan={columns.length} className={styles.noResultRows}>{section.requirements.length ? 'No requirement rows match these filters. Section diagnostics are shown below.' : 'No requirements in this view.'}</td></tr>}
           </tbody>
         </table></div>
-        {warnings.length > 0 && <div className="diagnostics">{warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
+        {warnings.length > 0 && <div className={styles.diagnostics}>{warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
       </article>;
     })}
   </div>;
