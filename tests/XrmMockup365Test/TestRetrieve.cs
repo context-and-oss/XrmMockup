@@ -29,7 +29,7 @@ namespace DG.XrmMockupTest
 
                 // Check the same User after ResetEnvironment
                 // This should be the case because identity IDs also remain unchanged in the real environment.
-                base.crm.ResetEnvironment();
+                base.crm.ResetEnvironment(true);
                 var calId2 = orgAdminUIService.Create(new Entity("ctx_parent"));
                 var cal2 = orgAdminUIService.Retrieve("ctx_parent", calId2, new ColumnSet(true));
                 Assert.Equal(calId2, cal2.Id);

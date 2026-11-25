@@ -217,8 +217,8 @@ namespace DG.Tools.XrmMockup
         /// <summary>
         /// Resets the local test data
         /// </summary>
-        public void ResetEnvironment() {
-            Core.ResetEnvironment();
+        public void ResetEnvironment(bool preserveOrganizationIdAndUserId = false) {
+            Core.ResetEnvironment(preserveOrganizationIdAndUserId);
             ClearTraceLog();
         }
 

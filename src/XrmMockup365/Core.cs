@@ -56,7 +56,7 @@ namespace DG.Tools.XrmMockup
         internal EntityReference BaseCurrency { get; private set; }
 
         // Setup admin user
-        private readonly Entity admin = new Entity(LogicalNames.SystemUser) { Id = Guid.NewGuid() };
+        private Entity admin = new Entity(LogicalNames.SystemUser) { Id = Guid.NewGuid() };
         private RequestExecutionPipeline pipeline;
         private PluginManager pluginManager;
         private CustomApiManager customApiManager;
@@ -1214,8 +1214,14 @@ namespace DG.Tools.XrmMockup
             snapshots.Remove(snapshotName);
         }
 
-        internal void ResetEnvironment()
+        internal void ResetEnvironment(bool preserveOrganizationIdAndUserId = false)
         {
+            if (!preserveOrganizationIdAndUserId)
+            {
+                OrganizationId  = Guid.NewGuid();
+                admin = new Entity(LogicalNames.SystemUser) { Id = Guid.NewGuid() };
+            }
+
             this.TimeOffset = new TimeSpan();
             AutoNumbers.Restore(null);
             workflowManager.ResetWorkflows(settings.IncludeAllWorkflows);
