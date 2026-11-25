@@ -99,7 +99,7 @@ internal static class AnalysisRunner
                 using var explorerUsers = new ExplorerUsers(roles, configuration.ConnectionConfiguration, loggerFactory);
                 var model = new SecurityModel(root, snapshot?.Graph ?? builder.Extracted(), incomplete, roles,
                     configuration.Permissions, coverageOptions, inputs, request.NoRoles, columns, explorerUsers);
-                await SecurityWebHost.RunAsync(model, request.Port, logger, cancellationToken);
+                await SecurityWebHost.RunAsync(model, request.Port, logger, cancellationToken, address => BrowserLauncher.Open(address, logger));
                 return ExitCodes.Success;
             }
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));

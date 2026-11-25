@@ -25,7 +25,7 @@ internal static class SecurityWebHost
         MaxDepth = 16
     };
 
-    internal static async Task RunAsync(SecurityModel model, int port, ILogger logger, CancellationToken cancellationToken)
+    internal static async Task RunAsync(SecurityModel model, int port, ILogger logger, CancellationToken cancellationToken, Action<string>? openBrowser = null)
     {
         if (port is < 1 or > 65535) throw new ToolException("Web port must be between 1 and 65535.");
         var address = $"http://127.0.0.1:{port}/";
@@ -53,6 +53,7 @@ internal static class SecurityWebHost
         try { await app.StartAsync(cancellationToken); }
         catch (IOException ex) { throw new ToolException($"Cannot start web UI at {address}: {ex.Message}. Try another --port."); }
         logger.LogInformation("Security model web UI: {Address} (local only). Press Ctrl+C to stop", address);
+        if (!cancellationToken.IsCancellationRequested) openBrowser?.Invoke(address);
         await app.WaitForShutdownAsync(cancellationToken);
     }
 

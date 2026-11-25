@@ -231,6 +231,26 @@ public class WebTests
     }
 
     [Fact]
+    public async Task BrowserLaunchHappensOnceAfterServerIsReadyAndUsesTheSelectedPort()
+    {
+        using var reservation = new TcpListener(IPAddress.Loopback, 0);
+        reservation.Start(); var port = ((IPEndPoint)reservation.LocalEndpoint).Port; reservation.Stop();
+        using var cancellation = new CancellationTokenSource();
+        var opened = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var server = SecurityWebHost.RunAsync(Model(), port, NullLogger.Instance, cancellation.Token,
+            address => { calls++; opened.TrySetResult(address); });
+        try {
+            var address = await opened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal($"http://127.0.0.1:{port}/", address);
+            using var client = new HttpClient();
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(address)).StatusCode);
+            Assert.Equal(1, calls);
+        }
+        finally { cancellation.Cancel(); await server.WaitAsync(TimeSpan.FromSeconds(10)); }
+    }
+
+    [Fact]
     public async Task LocalServerServesEmbeddedUiProtectsApiAndStopsCleanly()
     {
         using var reservation = new TcpListener(IPAddress.Loopback, 0);

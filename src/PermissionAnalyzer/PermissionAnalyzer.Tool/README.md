@@ -49,7 +49,8 @@ Use `--no-roles` to inspect requirements without checking role coverage.
 
 ## Permission explorer
 
-Open the address printed by the CLI (default: `http://127.0.0.1:8765/`). Keep the CLI running while you
+The explorer opens your default browser after the server starts. If no browser is available, open the
+address printed by the CLI manually (default: `http://127.0.0.1:8765/`). Keep the CLI running while you
 use the explorer; **Ctrl+C** stops it. If the port is occupied, add `--port 9000`.
 
 1. **Choose what to analyze:** the whole model, a plugin, custom API, function, method, or table operation.
