@@ -2,54 +2,34 @@ import styles from './ReportView.module.css';
 import ui from '../../shared/ui/ui.module.css';
 import { cx } from '../../shared/ui/classNames';
 import { useState } from 'react';
-import type { Report, Requirement, Source } from '../../shared/api/types';
+import { SuggestionPicker } from '../../shared/components/SuggestionPicker/SuggestionPicker';
+import { roleOriginLabel, sectionTitle, sectionKindLabel, identityLabel, uiMessage, coverageLabel, depthLabel } from '../../shared/presentation/labels';
+import { PermissionTable } from './PermissionTable';
+import { columns, status, value, searchValue, groupRows } from './resultRows';
+import type { Column, Sort } from './resultRows';
+import type { Report, Requirement } from '../../shared/api/types';
 
-type Column = 'table' | 'privilege' | 'identity' | 'basis' | 'coverage';
 type Category = 'granted' | 'missing' | 'not-checked' | 'unresolved' | 'unverifiable' | 'truncated' | 'suppressed' | 'system' | 'not-governed';
 type Filters = Record<Column, string>;
-const columns: [Column, string][] = [['table', 'Table'], ['privilege', 'Privilege'], ['identity', 'Runs as'], ['basis', 'Basis'], ['coverage', 'Coverage']];
 const emptyFilters: Filters = { table: '', privilege: '', identity: '', basis: '', coverage: '' };
-const status = (requirement: Requirement) => requirement.coverage?.status || 'not-checked';
-function value(requirement: Requirement, column: Column) {
-  switch (column) {
-    case 'table': return requirement.table || 'Global';
-    case 'privilege': return requirement.privilege;
-    case 'identity': return `${requirement.runsAs}${requirement.userId ? ` (${requirement.userId})` : ''}${requirement.assumed ? ' (assumed)' : ''}`;
-    case 'basis': return requirement.basis;
-    case 'coverage': return [status(requirement).replaceAll('-', ' '), requirement.coverage?.depth, requirement.coverage?.reason].filter(Boolean).join(' · ');
-  }
-}
-function Sources({ sources }: { sources: Source[] }) {
-  if (!sources.length) return null;
-  return <details className={styles.sources}><summary>{sources.length} source{sources.length === 1 ? '' : 's'}</summary>
-    {sources.map((source, index) => <div key={index} className={styles.source}>{source.file}:{source.line}:{source.column}
-      {source.path.length > 0 && <div>{source.path.join(' → ')}</div>}
-    </div>)}
-  </details>;
-}
 
 function Results({ report }: { report: Report }) {
   const [selected, setSelected] = useState<Category[]>([]);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [sort, setSort] = useState<{ column: Column; direction: 'ascending' | 'descending' }>();
+  const [sort, setSort] = useState<Sort>();
   const sections = [...report.entryPoints, ...report.unreached];
   const hasFilters = selected.length > 0 || Object.values(filters).some(value => value.trim());
   const matchesColumns = (requirement: Requirement) => columns.every(([column]) =>
-    value(requirement, column).toLowerCase().includes(filters[column].trim().toLowerCase()));
+    searchValue(requirement, column).toLowerCase().includes(filters[column].trim().toLowerCase()));
   const views = sections.map(section => {
     const truncated = report.analysis.truncatedSections.includes(section.id);
     const rows = section.requirements.map((requirement, index) => ({ requirement, index }))
       .filter(({ requirement }) => (!selected.length || selected.includes(status(requirement)) || truncated && selected.includes('truncated')) && matchesColumns(requirement));
-    if (sort) rows.sort((a, b) => {
-      const left = value(a.requirement, sort.column).toLowerCase(), right = value(b.requirement, sort.column).toLowerCase();
-      const comparison = left < right ? -1 : left > right ? 1 : 0;
-      return comparison * (sort.direction === 'ascending' ? 1 : -1) || a.index - b.index;
-    });
     const diagnosticMatch = !selected.length || selected.includes('unresolved') && section.unresolved.length > 0 || selected.includes('truncated') && truncated;
     // Preserve incomplete-analysis evidence even if column filters hide every requirement.
     const showDiagnostics = diagnosticMatch && (truncated || section.unresolved.length > 0 || section.assumptions.length > 0);
-    return { section, rows, truncated, visible: !hasFilters || rows.length > 0 || showDiagnostics };
+    return { section, rows, groups: groupRows(rows, sort), truncated, visible: !hasFilters || rows.length > 0 || showDiagnostics };
   });
   const counts: [string, number, string, Category][] = report.result ? [
     ['Granted', report.result.granted, 'good', 'granted'], ['Missing', report.result.missing, 'bad', 'missing'],
@@ -58,6 +38,8 @@ function Results({ report }: { report: Report }) {
     ['Suppressed', report.result.suppressed, '', 'suppressed'], ['System', report.result.system, '', 'system'], ['Not governed', report.result.notGoverned, '', 'not-governed'],
   ] : [];
   const shownRows = views.reduce((count, view) => count + view.rows.length, 0);
+  const groupCount = views.reduce((count, view) => count + view.groups.length, 0);
+  const filterOptions = Object.fromEntries(columns.map(([column]) => [column, [...new Set(sections.flatMap(section => section.requirements.flatMap(requirement => column === 'coverage' ? [coverageLabel(status(requirement)), ...(requirement.coverage?.depth ? [depthLabel(requirement.coverage.depth)] : []), ...(requirement.coverage?.reason ? [uiMessage(requirement.coverage.reason)] : [])] : [value(requirement, column)])))]])) as Record<Column, string[]>;
   const totalRows = sections.reduce((count, section) => count + section.requirements.length, 0);
   function toggle(category: Category) {
     setSelected(current => current.includes(category) ? current.filter(value => value !== category) : [...current, category]);
@@ -78,18 +60,18 @@ function Results({ report }: { report: Report }) {
       {!!report.tablesWithoutRoleMetadata?.length && <span className={cx(styles.pill, styles.warn)}>No role metadata: {report.tablesWithoutRoleMetadata.join(', ')}</span>}
     </div>
     <div className={styles.resultToolbar}>
-      <div><p className={styles.resultCount} role="status" aria-label="Result row count">Showing {shownRows} of {totalRows} loaded requirement rows{selected.length > 0 && ' · Finding filters active'}</p>
+      <div><p className={styles.resultCount} role="status" aria-label="Result row count">Showing {shownRows} of {totalRows} loaded requirements across {groupCount} table groups{selected.length > 0 && ' · Finding filters active'}</p>
         <p className={ui.hint}>Toggle badges to combine findings. Column filters combine with AND. Counts and JSON stay unchanged; diagnostics remain in matching sections.</p></div>
       <div className={styles.resultToolbarActions}><button className={ui.secondary} type="button" aria-expanded={filterOpen} aria-controls="result-column-filters" onClick={() => setFilterOpen(!filterOpen)}>{filterOpen ? 'Hide column filters' : 'Filter columns'}</button>
         {hasFilters && <button className={ui.textButton} type="button" onClick={clear}>Clear result filters</button>}</div>
     </div>
     {filterOpen && <fieldset id="result-column-filters" className={styles.resultColumnFilters}><legend className={ui.srOnly}>Result column filters</legend>
       {columns.map(([column, label]) => <div key={column}><label htmlFor={`result-filter-${column}`}>{label}</label>
-        <input id={`result-filter-${column}`} type="search" value={filters[column]} onChange={event => setFilters({ ...filters, [column]: event.target.value })}
+        <SuggestionPicker id={`result-filter-${column}`} label={label} options={filterOptions[column]} value={filters[column]} onChange={value => setFilters(current => ({ ...current, [column]: value }))}
           placeholder={column === 'coverage' ? 'Status, depth, or reason…' : `Filter ${label.toLowerCase()}…`} /></div>)}
     </fieldset>}
     {!views.some(view => view.visible) && <div className={cx(ui.surface, ui.empty)}><h3>No matching results</h3><p>Try another finding or clear the column filters. The analysis totals above have not changed.</p></div>}
-    {views.filter(view => view.visible).map(({ section, rows, truncated }) => {
+    {views.filter(view => view.visible).map(({ section, rows, groups, truncated }) => {
       const warnings = [
         ...(truncated ? ['Analysis truncated for this section.'] : []),
         ...section.unresolved.map(value => `Unresolved ${value.operation}: ${value.reason} (${value.source.file}:${value.source.line})`),
@@ -97,27 +79,12 @@ function Results({ report }: { report: Report }) {
         ...(section.triggers?.length ? [`Triggers: ${section.triggers.join(', ')}`] : []),
       ];
       return <article className={cx(ui.surface, styles.sectionCard)} key={section.id}>
-        <div className={styles.sectionHead}><h3>{section.id}</h3><p>{section.kind || 'Unreached method'}</p>
-          {section.roles?.map((identity, index) => <p key={index}>{identity.runsAs}{identity.userId && ` (${identity.userId})`}: {identity.roles?.join(' + ') || identity.note || 'Not checked'}{identity.origin && ` · ${identity.origin}`}</p>)}
-          <p>{rows.length} of {section.requirements.length} requirement rows</p>
+        <div className={styles.sectionHead}><h3>{sectionTitle(section.id)}</h3><p>{sectionKindLabel(section.kind)}</p>
+          {section.roles?.map((identity, index) => <p key={index}>{identityLabel(identity.runsAs)}{identity.userId && ` (${identity.userId})`}: {identity.roles?.join(' + ') || (identity.note && uiMessage(identity.note)) || 'Not checked'}{identity.origin && ` · ${roleOriginLabel(identity.origin)}`}</p>)}
+          <p>{rows.length} of {section.requirements.length} requirements · {groups.length} table groups</p>
         </div>
-        <div className={ui.tableWrap} role="region" aria-label={`${section.id} requirements`} tabIndex={0}><table className={ui.table}>
-          <thead><tr>{columns.map(([column, label]) => <th key={column} scope="col" aria-sort={sort?.column === column ? sort.direction : 'none'}>
-            <button className={styles.tableSort} type="button" onClick={() => sortColumn(column)} aria-label={`Sort by ${label.toLowerCase()}`}>
-              {label}<span aria-hidden="true">{sort?.column === column ? sort.direction === 'ascending' ? '↑' : '↓' : '↕'}</span></button>
-          </th>)}</tr></thead>
-          <tbody>{rows.map(({ requirement, index }) => <tr key={index}>
-            <td>{requirement.table || 'Global'}<Sources sources={requirement.sources} /></td>
-            <td>{requirement.privilege}</td><td>{value(requirement, 'identity')}</td><td>{requirement.basis}</td>
-            <td><span className={cx(styles.badge, styles[status(requirement)])}>{requirement.coverage?.status || 'Not checked'}</span>
-              {requirement.coverage?.depth && <div className={ui.hint}>{requirement.coverage.depth}</div>}
-              {requirement.coverage?.reason && <div className={ui.hint}>{requirement.coverage.reason}</div>}
-            </td>
-          </tr>)}
-          {!rows.length && <tr><td colSpan={columns.length} className={styles.noResultRows}>{section.requirements.length ? 'No requirement rows match these filters. Section diagnostics are shown below.' : 'No requirements in this view.'}</td></tr>}
-          </tbody>
-        </table></div>
-        {warnings.length > 0 && <div className={styles.diagnostics}>{warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
+        <PermissionTable id={section.id} groups={groups} hasRequirements={section.requirements.length > 0} sort={sort} onSort={sortColumn} />
+        {warnings.length > 0 && <div className={styles.diagnostics}>{warnings.map((warning, index) => <p key={index}>{uiMessage(warning)}</p>)}</div>}
       </article>;
     })}
   </div>;

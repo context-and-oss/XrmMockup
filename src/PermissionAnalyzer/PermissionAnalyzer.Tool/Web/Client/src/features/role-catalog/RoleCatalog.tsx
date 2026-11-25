@@ -2,6 +2,8 @@ import styles from './RoleCatalog.module.css';
 import ui from '../../shared/ui/ui.module.css';
 import { cx } from '../../shared/ui/classNames';
 import { useState } from 'react';
+import { SuggestionPicker } from '../../shared/components/SuggestionPicker/SuggestionPicker';
+import { depthLabel } from '../../shared/presentation/labels';
 import type { Catalog, Grant, Role } from '../../shared/api/types';
 
 function RoleCard({ role, grants, expanded }: { role: Role; grants: Grant[]; expanded: boolean }) {
@@ -12,7 +14,7 @@ function RoleCard({ role, grants, expanded }: { role: Role; grants: Grant[]; exp
     {open && <>
       {!role.globalPrivilegesKnown && <p className={ui.hint}>Global privileges are unknown in this metadata (not evidence of missing grants).</p>}
       <div className={ui.tableWrap} role="region" aria-label={`${role.name} grants`} tabIndex={0}><table className={ui.table}><thead><tr><th>Table</th><th>Privilege</th><th>Depth</th></tr></thead>
-        <tbody>{grants.map((grant, index) => <tr key={index}><td>{grant.table || 'Global'}</td><td>{grant.privilege}</td><td>{grant.depth}</td></tr>)}</tbody>
+        <tbody>{grants.map((grant, index) => <tr key={index}><td>{grant.table || 'Global'}</td><td>{grant.privilege}</td><td>{depthLabel(grant.depth)}</td></tr>)}</tbody>
       </table></div>
       {!grants.length && <p className={ui.hint}>No recorded grants.</p>}
     </>}
@@ -27,9 +29,9 @@ export function RoleCatalog({ model }: { model: Catalog }) {
     .filter(({ role, grants }) => role.name.toLowerCase().includes(filter) || grants.length);
   return <section>
     <div className={styles.catalogToolbar}><div><h2>Role privilege catalog</h2><p className={ui.muted}>Individual role grants at their recorded depth. Query permissions to evaluate combined roles.</p></div>
-      <label htmlFor="catalog-search">Filter role, table, or privilege<input id="catalog-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search grants…" /></label>
+      <label htmlFor="catalog-search">Filter role, table, or privilege<SuggestionPicker id="catalog-search" label="Roles, tables, or privileges" options={[...model.roles.map(role => role.name), ...model.tables, ...model.roles.flatMap(role => role.grants.map(grant => grant.privilege))]} value={search} onChange={setSearch} placeholder="Search grants…" /></label>
     </div>
     {matches.map(({ role, grants }, index) => <RoleCard key={`${index}:${role.roleId || role.name}:${filter}`} role={role} grants={grants} expanded={Boolean(filter)} />)}
-    {!matches.length && <div className={cx(ui.surface, ui.empty)}>{model.roles.length ? 'No grants match your search.' : 'No security roles loaded. Restart with --metadata containing SecurityRoles, or a snapshot with embedded roles.'}</div>}
+    {!matches.length && <div className={cx(ui.surface, ui.empty)}>{model.roles.length ? 'No grants match your search.' : 'No security roles loaded. Restart the analyzer with local role metadata or a saved analysis that includes roles.'}</div>}
   </section>;
 }

@@ -85,7 +85,7 @@ describe('React security explorer', () => {
     render(<App api={mockApi()} />); await screen.findByText('Build a query');
     fireEvent.click(screen.getByRole('button', { name: 'Role catalog' }));
     fireEvent.change(screen.getByLabelText('Filter role, table, or privilege'), { target: { value: 'prvCustom' } });
-    expect(screen.getByText('prvCustom')).toBeInTheDocument();
+    expect(screen.getByText('prvCustom', { selector: 'td' })).toBeInTheDocument();
     expect(screen.getByText('Global')).toBeInTheDocument();
     expect(screen.getByText(/<script>alert\(1\)<\/script> · 1 grants/)).toBeInTheDocument();
     expect(document.querySelector('script')).toBeNull();
@@ -144,7 +144,7 @@ describe('React security explorer', () => {
     resolve(report);
     await screen.findByText('1 Missing');
     expect(screen.getByRole('button', { name: 'Run query' })).toBeEnabled();
-    expect(screen.getByRole('region', { name: 'operation:Update account requirements' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('region', { name: 'Update account requirements' })).toHaveAttribute('tabindex', '0');
   });
 
   it('preserves hidden role selections while searching and restores session defaults explicitly', async () => {

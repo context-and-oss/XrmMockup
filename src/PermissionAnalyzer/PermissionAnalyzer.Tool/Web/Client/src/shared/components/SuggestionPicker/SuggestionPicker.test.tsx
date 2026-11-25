@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { SuggestionPicker } from './SuggestionPicker';
 
-function Harness({ options = ['account', 'contact', 'businessunit'], initial = '', disabled = false }: {
-  options?: string[]; initial?: string; disabled?: boolean;
+function Harness({ options = ['account', 'contact', 'businessunit'], initial = '', disabled = false, commaSeparated = false }: {
+  options?: string[]; initial?: string; disabled?: boolean; commaSeparated?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   return <form onSubmit={event => event.preventDefault()}>
     <label htmlFor="test-picker">Table logical name</label>
-    <SuggestionPicker id="test-picker" label="Tables" options={options} value={value} onChange={setValue} disabled={disabled} />
+    <SuggestionPicker id="test-picker" label="Tables" options={options} value={value} onChange={setValue} disabled={disabled} commaSeparated={commaSeparated} />
     <button type="button">Outside</button>
   </form>;
 }
@@ -90,6 +90,18 @@ describe('Editable suggestion picker', () => {
     expect(document.querySelector('img')).toBeNull();
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'table99' } });
     expect(screen.getByRole('option', { name: 'table99' })).toBeInTheDocument();
+  });
+
+  it('completes the final comma-separated value without dropping previous selections', () => {
+    render(<Harness initial="account, con" commaSeparated />);
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    expect(screen.queryByRole('option', { name: 'account' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'contact' }));
+    expect(input).toHaveValue('account, contact');
+    fireEvent.change(input, { target: { value: 'account, contact, business' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' }); fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input).toHaveValue('account, contact, businessunit');
   });
 
   it('closes an open popup and disables both input and trigger when busy', () => {

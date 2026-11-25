@@ -8,10 +8,11 @@ import { QueryForm } from '../features/query-builder/QueryForm';
 import { queryDescription, queryContextDescription } from '../features/query-builder/queryDescription';
 import { ReportView } from '../features/results/ReportView';
 import { RoleCatalog } from '../features/role-catalog/RoleCatalog';
+import { uiMessage } from '../shared/presentation/labels';
 
 const defaultApi = new PermissionApi();
 interface Props { api?: Pick<PermissionApi, 'catalog' | 'query'> }
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unexpected error.';
+const errorMessage = (error: unknown) => error instanceof Error ? uiMessage(error.message) : 'Unexpected error.';
 
 export function App({ api = defaultApi }: Props) {
   const [model, setModel] = useState<Catalog>();
@@ -27,7 +28,7 @@ export function App({ api = defaultApi }: Props) {
   useEffect(() => {
     let active = true;
     api.catalog().then(catalog => { if (active) setModel(catalog); }).catch(error => {
-      if (active) setError(`Could not load model: ${errorMessage(error)}. Check that the CLI is still running.`);
+      if (active) setError(`Could not load model: ${errorMessage(error)}. Check that the local analyzer is still running.`);
     });
     return () => { active = false; };
   }, [api]);
@@ -72,7 +73,7 @@ export function App({ api = defaultApi }: Props) {
         </section>
         {view === 'roles' && <RoleCatalog model={model} />}
       </>}
-      <footer className={styles.footer}>Read-only · Source and analysis inputs are frozen for this session. Restart the CLI to refresh the model. Ctrl+C stops the server.</footer>
+      <footer className={styles.footer}>Read-only · Source and analysis inputs are frozen for this session. Restart the local analyzer to refresh the model. Ctrl+C stops the server.</footer>
     </main>
   </>;
 }

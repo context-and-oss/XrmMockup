@@ -1,0 +1,136 @@
+.table {
+  table-layout: fixed;
+  min-width: 700px;
+
+  col {
+    width: 19.5%;
+  }
+
+  .tableColumn {
+    width: 22%;
+  }
+}
+
+.tableSort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--grey);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  text-align: left;
+
+  &:hover, th[aria-sort=ascending] &, th[aria-sort=descending] & {
+    color: var(--purple);
+  }
+}
+
+.tableName {
+  background: var(--white);
+  color: var(--black);
+  font-size: 12px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+
+  small {
+    display: block;
+    margin-top: 8px;
+    color: var(--grey);
+    font-size: 10px;
+  }
+}
+
+.permissionCell {
+  padding: 0;
+}
+
+.permissions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.permission {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 12px 0;
+  row-gap: 6px;
+
+  + li {
+    border-top: 1px solid var(--bg);
+  }
+
+  > div {
+    min-width: 0;
+    padding: 0 20px;
+    overflow-wrap: anywhere;
+  }
+
+  .permissionSources {
+    grid-column: 1 / -1;
+  }
+}
+
+.privilege {
+  font-weight: 500;
+
+  small {
+    display: block;
+    margin-top: 4px;
+    color: var(--grey);
+    font-size: 10px;
+    font-weight: 400;
+  }
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  border-radius: 5px;
+  background: var(--status-bg, var(--bg));
+  color: var(--status-text, inherit);
+  padding: 4px 8px;
+  white-space: nowrap;
+
+  &.granted {
+    --status-bg: var(--success-bg);
+    --status-text: var(--success-text);
+  }
+
+  &.missing {
+    --status-bg: var(--missing-bg);
+    --status-text: var(--missing-text);
+  }
+}
+
+.sources {
+  margin: 0;
+  font-size: 11px;
+
+  summary {
+    font-weight: 400;
+  }
+}
+
+.source {
+  margin-top: 8px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.noResultRows {
+  color: var(--grey);
+  font-size: 12px;
+  padding: 22px;
+}

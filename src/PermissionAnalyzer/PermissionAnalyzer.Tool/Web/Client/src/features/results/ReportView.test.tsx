@@ -21,8 +21,9 @@ const report: Report = {
   entryPoints: [section, diagnostics], unreached: [],
   result: { granted: 1, missing: 2, unresolved: 1, notChecked: 1, unverifiable: 1, truncated: 1, suppressed: 0, system: 1, notGoverned: 0 },
 };
-const table = () => within(screen.getByRole('region', { name: 'function:Sync requirements' })).getByRole('table');
-const rows = () => within(table()).getAllByRole('row').slice(1);
+const table = () => within(screen.getByRole('region', { name: 'Sync requirements' })).getByRole('table');
+const rows = () => within(table()).getAllByRole('listitem');
+const tableRows = () => within(table()).getAllByRole('row').slice(1);
 const filterColumns = () => fireEvent.click(screen.getByRole('button', { name: 'Filter columns' }));
 
 describe('Interactive report results', () => {
@@ -46,13 +47,13 @@ describe('Interactive report results', () => {
   it('selects unresolved and truncated sections without presenting a clean empty analysis', () => {
     render(<ReportView report={report} />);
     fireEvent.click(screen.getByRole('button', { name: '1 Unresolved' }));
-    expect(screen.queryByRole('region', { name: 'function:Sync requirements' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Sync requirements' })).not.toBeInTheDocument();
     expect(screen.getByText(/Unresolved Execute: Unknown request/)).toBeInTheDocument();
     expect(screen.getByText('Analysis truncated for this section.')).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Result row count' })).toHaveTextContent('Showing 0 of 6');
     fireEvent.click(screen.getByRole('button', { name: '1 Truncated' }));
     fireEvent.click(screen.getByRole('button', { name: '1 Unresolved' }));
-    expect(screen.getByText('plugin:Unknown')).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
   });
 
   it('filters every column case-insensitively with AND, including identity details and coverage depth/reason', () => {
@@ -71,7 +72,7 @@ describe('Interactive report results', () => {
     expect(rows()).toHaveLength(1);
     fireEvent.change(screen.getByLabelText('Coverage'), { target: { value: 'No role grants' } });
     expect(rows()).toHaveLength(1);
-    expect(within(rows()[0]!).getByText('contact')).toBeInTheDocument();
+    expect(within(table()).getByRole('rowheader', { name: /contact/ })).toBeInTheDocument();
     expect(screen.getByText(/Unresolved Execute/)).toBeInTheDocument();
   });
 
@@ -80,13 +81,13 @@ describe('Interactive report results', () => {
     const button = within(table()).getByRole('button', { name: 'Sort by table' });
     fireEvent.click(button);
     expect(button.closest('th')).toHaveAttribute('aria-sort', 'ascending');
-    expect(rows().map(row => row.querySelector('td')!.firstChild!.textContent)).toEqual(['account', 'account', 'contact', 'Global', 'lead', 'team']);
+    expect(tableRows().map(row => row.querySelector('th')!.firstChild!.textContent)).toEqual(['account', 'contact', 'Global', 'lead', 'team']);
     fireEvent.click(button);
     expect(button.closest('th')).toHaveAttribute('aria-sort', 'descending');
-    expect(rows()[0]!.querySelector('td')).toHaveTextContent('team');
+    expect(tableRows()[0]!.querySelector('th')).toHaveTextContent('team');
     fireEvent.click(button);
     expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
-    expect(rows()[0]!.querySelector('td')).toHaveTextContent('contact');
+    expect(tableRows()[0]!.querySelector('th')).toHaveTextContent('contact');
     for (const label of ['privilege', 'runs as', 'basis', 'coverage']) {
       fireEvent.click(within(table()).getByRole('button', { name: `Sort by ${label}` }));
       expect(table().querySelectorAll('th[aria-sort=ascending]')).toHaveLength(1);
@@ -101,7 +102,7 @@ describe('Interactive report results', () => {
     expect(rows()).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Clear result filters' }));
     fireEvent.click(screen.getByRole('button', { name: '1 Not checked' }));
-    expect(rows()).toHaveLength(1); expect(within(rows()[0]!).getByText('team')).toBeInTheDocument();
+    expect(rows()).toHaveLength(1); expect(within(table()).getByRole('rowheader', { name: /team/ })).toBeInTheDocument();
     view.rerender(<ReportView report={{ ...report }} />);
     expect(rows()).toHaveLength(6);
     expect(screen.getByRole('button', { name: '1 Not checked' })).toHaveAttribute('aria-pressed', 'false');
@@ -123,9 +124,41 @@ describe('Interactive report results', () => {
     expect(screen.getByText('No matching results')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear result filters' }));
     fireEvent.click(screen.getByRole('button', { name: '1 Suppressed' }));
-    expect(rows()).toHaveLength(1); expect(within(rows()[0]!).getByText('suppressed')).toBeInTheDocument();
+    expect(rows()).toHaveLength(1); expect(within(rows()[0]!).getByText('Suppressed')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '1 Not governed' }));
     expect(rows()).toHaveLength(2);
+  });
+
+  it('renders each table once and applies AND filters to individual permissions, not an aggregate row', () => {
+    render(<ReportView report={report} />);
+    expect(within(table()).getAllByRole('rowheader')).toHaveLength(5);
+    const account = within(table()).getByRole('list', { name: 'account permissions' });
+    expect(within(account).getAllByRole('listitem')).toHaveLength(2);
+    filterColumns();
+    fireEvent.change(screen.getByLabelText('Table'), { target: { value: 'account' } });
+    fireEvent.change(screen.getByLabelText('Privilege'), { target: { value: 'Read' } });
+    fireEvent.change(screen.getByLabelText('Runs as'), { target: { value: 'User' } });
+    // Account has Read as Caller and Write as User, not Read as User.
+    expect(screen.queryByRole('list', { name: 'account permissions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Result row count' })).toHaveTextContent('Showing 0 of 6');
+  });
+
+  it('autocompletes each filter with report values and renders origins and entry titles as UI labels', () => {
+    const view = render(<ReportView report={{ ...report, entryPoints: [{ ...section,
+      id: 'operation:Update account(name)', kind: 'Operation',
+      roles: [{ runsAs: 'Caller', roles: ['Reader'], origin: '--role' }],
+    }] }} />);
+    expect(screen.getByRole('heading', { name: 'Update account (name)' })).toBeInTheDocument();
+    expect(screen.getByText('Caller: Reader · Session roles')).toBeInTheDocument();
+    expect(view.container.textContent).not.toContain('--role');
+    filterColumns();
+    for (const [label, candidate] of [['Table', 'account'], ['Privilege', 'Write'], ['Runs as', 'Caller'], ['Basis', 'Direct'], ['Coverage', 'Organization']]) {
+      const input = screen.getByRole('combobox', { name: label });
+      fireEvent.focus(input);
+      fireEvent.click(screen.getByRole('option', { name: candidate }));
+      expect(input).toHaveValue(candidate);
+      fireEvent.click(screen.getByRole('button', { name: 'Clear result filters' }));
+    }
   });
 
   it('supports requirements-only reports without inventing role coverage', () => {

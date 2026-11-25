@@ -31,6 +31,23 @@ describe('Changed column picker', () => {
     expect(screen.getByRole('checkbox', { name: 'Account name (name)' })).not.toBeChecked();
   });
 
+  it('treats clicks on the entire label as selection and does not dismiss on a transient blur', () => {
+    render(<Harness />); open();
+    const checkbox = screen.getByRole('checkbox', { name: 'Account name (name)' });
+    const label = checkbox.closest('label')!;
+    fireEvent.pointerDown(within(label).getByText('Account name'));
+    fireEvent.blur(screen.getByRole('searchbox'), { relatedTarget: null });
+    fireEvent.click(within(label).getByText('Account name'));
+    expect(checkbox).toBeChecked();
+    expect(screen.getByRole('searchbox')).toBeInTheDocument();
+    fireEvent.click(within(label).getByText('name'));
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(label);
+    expect(checkbox).toBeChecked();
+    fireEvent.keyDown(checkbox, { key: 'Escape' });
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+  });
+
   it('allows manual values, prevents duplicates, and clears back to unknown', () => {
     render(<Harness />); open();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'CTX_CUSTOM' } });

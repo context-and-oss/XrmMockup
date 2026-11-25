@@ -9,6 +9,7 @@ import { RolePicker } from './RolePicker';
 import { SuggestionPicker } from '../../shared/components/SuggestionPicker/SuggestionPicker';
 import { ColumnPicker } from './ColumnPicker';
 import { queryDescription, queryContextDescription, scopeLabels } from './queryDescription';
+import { roleOriginLabel } from '../../shared/presentation/labels';
 
 interface Props {
   model: Catalog;
@@ -20,7 +21,7 @@ interface Props {
 const scopeHints: Record<Scope, string> = {
   all: 'Explore requirements across the entire loaded analysis. No target needed.',
   operation: 'Trace a table operation and the plugins and cascades it can trigger.',
-  plugin: 'Choose a plugin type. Optionally append :message:stage to narrow the step.',
+  plugin: 'Choose a plugin type, or enter a specific step to narrow the analysis.',
   'custom-api': 'Trace a custom API and its required execute privilege.',
   function: 'Trace the Dataverse privileges used by an Azure Function.',
   method: 'Trace a method by its fully qualified name, including unreached methods.',
@@ -88,7 +89,7 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
             </select></div></div>
           <p id="scope-help" className={cx(ui.hint, styles.clauseHint)}>{scopeHints[scope]}</p>
           {scope !== 'all' && <div className={styles.queryClause}><span className={styles.clauseWord} aria-hidden="true">For</span><div className={styles.clauseField}>
-            <label htmlFor="target">{scope === 'operation' ? 'Table logical name' : scope === 'plugin' ? 'Plugin type[:message[:stage]]' : 'Target name'}</label>
+            <label htmlFor="target">{scope === 'operation' ? 'Table logical name' : scope === 'plugin' ? 'Plugin type or step' : 'Target name'}</label>
             <SuggestionPicker key={scope} id="target" label={scope === 'operation' ? 'Tables' : 'Targets'} options={suggestions} required disabled={busy} value={target} onChange={value => { if (value.trim().toLowerCase() !== target.trim().toLowerCase()) setAttributes([]); setTarget(value); }}
               placeholder={scope === 'operation' ? 'Choose or enter a table…' : scope === 'plugin' ? 'AccountPostPlugin:Update' : scope === 'method' ? 'Contoso.Importer.Run' : 'Choose or enter a target…'} />
           </div></div>}
@@ -109,21 +110,21 @@ export function QueryForm({ model, busy, onQuery, onDraftChange }: Props) {
           <p className={ui.hint}>{model.requirementsOnly ? 'This session is fixed to requirements-only analysis.' : 'Combine role grants or inspect requirements without checking coverage.'}</p>
           <div className={cx(styles.roleContext, noRoles && styles.contextDisabled)}>
             <p className={styles.contextLabel}>Application / caller roles</p>
-            <p className={styles.effectiveRoles}>{noRoles ? 'Not checked' : effectiveRoles.join(' + ') || 'CLI / configuration defaults'}</p>
-            <p className={ui.hint}>{!roles.length ? `Defaults: ${model.defaults.roles.join(' + ') || 'CLI / configuration defaults'} (${model.defaults.roleOrigin || 'CLI'}).` : `${roles.length} explicit roles combined. Session defaults replaced.`}</p>
+            <p className={styles.effectiveRoles}>{noRoles ? 'Not checked' : effectiveRoles.join(' + ') || 'Session defaults'}</p>
+            <p className={ui.hint}>{!roles.length ? `Defaults: ${model.defaults.roles.join(' + ') || 'Session defaults'} (${roleOriginLabel(model.defaults.roleOrigin)}).` : `${roles.length} explicit roles combined. Session defaults replaced.`}</p>
             <details className={styles.pickerDisclosure} open={rolePickerOpen} onToggle={event => setRolePickerOpen(event.currentTarget.open)}><summary>Choose application / caller roles</summary>
               <RolePicker id="roles" label="Application / caller roles" names={roleNames} selected={roles} disabled={noRoles} onChange={setRoles} />
             </details>
           </div>
           <details className={cx(styles.pickerDisclosure, styles.impersonation)} open={callerPickerOpen} onToggle={event => setCallerPickerOpen(event.currentTarget.open)}><summary>Impersonated caller roles{effectiveCallerRoles.length > 0 && <span className={styles.detailCount}>{effectiveCallerRoles.length}</span>}</summary>
-            <p className={ui.hint}>A separate caller identity, not additional application roles. Defaults: {model.defaults.callerRoles.join(' + ') || 'CLI / configuration defaults'} ({model.defaults.callerRoleOrigin || 'CLI'}).</p>
+            <p className={ui.hint}>A separate caller identity, not additional application roles. Defaults: {model.defaults.callerRoles.join(' + ') || 'Session defaults'} ({roleOriginLabel(model.defaults.callerRoleOrigin)}).</p>
             <RolePicker id="caller-roles" label="Impersonated caller roles" names={roleNames} selected={callerRoles} disabled={noRoles} onChange={setCallerRoles} />
           </details>
         </section>
       </div>
       <details className={styles.filterDisclosure} open={filtersOpen} onToggle={event => setFiltersOpen(event.currentTarget.open)}><summary><span className={styles.stepNumber} aria-hidden="true">3</span>Report filters <span className={styles.optionalLabel}>{filterCount ? `${filterCount} values applied` : 'Optional'}</span></summary>
-        <div className={styles.filterFields}><div><label htmlFor="tables">Tables</label><input id="tables" value={tables} onChange={event => setTables(event.target.value)} placeholder="account, contact" /></div>
-          <div><label htmlFor="privileges">Privileges</label><input id="privileges" value={privileges} onChange={event => setPrivileges(event.target.value)} placeholder="Read, Write, prvCustomPrivilege" /></div>
+        <div className={styles.filterFields}><div><label htmlFor="tables">Tables</label><SuggestionPicker id="tables" label="Report tables" options={model.tables} commaSeparated disabled={busy} value={tables} onChange={setTables} placeholder="account, contact" /></div>
+          <div><label htmlFor="privileges">Privileges</label><SuggestionPicker id="privileges" label="Report privileges" options={['Create', 'Read', 'Write', 'Delete', 'Append', 'AppendTo', 'Assign', 'Share', ...model.roles.flatMap(role => role.grants.map(grant => grant.privilege))]} commaSeparated disabled={busy} value={privileges} onChange={setPrivileges} placeholder="Read, Write, custom privilege…" /></div>
           <button type="button" className={ui.textButton} disabled={!filterCount} onClick={() => { setTables(''); setPrivileges(''); }}>Clear filters</button>
         </div><p className={ui.hint}>Comma-separated. Filters narrow displayed rows, not whole-analysis counts.</p>
       </details>

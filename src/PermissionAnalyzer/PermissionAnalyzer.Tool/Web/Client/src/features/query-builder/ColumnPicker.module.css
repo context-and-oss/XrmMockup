@@ -109,6 +109,12 @@
   padding: 8px 0;
   min-height: 44px;
   font-weight: 400;
+  cursor: pointer;
+  border-radius: 6px;
+
+  &:hover, &:focus-within {
+    background: var(--purple-tint);
+  }
 
   > span {
     min-width: 0;

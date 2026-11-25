@@ -22,12 +22,12 @@
   }
 }
 
-.pill.good, .badge.granted {
+.pill.good {
   --status-bg: var(--success-bg);
   --status-text: var(--success-text);
 }
 
-.pill.bad, .badge.missing {
+.pill.bad {
   --status-bg: var(--missing-bg);
   --status-text: var(--missing-text);
 }
@@ -35,13 +35,7 @@
 .sectionCard {
   border-radius: 20px;
   margin-bottom: 18px;
-  overflow: hidden;
-
-  @media (max-width: 600px) {
-    table {
-      min-width: 560px;
-    }
-  }
+  overflow: hidden
 }
 
 .sectionHead {
@@ -61,32 +55,6 @@
     margin: 0;
     overflow-wrap: anywhere;
   }
-}
-
-.badge {
-  display: inline-block;
-  font-size: 11px;
-  border-radius: 5px;
-  background: var(--status-bg, var(--bg));
-  color: var(--status-text, inherit);
-  padding: 4px 8px;
-  white-space: nowrap;
-}
-
-.sources {
-  margin: 8px 0 0;
-  font-size: 11px;
-
-  summary {
-    font-weight: 400;
-  }
-}
-
-.source {
-  margin-top: 8px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-  color: var(--muted);
 }
 
 .diagnostics {
@@ -183,31 +151,4 @@
   @media (max-width: 480px) {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-.tableSort {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 6px 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--grey);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  text-align: left;
-
-  &:hover, th[aria-sort=ascending] &, th[aria-sort=descending] & {
-    color: var(--purple);
-  }
-}
-
-.noResultRows {
-  color: var(--grey);
-  font-size: 12px;
-  padding: 22px;
 }

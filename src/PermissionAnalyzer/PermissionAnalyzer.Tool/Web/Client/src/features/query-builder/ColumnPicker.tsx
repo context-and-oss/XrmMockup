@@ -47,7 +47,11 @@ export function ColumnPicker({ table, catalog, selected, disabled, onChange }: P
 
   return <div className={styles.columnPicker} ref={root} onKeyDown={event => {
     if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); }
-  }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false); }}>
+  }} onBlur={event => {
+    // Clicking a label's text can blur the search input before the browser focuses
+    // its checkbox. A null relatedTarget is not an outside interaction.
+    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+  }}>
     <button ref={trigger} type="button" className={styles.columnTrigger} disabled={disabled || !table.trim()}
       aria-label="Changed columns (optional)" aria-describedby="attributes-help" aria-expanded={open} aria-controls="column-options"
       onClick={() => setOpen(!open)}>
@@ -67,7 +71,8 @@ export function ColumnPicker({ table, catalog, selected, disabled, onChange }: P
         onChange={event => setSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); add(); } }} />
       {!catalog && <p className={ui.hint}>No column catalog for this table. Enter a logical name to add it manually.</p>}
       <fieldset className={styles.columnChoices}><legend className={ui.srOnly}>Available changed columns</legend>
-        {matches.slice(0, 100).map(column => <label className={cx(ui.check, styles.columnChoice)} key={column.logicalName}>
+        {matches.slice(0, 100).map(column => <label className={cx(ui.check, styles.columnChoice)} key={column.logicalName}
+          onPointerDown={event => { if (!(event.target instanceof HTMLInputElement)) event.preventDefault(); }}>
           <input type="checkbox" aria-label={column.displayName ? `${column.displayName} (${column.logicalName})` : column.logicalName} checked={selected.includes(column.logicalName)} disabled={limit && !selected.includes(column.logicalName)} onChange={() => toggle(column.logicalName)} />
           <span>{column.displayName || column.logicalName}{column.displayName && <small>{column.logicalName}</small>}</span>
         </label>)}

@@ -12,12 +12,13 @@ interface Props {
   placeholder?: string;
   required?: boolean;
   disabled?: boolean;
+  commaSeparated?: boolean;
   onChange: (value: string) => void;
 }
 
 // An editable combobox: suggestions help discover loaded metadata, but never
 // restrict valid identifiers (for example plugin type:message:stage suffixes).
-export function SuggestionPicker({ id, label, value, options, placeholder, required, disabled, onChange }: Props) {
+export function SuggestionPicker({ id, label, value, options, placeholder, required, disabled, commaSeparated = false, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [browsing, setBrowsing] = useState(true);
   const [active, setActive] = useState(-1);
@@ -26,8 +27,11 @@ export function SuggestionPicker({ id, label, value, options, placeholder, requi
   const input = useRef<HTMLInputElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const listId = `${id}-suggestions`;
-  const filter = browsing ? '' : value.trim().toLowerCase();
-  const matches = [...new Set(options)].filter(option => option.toLowerCase().includes(filter));
+  const tokens = commaSeparated ? value.split(',') : [value];
+  const typed = tokens.at(-1)?.trim() || '';
+  const preceding = commaSeparated ? tokens.slice(0, -1).map(token => token.trim().toLowerCase()) : [];
+  const filter = browsing ? '' : typed.toLowerCase();
+  const matches = [...new Set(options)].filter(option => option.toLowerCase().includes(filter) && !preceding.includes(option.toLowerCase()));
   // Bound large metadata lists without hiding the fact that more matches exist.
   const visible = matches.slice(0, 80);
   const matchSignature = JSON.stringify(visible);
@@ -81,7 +85,7 @@ export function SuggestionPicker({ id, label, value, options, placeholder, requi
   }, [active, expanded, id]);
 
   function choose(option: string) {
-    onChange(option); setActive(-1); setOpen(false);
+    onChange(commaSeparated ? [...tokens.slice(0, -1).map(token => token.trim()).filter(Boolean), option].join(', ') : option); setActive(-1); setOpen(false);
   }
   function keyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -117,13 +121,13 @@ export function SuggestionPicker({ id, label, value, options, placeholder, requi
       <div className={styles.suggestionCaption}>{label}<span aria-live="polite" aria-atomic="true">{matches.length} {matches.length === 1 ? 'match' : 'matches'}</span></div>
       <div id={listId} role="listbox" aria-label={`${label} suggestions`} className={styles.suggestionList}>
         {visible.map((option, index) => <div key={option} id={`${id}-option-${index}`} role="option"
-          aria-selected={value === option} className={cx(styles.suggestionOption, active === index && styles.isActive)}
+          aria-selected={typed === option} className={cx(styles.suggestionOption, active === index && styles.isActive)}
           onPointerDown={event => event.preventDefault()} onClick={() => choose(option)}>
-          <span>{option}</span>{value === option && <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 10 4 4 8-8" /></svg>}
+          <span>{option}</span>{typed === option && <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 10 4 4 8-8" /></svg>}
         </div>)}
       </div>
       {!visible.length && <p className={styles.suggestionEmpty}>{options.length ? 'No matching suggestions.' : 'No suggestions in the loaded model.'} You can still use the value you enter.</p>}
-      <div className={styles.suggestionFooter}>{matches.length > visible.length ? 'Showing the first 80 matches. Keep typing to narrow the list.' : 'Type to search, or enter your own value.'}</div>
+      <div className={styles.suggestionFooter}>{matches.length > visible.length ? 'Showing the first 80 matches. Keep typing to narrow the list.' : commaSeparated ? 'Select a value, then type a comma to add another.' : 'Type to search, or enter your own value.'}</div>
     </div>, document.body)}
   </div>;
 }
