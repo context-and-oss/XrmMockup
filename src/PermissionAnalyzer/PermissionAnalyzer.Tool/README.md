@@ -111,8 +111,16 @@ installation is required to run the packaged CLI; the React/TypeScript frontend 
 custom APIs, Azure Functions, explicit methods, and synthetic table operations with plugin/workflow
 cascades. For operations, changed columns determine which filtered Update steps run; leaving columns
 blank treats them as unknown. Combine application/caller roles and separately choose impersonated
-caller roles. No selection uses startup CLI/configured defaults; **Requirements only** skips coverage.
+caller roles using searchable checkboxes; no Ctrl/Cmd multi-selection is needed. No selection uses
+startup CLI/configured defaults; **Use session defaults** clears an explicit role selection.
+**Requirements only** skips coverage.
 `--no-roles` at startup fixes the entire session to requirements-only evaluation.
+
+The guided builder sits above the results: choose an analysis scope, set role context, then optionally
+expand **Report filters**. The query summary stays visible when you **Collapse builder**; **Edit query**
+restores all inputs. **Reset query** returns to the session starting point. Changing a query does not
+automatically rerun it: a notice labels results and JSON downloads from the previous run until you
+select **Run query** again.
 
 Results include granted/missing privileges and their depths, identities, source locations/call paths,
 assumptions, triggered steps, unresolved operations, and incomplete/truncated analysis warnings.

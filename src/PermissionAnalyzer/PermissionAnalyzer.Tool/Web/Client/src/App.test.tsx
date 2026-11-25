@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App';
 import { PermissionApi } from './model';
 import type { Catalog, Report } from './model';
@@ -55,10 +55,13 @@ describe('React security explorer', () => {
 
   it('combines explicit roles separately from impersonated roles', async () => {
     const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
-    const roles = screen.getByLabelText('Application / caller roles') as HTMLSelectElement;
-    roles.options[0]!.selected = true; roles.options[1]!.selected = true; fireEvent.change(roles);
-    const caller = screen.getByLabelText('Impersonated caller roles') as HTMLSelectElement;
-    caller.options[0]!.selected = true; fireEvent.change(caller);
+    fireEvent.click(screen.getByText('Choose application / caller roles'));
+    const roles = screen.getByRole('group', { name: 'Application / caller roles' });
+    fireEvent.click(within(roles).getByRole('checkbox', { name: 'Reader' }));
+    fireEvent.click(within(roles).getByRole('checkbox', { name: '<script>alert(1)</script>' }));
+    fireEvent.click(screen.getByText('Impersonated caller roles', { selector: 'summary' }));
+    const caller = screen.getByRole('group', { name: 'Impersonated caller roles' });
+    fireEvent.click(within(caller).getByRole('checkbox', { name: 'Reader' }));
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenCalledWith(expect.objectContaining({ roles: ['Reader', '<script>alert(1)</script>'], callerRoles: ['Reader'] })));
   });
@@ -88,13 +91,17 @@ describe('React security explorer', () => {
 
   it('fixes requirements-only sessions and exposes custom API suggestions', async () => {
     const api = mockApi({ ...catalog, requirementsOnly: true }); render(<App api={api} />); await screen.findByText('Build a query');
-    expect(screen.getByRole('checkbox')).toBeChecked(); expect(screen.getByRole('checkbox')).toBeDisabled();
-    expect(screen.getByLabelText('Application / caller roles')).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Requirements only/ })).toBeChecked(); expect(screen.getByRole('checkbox', { name: /Requirements only/ })).toBeDisabled();
+    fireEvent.click(screen.getByText('Choose application / caller roles'));
+    expect(screen.getByLabelText('Search application / caller roles')).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'custom-api' } });
     expect(document.querySelector('#targets option')?.getAttribute('value')).toBe('ctx_Run');
     fireEvent.change(screen.getByLabelText('Target name'), { target: { value: 'ctx_Run' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() => expect(api.query).toHaveBeenCalledWith(expect.objectContaining({ scope: 'custom-api', target: 'ctx_Run', noRoles: true, roles: [] })));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset query' }));
+    expect(screen.getByRole('checkbox', { name: /Requirements only/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Requirements only/ })).toBeDisabled();
   });
 
   it('reports startup failures and empty role catalogs', async () => {
@@ -103,7 +110,7 @@ describe('React security explorer', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load model: Server stopped'); first.unmount();
     render(<App api={mockApi({ ...catalog, roles: [] })} />); await screen.findByText('Build a query');
     fireEvent.click(screen.getByRole('button', { name: 'Role catalog' }));
-    expect(screen.getByText(/No security roles loaded/)).toBeInTheDocument();
+    expect(screen.getByText(/No security roles loaded\. Restart/)).toBeInTheDocument();
   });
 
   it('offers a skip link and communicates the selected explorer view', async () => {
@@ -133,6 +140,89 @@ describe('React security explorer', () => {
     await screen.findByText('1 Missing');
     expect(screen.getByRole('button', { name: 'Run query' })).toBeEnabled();
     expect(screen.getByRole('region', { name: 'operation:Update account requirements' })).toHaveAttribute('tabindex', '0');
+  });
+
+  it('preserves hidden role selections while searching and restores session defaults explicitly', async () => {
+    const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.click(screen.getByText('Choose application / caller roles'));
+    const roles = screen.getByRole('group', { name: 'Application / caller roles' });
+    fireEvent.click(within(roles).getByRole('checkbox', { name: 'Reader' }));
+    fireEvent.change(screen.getByLabelText('Search application / caller roles'), { target: { value: 'script' } });
+    expect(within(roles).queryByRole('checkbox', { name: 'Reader' })).not.toBeInTheDocument();
+    fireEvent.click(within(roles).getByRole('checkbox', { name: '<script>alert(1)</script>' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ roles: ['Reader', '<script>alert(1)</script>'] })));
+    fireEvent.click(within(roles).getByRole('button', { name: 'Use session defaults' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ roles: [] })));
+    expect(screen.getByText(/Defaults: Reader \(Dataverse\)/)).toBeInTheDocument();
+  });
+
+  it('keeps a compact query editable and labels results from a previous draft', async () => {
+    const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' })); await screen.findByText('1 Missing');
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse builder' }));
+    expect(screen.queryByRole('combobox', { name: 'Scope' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run query' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit query' }));
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
+    expect(screen.getByRole('button', { name: 'Run query' })).toBeDisabled();
+    expect(screen.getByText('Choose a target to run this query.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('These results and the JSON download are from the last run');
+    fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(screen.getByText('Last run: Update account + cascades')).toBeInTheDocument();
+  });
+
+  it('preserves operation inputs across scopes without sending hidden operation constraints', async () => {
+    const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
+    fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
+    fireEvent.change(screen.getByLabelText(/Changed columns/), { target: { value: 'name' } });
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'method' } });
+    fireEvent.change(screen.getByLabelText('Target name'), { target: { value: 'App.Run' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'method', target: 'App.Run', message: null, attributes: [] })));
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
+    expect(screen.getByLabelText(/Changed columns/)).toHaveValue('name');
+  });
+
+  it('clears optional filters and resets to the session starting point', async () => {
+    const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.click(screen.getByText('Report filters'));
+    fireEvent.change(screen.getByLabelText('Tables', { selector: 'input' }), { target: { value: 'account, contact' } });
+    fireEvent.change(screen.getByLabelText('Privileges'), { target: { value: 'Read' } });
+    expect(screen.getByText('3 values applied')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ tables: ['account', 'contact'], privileges: ['Read'] })));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByLabelText('Tables', { selector: 'input' })).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Reset query' }));
+    expect(screen.getByLabelText('Scope')).toHaveValue('all');
+    expect(screen.getByRole('checkbox', { name: /Requirements only/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'all', roles: [], callerRoles: [], noRoles: false, tables: [], privileges: [] })));
+  });
+
+  it('skips both identities in requirements-only mode without discarding explicit selections', async () => {
+    const api = mockApi(); render(<App api={api} />); await screen.findByText('Build a query');
+    fireEvent.click(screen.getByText('Choose application / caller roles'));
+    const roles = screen.getByRole('group', { name: 'Application / caller roles' });
+    fireEvent.click(within(roles).getByRole('checkbox', { name: 'Reader' }));
+    fireEvent.click(screen.getByText('Impersonated caller roles', { selector: 'summary' }));
+    const caller = screen.getByRole('group', { name: 'Impersonated caller roles' });
+    fireEvent.click(within(caller).getByRole('checkbox', { name: 'Reader' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Requirements only/ }));
+    expect(within(roles).getByRole('checkbox', { name: 'Reader' })).toBeDisabled();
+    expect(within(caller).getByRole('checkbox', { name: 'Reader' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ noRoles: true, roles: [], callerRoles: [] })));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Requirements only/ }));
+    expect(within(roles).getByRole('checkbox', { name: 'Reader' })).toBeChecked();
+    expect(within(caller).getByRole('checkbox', { name: 'Reader' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => expect(api.query).toHaveBeenLastCalledWith(expect.objectContaining({ noRoles: false, roles: ['Reader'], callerRoles: ['Reader'] })));
   });
 
   it('sends the session token through the typed API and surfaces server errors', async () => {
