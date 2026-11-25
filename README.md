@@ -6,14 +6,17 @@
 
 
 
-XrmMockup is a tool which simulates ***your*** exact Dynamics 365/CRM instance locally including all of its logic in the form of workflows, plugins, and the security model.
+XrmMockup simulates Dynamics 365/Dataverse locally using your downloaded metadata,
+plugin assemblies, workflows, and security roles.
 
-This means you can write tests towards XrmMockup as though it was the real CRM instance, and check that it behaves as expected with all of your customizations.
+Write tests against its organization services to exercise supported platform behavior
+and the interactions between your customizations without a live environment.
+Plugins and workflows run automatically when supported requests trigger them.
+XrmMockup is a simulator, not a complete clone of every Dataverse feature; unsupported
+requests and differences from the live platform still require consideration.
 
-You can test (and debug!) the entirety of the functionality you have implemented in your CRM system, with all 
-the plugins and workflows automatically being run inside your test cases if necessary -- along with all the standard out-of-the-box CRM logic. 
-
-Find more in-depth information and examples in the [wiki](https://github.com/delegateas/XrmMockup/wiki).
+Find more in-depth information and examples in the [documentation](docs/README.md).
+The [migration review report](docs/documentation-review.md) records legacy guidance and documentation gaps that need human review.
 
 ## Supported frameworks
 
