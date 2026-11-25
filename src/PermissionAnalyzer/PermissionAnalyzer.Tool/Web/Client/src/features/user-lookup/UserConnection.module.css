@@ -46,3 +46,27 @@
     gap: 8px;
   }
 }
+
+.identity {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--white);
+  font-size: 12px;
+
+  > span, > strong {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  > strong {
+    margin: 4px 0;
+    font-weight: 500;
+  }
+
+  .identityLabel {
+    color: var(--grey);
+    font-size: 10px;
+  }
+}

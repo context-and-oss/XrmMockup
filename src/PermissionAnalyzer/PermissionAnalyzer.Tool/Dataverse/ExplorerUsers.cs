@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using Microsoft.Crm.Sdk.Messages;
 using XrmMockup.PermissionAnalyzer.Core.Coverage;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 
@@ -14,7 +15,7 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Dataverse;
 internal sealed record UserConnectionRequest(string EnvironmentUrl, string CredentialType = "browser");
 internal sealed record UserSearchRequest(string Search);
 internal sealed record UserResolveRequest(Guid UserId, bool IsCaller = false);
-internal sealed record ExplorerConnection(bool Connected, string? EnvironmentUrl = null);
+internal sealed record ExplorerConnection(bool Connected, string? EnvironmentUrl = null, ExplorerUser? ConnectedUser = null);
 internal sealed record ExplorerUser(Guid Id, string Name, string? Email, string? Upn, bool Disabled);
 internal sealed record ExplorerSelection(string SelectionId, ExplorerUser User, string EnvironmentUrl, DateTimeOffset ReadAt,
     IReadOnlyList<string> Roles, IReadOnlyList<LiveRoleAssignment> Assignments, bool IsCaller);
@@ -31,6 +32,7 @@ internal sealed class ExplorerUsers(IReadOnlyList<RoleDefinition>? roles, IConfi
     }
     private ConnectedService? connection;
     private string? environmentUrl;
+    private ExplorerUser? connectedUser;
     private readonly Dictionary<string, (RoleSet Roles, bool IsCaller)> selections = new(StringComparer.Ordinal);
     internal object Options => new { available = roles is { Count: > 0 },
         environmentUrl = SuggestedUrl(configuration?["DataverseUrl"] ?? configuration?["DATAVERSE_URL"]),
@@ -41,7 +43,7 @@ internal sealed class ExplorerUsers(IReadOnlyList<RoleDefinition>? roles, IConfi
     private static string SuggestedUrl(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == "https"
         && uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0 ? uri.GetLeftPart(UriPartial.Authority) : "";
 
-    internal ExplorerConnection Status => new(connection is not null, environmentUrl);
+    internal ExplorerConnection Status => new(connection is not null, environmentUrl, connectedUser);
 
     internal async Task<ExplorerConnection> ConnectAsync(UserConnectionRequest request, CancellationToken cancellationToken)
     {
@@ -54,6 +56,20 @@ internal sealed class ExplorerUsers(IReadOnlyList<RoleDefinition>? roles, IConfi
             // Authentication may prompt in the server's browser/terminal. It never receives browser-supplied credentials.
             next = await Task.Run(() => factory is null ? CreateConnection(request) : factory(request), cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            // Verify the actual service identity, rather than inferring it from the
+            // browser sign-in or a selected user. Commit connection state only after
+            // both WhoAmI and the minimal profile read have succeeded.
+            var user = await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var identity = next.Service.Execute(new WhoAmIRequest()) as WhoAmIResponse;
+                if (identity is null || identity.UserId == Guid.Empty) throw new InvalidOperationException("WhoAmI did not return a user.");
+                cancellationToken.ThrowIfCancellationRequested();
+                return User(next.Service.Retrieve("systemuser", identity.UserId,
+                    new ColumnSet("fullname", "domainname", "internalemailaddress", "isdisabled")));
+            }, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            connectedUser = user;
             connection = next;
             environmentUrl = new Uri(request.EnvironmentUrl).GetLeftPart(UriPartial.Authority) + "/";
             return Status;
@@ -118,7 +134,7 @@ internal sealed class ExplorerUsers(IReadOnlyList<RoleDefinition>? roles, IConfi
 
     internal ExplorerConnection Disconnect()
     {
-        selections.Clear(); environmentUrl = null;
+        selections.Clear(); environmentUrl = null; connectedUser = null;
         var old = connection; connection = null; old?.Dispose();
         return Status;
     }

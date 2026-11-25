@@ -86,6 +86,8 @@ once; restart the CLI to refresh them. Choose scopes, filters, and reports in th
 Select **Connect to Dataverse** in the query builder, enter your environment URL, and choose browser,
 device-code, or existing Azure CLI sign-in. Authentication runs in the local analyzer: complete browser
 sign-in on that machine, or follow device-code instructions in its terminal. Nothing connects automatically.
+After sign-in, the analyzer runs **WhoAmI** and shows the connected account’s name and sign-in address.
+This account performs lookups; it does not automatically become the calling or impersonated user.
 
 - **Look up calling user** searches enabled/disabled users by the beginning of their name, email, or
   sign-in name. Select an enabled user to use their direct and team role assignments instead of explicit

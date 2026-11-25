@@ -41,6 +41,12 @@ export function UserConnection({ api, options, connection, disabled, onChange, o
       {connection?.connected ? <button type="button" className={ui.textButton} disabled={loading || disabled || busy} onClick={disconnect}>{busy ? 'Disconnecting…' : 'Disconnect'}</button> :
         <button type="button" className={ui.textButton} aria-expanded={expanded} aria-controls="user-connection-settings" disabled={loading || disabled || busy || !options.available} onClick={() => setExpanded(!expanded)}>{expanded ? 'Hide connection' : 'Connect to Dataverse'}</button>}
     </div>
+    {connection?.connected && connection.connectedUser && <div className={styles.identity} aria-label="Connected Dataverse user">
+      <span className={styles.identityLabel}>Signed in as</span>
+      <strong>{connection.connectedUser.name}</strong>
+      <span>{connection.connectedUser.upn || connection.connectedUser.email || connection.connectedUser.id}</span>
+      <p className={ui.hint}>This account performs the user lookups. Calling and impersonated users for permission checks are selected separately.</p>
+    </div>}
     {!options.available && <p className={ui.hint}>User lookup requires a local role catalog. Restart with role metadata or a saved analysis that contains roles.</p>}
     {expanded && !connection?.connected && <div id="user-connection-settings" className={styles.settings}>
       <div><label htmlFor="dataverse-url">Environment URL</label><input id="dataverse-url" type="url" value={url} placeholder="https://your-org.crm.dynamics.com" disabled={busy || disabled} onChange={event => setUrl(event.target.value)} /></div>

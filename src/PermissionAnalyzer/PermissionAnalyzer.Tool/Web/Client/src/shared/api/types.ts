@@ -7,7 +7,7 @@ export interface ColumnDefinition { logicalName: string; displayName: string | n
 export interface TableColumnCatalog { table: string; displayName: string | null; columns: ColumnDefinition[] }
 export type CredentialType = 'browser' | 'devicecode' | 'azcli';
 export interface UserLookupOptions { available: boolean; environmentUrl: string; credentialType: CredentialType }
-export interface UserConnection { connected: boolean; environmentUrl: string | null }
+export interface UserConnection { connected: boolean; environmentUrl: string | null; connectedUser: DataverseUser | null }
 export interface DataverseUser { id: string; name: string; email: string | null; upn: string | null; disabled: boolean }
 export interface UserSelection {
   selectionId: string; user: DataverseUser; environmentUrl: string; readAt: string; roles: string[]; isCaller: boolean;

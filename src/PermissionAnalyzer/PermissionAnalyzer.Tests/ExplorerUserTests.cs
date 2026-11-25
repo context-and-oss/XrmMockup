@@ -8,6 +8,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using WhoAmIRequest = Microsoft.Crm.Sdk.Messages.WhoAmIRequest;
+using WhoAmIResponse = Microsoft.Crm.Sdk.Messages.WhoAmIResponse;
 using XrmMockup.PermissionAnalyzer.Core.Analysis;
 using XrmMockup.PermissionAnalyzer.Core.Coverage;
 using XrmMockup.PermissionAnalyzer.Core.Model;
@@ -47,15 +49,22 @@ public class ExplorerUserTests
     }
     private static EntityCollection Page(params Entity[] entities) => new(entities.ToList());
     private sealed class Lifetime : IDisposable { public bool Disposed; public void Dispose() => Disposed = true; }
-    private sealed class Service(Func<QueryExpression, EntityCollection> read) : IOrganizationService
+    private sealed class Service(Func<QueryExpression, EntityCollection> read, Func<OrganizationRequest, OrganizationResponse>? execute = null,
+        Func<string, Guid, ColumnSet, Entity>? retrieve = null) : IOrganizationService
     {
         public readonly List<QueryExpression> Queries = [];
+        public readonly List<OrganizationRequest> Requests = [];
         public EntityCollection RetrieveMultiple(QueryBase query) { Queries.Add((QueryExpression)query); return read((QueryExpression)query); }
         public Guid Create(Entity entity) => throw new NotSupportedException();
         public void Update(Entity entity) => throw new NotSupportedException();
         public void Delete(string name, Guid id) => throw new NotSupportedException();
-        public Entity Retrieve(string name, Guid id, ColumnSet columns) => throw new NotSupportedException();
-        public OrganizationResponse Execute(OrganizationRequest request) => throw new NotSupportedException();
+        public Entity Retrieve(string name, Guid id, ColumnSet columns) => retrieve?.Invoke(name, id, columns) ?? User(id);
+        public OrganizationResponse Execute(OrganizationRequest request) {
+            Requests.Add(request);
+            if (execute is not null) return execute(request);
+            Assert.IsType<WhoAmIRequest>(request);
+            return new WhoAmIResponse { Results = new ParameterCollection { ["UserId"] = Bob } };
+        }
         public void Associate(string name, Guid id, Relationship relationship, EntityReferenceCollection references) => throw new NotSupportedException();
         public void Disassociate(string name, Guid id, Relationship relationship, EntityReferenceCollection references) => throw new NotSupportedException();
     }
@@ -95,7 +104,10 @@ public class ExplorerUserTests
         using var users = Users(service, lifetime);
         await Assert.ThrowsAsync<ToolException>(() => users.SearchAsync("Alice", CancellationToken.None));
         Assert.Empty(service.Queries);
-        await users.ConnectAsync(new(Url), CancellationToken.None);
+        var connection = await users.ConnectAsync(new(Url), CancellationToken.None);
+        Assert.Equal(Bob, connection.ConnectedUser!.Id);
+        Assert.Equal("Bob Example", connection.ConnectedUser.Name);
+        Assert.IsType<WhoAmIRequest>(Assert.Single(service.Requests));
         var matches = await users.SearchAsync("Example", CancellationToken.None);
         Assert.Equal(2, matches.Count);
         var search = Assert.Single(service.Queries);
@@ -110,7 +122,7 @@ public class ExplorerUserTests
         Assert.Null(roles.DirectGlobalDepth(GlobalRequirement.ActOnBehalfOfAnotherUser));
         Assert.False(roles.LiveSource!.IsCaller);
         Assert.Throws<ToolException>(() => users.Selection(selected.SelectionId, true));
-        users.Disconnect(); Assert.True(lifetime.Disposed);
+        users.Disconnect(); Assert.True(lifetime.Disposed); Assert.Null(users.Status.ConnectedUser);
         Assert.Throws<ToolException>(() => users.Selection(selected.SelectionId, false));
     }
 
@@ -124,6 +136,38 @@ public class ExplorerUserTests
     [InlineData("https://example.crm.dynamics.com?token=secret")]
     [InlineData("https://example.crm.dynamics.com.attacker.test")]
     public void RejectsUnsafeConnectionTargets(string url) => Assert.Throws<ToolException>(() => ExplorerUsers.ValidateConnection(new(url)));
+
+    [Fact]
+    public async Task WhoAmIFailureDisposesConnectionAndAllowsRetryWithoutAnAssumedIdentity()
+    {
+        var attempts = 0; var firstLifetime = new Lifetime(); var secondLifetime = new Lifetime();
+        using var users = new ExplorerUsers([Reader, Writer], null, NullLoggerFactory.Instance, _ => {
+            attempts++;
+            return attempts == 1 ? ConnectedFailure() : new(DefaultService(), secondLifetime);
+            ExplorerUsers.ConnectedService ConnectedFailure() => new(new Service(_ => Page(),
+                _ => throw new InvalidOperationException("secret from WhoAmI")), firstLifetime);
+        });
+        var error = await Assert.ThrowsAsync<ToolException>(() => users.ConnectAsync(new(Url), CancellationToken.None));
+        Assert.DoesNotContain("secret from WhoAmI", error.Message);
+        Assert.True(firstLifetime.Disposed); Assert.False(users.Status.Connected);
+        Assert.Null(users.Status.ConnectedUser); Assert.Null(users.Status.EnvironmentUrl);
+        var connected = await users.ConnectAsync(new(Url), CancellationToken.None);
+        Assert.Equal(Bob, connected.ConnectedUser!.Id);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidIdentityOrUnreadableProfileDoesNotPublishConnectedState(bool profileFailure)
+    {
+        var lifetime = new Lifetime();
+        var service = new Service(_ => Page(),
+            _ => new WhoAmIResponse { Results = new ParameterCollection { ["UserId"] = profileFailure ? Bob : Guid.Empty } },
+            (_, _, _) => throw new InvalidOperationException("Profile unavailable"));
+        using var users = Users(service, lifetime);
+        await Assert.ThrowsAsync<ToolException>(() => users.ConnectAsync(new(Url), CancellationToken.None));
+        Assert.True(lifetime.Disposed); Assert.Null(users.Status.ConnectedUser); Assert.False(users.Status.Connected);
+    }
 
     [Fact]
     public async Task MalformedSearchAndFailedAuthenticationDoNotLeaveAConnection()
@@ -276,7 +320,8 @@ public class ExplorerUserTests
             var session = await client.GetFromJsonAsync<JsonElement>("api/session"); client.DefaultRequestHeaders.Add("X-XrmMockup-Token", session.GetProperty("token").GetString());
             Assert.False((await client.GetFromJsonAsync<ExplorerConnection>("api/users/status"))!.Connected);
             Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("api/users/connect", new { environmentUrl = Url, credentialType = "browser" })).StatusCode);
-            Assert.True((await client.GetFromJsonAsync<ExplorerConnection>("api/users/status"))!.Connected);
+            var status = await client.GetFromJsonAsync<ExplorerConnection>("api/users/status");
+            Assert.True(status!.Connected); Assert.Equal(Bob, status.ConnectedUser!.Id);
             Assert.Equal(HttpStatusCode.MethodNotAllowed, (await client.GetAsync("api/users/search")).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("api/users/search", new { })).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("api/users/resolve", new { userId = "not-a-guid" })).StatusCode);
