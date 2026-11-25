@@ -85,6 +85,10 @@ internal static class AnalysisRunner
                     logger.LogInformation("Wrote complete analysis snapshot to {Path}", Path.GetFullPath(savePath));
                 }
             }
+            // Extraction is required for the snapshot, but capture alone must not evaluate the
+            // graph, apply query-specific entry points, or generate a permission report.
+            if (request.CaptureOnly) return ExitCodes.Success;
+
             if (request.Web)
             {
                 var model = new SecurityModel(root, snapshot?.Graph ?? builder.Extracted(), incomplete, roles,

@@ -33,7 +33,7 @@ internal static class CliOptions
     internal static class SaveSnapshot
     {
         public const string Primary = "--save-snapshot";
-        public const string Description = "Save the complete extracted graph and analysis metadata for later queries. Requirements-only by default; explicit role/user or failure options enable coverage";
+        public const string Description = "Save the complete extracted graph and analysis metadata for later queries, then stop. Explicit query/report options also produce a report; --explore starts the explorer";
     }
 
     internal static class Metadata

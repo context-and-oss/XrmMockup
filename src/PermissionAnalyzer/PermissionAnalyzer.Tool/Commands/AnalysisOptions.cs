@@ -165,6 +165,14 @@ internal sealed class AnalysisOptions
             : operation is not null ? EntryPointSelector.Operation(operation.Message, operation.Table)
             : null;
 
+        // Input/capture switches alone save the graph without evaluating a query or writing a report.
+        // Check explicit presence so even --format text or --detail normal requests a report.
+        var captureOnly = parseResult.GetValue(_saveSnapshot) is not null && !parseResult.GetValue(_explore)
+            && !new Option[] { _format, _output, _detail, _table, _privilege, _runsAs, _basis,
+                _plugin, _customApi, _function, _entry, _operation, _attributes,
+                _role, _callerRole, _user, _callerUser, _failOnMissing, _strict }
+                .Any(o => parseResult.GetResult(o) is { Implicit: false });
+
         return new AnalysisRequest(
             parseResult.GetValue(_solution),
             parseResult.GetValue(_metadata),
@@ -195,7 +203,8 @@ internal sealed class AnalysisOptions
             parseResult.GetValue(_snapshot),
             parseResult.GetValue(_saveSnapshot),
             parseResult.GetValue(_explore),
-            parseResult.GetResult(_port) is null ? 8765 : parseResult.GetValue(_port));
+            parseResult.GetResult(_port) is null ? 8765 : parseResult.GetValue(_port),
+            captureOnly);
     }
 
     /// <summary>
@@ -213,6 +222,7 @@ internal sealed class AnalysisOptions
 
 /// <summary>
 /// The command line of one run. <see cref="FailOnMissing"/> is also set by <c>--strict</c>.
+/// <see cref="CaptureOnly"/> stops after source extraction and snapshot saving, without evaluating a report.
 /// </summary>
 internal sealed record AnalysisRequest(
     string? Solution,
@@ -238,7 +248,8 @@ internal sealed record AnalysisRequest(
     string? Snapshot = null,
     string? SaveSnapshot = null,
     bool Web = false,
-    int Port = 8765)
+    int Port = 8765,
+    bool CaptureOnly = false)
 {
     // Capture is analysis-first. Configured coverage must not require --no-roles just to save a graph.
     // Explicit coverage/failure options still opt in, including configured roles with --strict.

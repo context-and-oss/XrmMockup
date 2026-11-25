@@ -179,9 +179,18 @@ Even if capture uses `--plugin`, `--operation`, `--entry`, `--table` or another 
 queries can select other entry points or construct new operation/attribute combinations. Project exclusions
 and the set of loaded source/plugin projects are still capture-time boundaries: code that was never loaded
 cannot be queried. Configured entry methods are retained; ad hoc `--entry` and `--operation` queries aren't.
-Saving also writes a requirements-only report by default; **`--no-roles` is not needed** for capture.
-Configured `Principals`, `Users` and suppressions do not apply to that default report. An explicit `--role`,
-`--caller-role`, `--user`, `--caller-user`, `--fail-on-missing` or `--strict` opts into coverage for the capture
+
+With only input options (`--solution`, `--metadata`, `--config`, `--exclude`, `--plugin-solution`) and
+`--save-snapshot`, the tool extracts and saves the graph, then stops: it does not evaluate a permission
+query, check coverage, or write a report. **`--no-roles` is not needed** for capture; adding it still only
+captures. Progress and the saved path are logged to standard error.
+
+Explicit scope, filter, report or coverage options also request a report after capture. For example,
+`--format json --output report.json` saves a separate report, and `--operation "Update account"` evaluates
+that operation after saving the whole graph. `--explore` starts the explorer after saving instead.
+Reports generated alongside capture are requirements-only unless coverage is explicitly requested;
+configured `Principals`, `Users` and suppressions do not apply to requirements-only reports. An explicit
+`--role`, `--caller-role`, `--user`, `--caller-user`, `--fail-on-missing` or `--strict` opts into coverage for the capture
 run, using the normal CLI/configuration role resolution. `--output` selects a separate report file, not the
 snapshot file. Normal analysis and snapshot replay retain their existing configured-role behavior; use
 `--no-roles` there only to override configured coverage.
@@ -246,7 +255,7 @@ roles grant them. With `--fail-on-missing` it exits with `1` when they don't, so
 | `--explore` | | Explore permissions interactively in your browser; load source or a snapshot once and query interactively (see [Permission explorer](#permission-explorer)) |
 | `--port` | | Local permission explorer port, 1–65535 (default: 8765). Requires `--explore`; binding remains IPv4 loopback only |
 | `--solution` | `-s` | Solution (`.sln`/`.slnx`) or project (`.csproj`) to analyze. A project is analyzed together with the projects it references; methods in those that the project doesn't reach aren't listed as unreached, since a shared library also has code for other apps |
-| `--save-snapshot` | | Save the complete extracted analysis to a file for later queries. Requirements-only report by default; explicit role/user or failure options opt into coverage. The snapshot is independent of scope, filters, roles and format |
+| `--save-snapshot` | | Save the complete extracted analysis to a file for later queries, then stop. Explicit query/report options also produce a report; `--explore` starts the explorer. The snapshot is independent of scope, filters, roles and format |
 | `--snapshot` | | Query a saved snapshot without loading source. Supports every scope, including new operations and explicit methods; cannot combine with `--solution`, `--exclude`, `--plugin-solution` or `--save-snapshot` |
 | `--metadata` | `-m` | XrmMockup metadata folder with `SecurityRoles/`. Default: `MetadataDirectory`, then `XrmMockup:Metadata:OutputDirectory`, then `./Metadata` next to the configuration file when it exists. With `--snapshot`, reads only `SecurityRoles/`; default: the embedded role catalog |
 | `--exclude` | `-x` | Leave out projects matching a pattern (see [Excluding projects](#excluding-projects)). Repeatable |
