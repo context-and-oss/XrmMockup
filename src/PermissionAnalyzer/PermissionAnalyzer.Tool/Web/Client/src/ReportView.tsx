@@ -20,7 +20,7 @@ function SectionCard({ section, truncated }: { section: Section; truncated: bool
     <div className="section-head"><h3>{section.id}</h3><p>{section.kind || 'Unreached method'}</p>
       {section.roles?.map((identity, index) => <p key={index}>{identity.runsAs}{identity.userId && ` (${identity.userId})`}: {identity.roles?.join(' + ') || identity.note || 'Not checked'}{identity.origin && ` · ${identity.origin}`}</p>)}
     </div>
-    {section.requirements.length > 0 ? <div className="table-wrap"><table>
+    {section.requirements.length > 0 ? <div className="table-wrap" role="region" aria-label={`${section.id} requirements`} tabIndex={0}><table>
       <thead><tr><th>Table / privilege</th><th>Runs as</th><th>Basis</th><th>Coverage</th></tr></thead>
       <tbody>{section.requirements.map((requirement, index) => <tr key={index}>
         <td>{requirement.table || 'Global'} · {requirement.privilege}<Sources sources={requirement.sources} /></td>

@@ -28,7 +28,7 @@ export function QueryForm({ model, busy, onQuery }: Props) {
   }
 
   return <form className="panel controls" onSubmit={submit}>
-    <h2>Build a query</h2><p className="muted small">Evaluate against the loaded model.</p>
+    <p className="eyebrow">QUERY SETUP</p><h2>Build a query</h2><p className="muted small">Evaluate against the loaded model.</p>
     <label htmlFor="scope">Scope</label>
     <select id="scope" value={scope} onChange={event => { setScope(event.target.value as Scope); setTarget(''); }}>
       <option value="all">All entry points &amp; unreached methods</option>

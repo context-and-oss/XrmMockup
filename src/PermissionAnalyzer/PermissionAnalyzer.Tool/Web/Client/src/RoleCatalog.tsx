@@ -8,7 +8,7 @@ function RoleCard({ role, grants, expanded }: { role: Role; grants: Grant[]; exp
     <summary>{role.name} · {grants.length} grants{role.roleId && ` · ${role.roleId}`}</summary>
     {open && <>
       {!role.globalPrivilegesKnown && <p className="hint">Global privileges are unknown in this metadata (not evidence of missing grants).</p>}
-      <div className="table-wrap"><table><thead><tr><th>Table</th><th>Privilege</th><th>Depth</th></tr></thead>
+      <div className="table-wrap" role="region" aria-label={`${role.name} grants`} tabIndex={0}><table><thead><tr><th>Table</th><th>Privilege</th><th>Depth</th></tr></thead>
         <tbody>{grants.map((grant, index) => <tr key={index}><td>{grant.table || 'Global'}</td><td>{grant.privilege}</td><td>{grant.depth}</td></tr>)}</tbody>
       </table></div>
       {!grants.length && <p className="hint">No recorded grants.</p>}

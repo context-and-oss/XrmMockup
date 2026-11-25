@@ -106,6 +106,35 @@ describe('React security explorer', () => {
     expect(screen.getByText(/No security roles loaded/)).toBeInTheDocument();
   });
 
+  it('offers a skip link and communicates the selected explorer view', async () => {
+    render(<App api={mockApi()} />);
+    await screen.findByText('Build a query');
+    expect(screen.getByRole('link', { name: 'Skip to security explorer' })).toHaveAttribute('href', '#explorer');
+    expect(document.querySelector('#explorer')).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('button', { name: 'Query permissions' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'operation' } });
+    fireEvent.change(screen.getByLabelText('Table logical name'), { target: { value: 'account' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Role catalog' }));
+    expect(screen.getByRole('button', { name: 'Role catalog' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Query permissions' }));
+    expect(screen.getByLabelText('Table logical name')).toHaveValue('account');
+  });
+
+  it('announces a pending query and disables repeat submissions and downloads', async () => {
+    let resolve!: (value: Report) => void;
+    const api = { catalog: vi.fn().mockResolvedValue(catalog), query: vi.fn(() => new Promise<Report>(done => { resolve = done; })) };
+    render(<App api={api} />);
+    await screen.findByText('Build a query');
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Evaluating query…');
+    expect(screen.getByRole('button', { name: 'Evaluating…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
+    resolve(report);
+    await screen.findByText('1 Missing');
+    expect(screen.getByRole('button', { name: 'Run query' })).toBeEnabled();
+    expect(screen.getByRole('region', { name: 'operation:Update account requirements' })).toHaveAttribute('tabindex', '0');
+  });
+
   it('sends the session token through the typed API and surfaces server errors', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ token: 'session-secret' })))
       .mockResolvedValueOnce(new Response(JSON.stringify(catalog)))
