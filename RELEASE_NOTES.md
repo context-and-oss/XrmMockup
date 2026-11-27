@@ -1,5 +1,6 @@
 <!-- BEGIN GENERATED RELEASE NOTES -->
 ### Unreleased
+* Add: The ability to preserve user identity IDs when resetting the environment (#389)
 * Fix: EntityMatcher and implement 'not-_-with' (#388)
 * Fix: Fix permission analyzer impersonation coverage and incomplete-analysis reporting (#391)
 <!-- END GENERATED RELEASE NOTES -->
