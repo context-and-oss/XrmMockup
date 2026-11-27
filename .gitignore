@@ -211,3 +211,7 @@ tmpclaude-*-cwd
 # Release automation source is not a .NET Release output directory.
 !/scripts/release/
 !/scripts/release/**
+
+# Permission web UI dependencies and Vite output
+/src/PermissionAnalyzer/PermissionAnalyzer.Tool/Web/Client/node_modules/
+/src/PermissionAnalyzer/PermissionAnalyzer.Tool/Web/Client/dist/

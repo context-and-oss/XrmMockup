@@ -12,7 +12,9 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Metadata;
 /// </summary>
 /// <param name="Lookups">The lookup columns, from the entity metadata of every file.</param>
 /// <param name="PluginSteps">The plugin steps, from <c>Metadata.xml</c>.</param>
-internal sealed record MetadataFileContents(IReadOnlyList<LookupColumn> Lookups, IReadOnlyList<PluginStepRegistration> PluginSteps);
+/// <param name="ColumnCatalog">Lightweight table/column names for offline UI suggestions.</param>
+internal sealed record MetadataFileContents(IReadOnlyList<LookupColumn> Lookups, IReadOnlyList<PluginStepRegistration> PluginSteps,
+    IReadOnlyList<TableColumnCatalog> ColumnCatalog);
 
 /// <summary>
 /// Reads the metadata files in one pass each. A file can be hundreds of megabytes, almost all of it entity metadata,
@@ -33,7 +35,7 @@ internal static class MetadataFileLoader
     /// </summary>
     public static MetadataFileContents Load(string metadataDirectory)
     {
-        if (!Directory.Exists(metadataDirectory)) return new([], []);
+        if (!Directory.Exists(metadataDirectory)) return new([], [], []);
 
         var entitySerializer = new DataContractSerializer(typeof(Dictionary<string, EntityMetadata>), EntityMetadataElement, Namespace);
         var pluginSerializer = new DataContractSerializer(typeof(List<MetaPlugin>), PluginsElement, Namespace);
@@ -78,6 +80,6 @@ internal static class MetadataFileLoader
                 }
             }
         }
-        return new(LookupLoader.Convert(entities.Values), PluginStepLoader.Convert(plugins));
+        return new(LookupLoader.Convert(entities.Values), PluginStepLoader.Convert(plugins), ColumnCatalog.Convert(entities.Values));
     }
 }

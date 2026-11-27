@@ -15,10 +15,16 @@ internal sealed class UserRoleResolver(IOrganizationService service)
         string option, DateTimeOffset readAt, CancellationToken cancellationToken = default)
     {
         var user = FindUser(username.Trim(), cancellationToken);
+        return Resolve(user.Id, username, metadataRoles, environmentUrl, option, readAt, cancellationToken);
+    }
+
+    internal RoleSet Resolve(Guid userId, string username, IReadOnlyList<RoleDefinition> metadataRoles, string environmentUrl,
+        string option, DateTimeOffset readAt, CancellationToken cancellationToken = default)
+    {
         var assignments = new List<(RoleDefinition Role, LiveRoleAssignment Source)>();
         foreach (var fromTeam in new[] { false, true })
         {
-            foreach (var role in RetrieveAll(RoleQuery(user.Id, fromTeam), cancellationToken))
+            foreach (var role in RetrieveAll(RoleQuery(userId, fromTeam), cancellationToken))
             {
                 var rootId = role.GetAttributeValue<EntityReference>("parentrootroleid")?.Id ?? role.Id;
                 var matches = metadataRoles.Where(r => r.RoleId == rootId).ToList();
@@ -34,7 +40,7 @@ internal sealed class UserRoleResolver(IOrganizationService service)
         }
 
         if (assignments.Count == 0)
-            throw new ToolException($"Dataverse user '{username}' ({user.Id:D}) has no direct or team security roles.");
+            throw new ToolException($"Dataverse user '{username}' ({userId:D}) has no direct or team security roles.");
 
         var sources = assignments.Select(a => a.Source).Distinct()
             .OrderBy(a => a.RoleName, StringComparer.Ordinal)
@@ -43,7 +49,7 @@ internal sealed class UserRoleResolver(IOrganizationService service)
             .ThenBy(a => a.TeamId)
             .ToList();
         return RoleSet.Combine(assignments.Select(a => a.Role), "Dataverse",
-            new LiveRoleSource(username, user.Id, environmentUrl, readAt.ToUniversalTime(), sources,
+            new LiveRoleSource(username, userId, environmentUrl, readAt.ToUniversalTime(), sources,
                 option == CliOptions.CallerUser.Primary), assignments.Where(a => a.Source.TeamId is null).Select(a => a.Role));
     }
 

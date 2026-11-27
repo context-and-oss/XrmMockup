@@ -7,6 +7,7 @@ using XrmMockup.PermissionAnalyzer.Core.Extraction;
 using XrmMockup.PermissionAnalyzer.Core.Graph;
 using XrmMockup.PermissionAnalyzer.Core.Model;
 using XrmMockup.PermissionAnalyzer.Tool.Output;
+using XrmMockup.PermissionAnalyzer.Tool.Metadata;
 
 namespace XrmMockup.PermissionAnalyzer.Tool.Snapshots;
 
@@ -23,18 +24,21 @@ internal sealed record AnalysisSnapshot(
     AnalysisProvenance Inputs,
     ExtractedAnalysis Graph,
     IReadOnlyList<UnresolvedOperation> Diagnostics,
-    IReadOnlyList<SnapshotRole>? Roles)
+    IReadOnlyList<SnapshotRole>? Roles,
+    IReadOnlyList<TableColumnCatalog> ColumnCatalog)
 {
     internal const int CurrentSchemaVersion = 1;
     private const string SnapshotKind = "xrmmockup-permissions-snapshot";
 
     internal static AnalysisSnapshot Create(ManifestBuilder builder, AnalysisProvenance inputs,
         IReadOnlyList<UnresolvedOperation> diagnostics, IReadOnlyList<RoleDefinition>? roles,
-        string version, string sourceRoot) => new(SnapshotKind, CurrentSchemaVersion, version, sourceRoot,
+        string version, string sourceRoot, IReadOnlyList<TableColumnCatalog>? columnCatalog = null) => new(SnapshotKind, CurrentSchemaVersion, version, sourceRoot,
             inputs, builder.Extracted(), diagnostics.OrderBy(d => d.Source.Location)
                 .ThenBy(d => d.Operation, StringComparer.Ordinal).ThenBy(d => d.Reason, StringComparer.Ordinal).ToList(),
             roles?.OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.RoleId)
-                .Select(SnapshotRole.Of).ToList());
+                .Select(SnapshotRole.Of).ToList(),
+            (columnCatalog ?? []).OrderBy(t => t.Table, StringComparer.Ordinal)
+                .Select(t => t with { Columns = t.Columns.OrderBy(c => c.LogicalName, StringComparer.Ordinal).ToList() }).ToList());
 
     internal IReadOnlyList<RoleDefinition>? RoleDefinitions() => Roles?.Select(r => r.Definition()).ToList();
 
@@ -48,8 +52,18 @@ internal sealed record AnalysisSnapshot(
                 throw new ToolException("Not a permission analysis snapshot. Create one with --save-snapshot; a JSON report cannot be replayed.");
             if (!root.TryGetProperty("schemaVersion", out var version) || !version.TryGetInt32(out var number) || number != CurrentSchemaVersion)
                 throw new ToolException($"Unsupported permission snapshot schema. This analyzer supports version {CurrentSchemaVersion}; recreate the snapshot with this analyzer.");
+            // The column catalog is required, even when capture had no entity metadata.
+            if (!root.TryGetProperty("columnCatalog", out var catalog)
+                || catalog.ValueKind != JsonValueKind.Array) throw new JsonException("Missing column catalog");
             ValidateArrays(root);
-            return root.Deserialize<AnalysisSnapshot>(Options) ?? throw new JsonException("Empty snapshot");
+            var snapshot = root.Deserialize<AnalysisSnapshot>(Options) ?? throw new JsonException("Empty snapshot");
+            var columns = snapshot.ColumnCatalog;
+            if (columns.Any(t => string.IsNullOrWhiteSpace(t.Table)
+                || t.Columns.Any(c => string.IsNullOrWhiteSpace(c.LogicalName))
+                || t.Columns.Select(c => c.LogicalName).Distinct(StringComparer.Ordinal).Count() != t.Columns.Count)
+                || columns.Select(t => t.Table).Distinct(StringComparer.Ordinal).Count() != columns.Count)
+                throw new JsonException("Invalid or duplicate column catalog identifiers");
+            return snapshot;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {

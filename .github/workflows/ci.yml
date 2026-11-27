@@ -25,6 +25,19 @@ jobs:
         with:
           dotnet-version: 10.x
 
+      - name: Setup Node.js for permission web UI
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: src/PermissionAnalyzer/PermissionAnalyzer.Tool/Web/Client/package-lock.json
+
+      - name: Test permission web UI
+        working-directory: src/PermissionAnalyzer/PermissionAnalyzer.Tool/Web/Client
+        run: |
+          npm ci --include=dev
+          npm test
+
       - name: Install dependencies
         run: dotnet restore
 

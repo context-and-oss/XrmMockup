@@ -4,7 +4,7 @@ Static privilege analysis shared by the `xrmmockup-permissions` CLI and explicit
 XrmMockup SDK checks. It reads C# source; it does not execute business logic or prove
 record-level access.
 
-Usage and configuration: [CLI reference](../../src/PermissionAnalyzer/PermissionAnalyzer.Tool/README.md).
+Usage and configuration: [CLI reference](../permission-analyzer-reference.md).
 SDK setup: [permission checks](../permission-analysis-sdk.md).
 
 ## Architecture

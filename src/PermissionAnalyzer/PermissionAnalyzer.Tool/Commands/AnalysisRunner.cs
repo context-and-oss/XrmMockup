@@ -1,4 +1,5 @@
 using System.Reflection;
+using XrmMockup.PermissionAnalyzer.Tool.Web;
 using XrmMockup.PermissionAnalyzer.Tool.Dataverse;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -54,11 +55,15 @@ internal static class AnalysisRunner
             ManifestBuilder builder;
             IReadOnlyList<UnresolvedOperation> incomplete;
             AnalysisProvenance? inputs;
+            IReadOnlyList<TableColumnCatalog> columns;
             if (snapshot is not null)
             {
                 builder = ManifestBuilder.Restore(root, snapshot.Graph);
                 incomplete = snapshot.Diagnostics;
                 inputs = snapshot.Inputs;
+                columns = request.Web && request.Metadata is { } columnDirectory
+                    ? LoadExplorerColumns(snapshot, Path.GetFullPath(columnDirectory))
+                    : snapshot.ColumnCatalog;
                 logger.LogInformation("Loaded complete analysis snapshot from {Path}; analysis metadata and request rules are frozen", request.Snapshot);
                 if (configuration.Permissions.Rules.Length > 0)
                     logger.LogWarning("Configured request rules are ignored during snapshot replay; recreate the snapshot to change analysis inputs");
@@ -66,23 +71,38 @@ internal static class AnalysisRunner
             else
             {
                 var metadataFile = settings!.MetadataDirectory is { } fileDirectory ? LoadMetadataFile(fileDirectory, logger) : null;
+                columns = metadataFile?.ColumnCatalog ?? [];
                 builder = new ManifestBuilder(root, RuleSetup.Create(configuration.Permissions), metadataFile?.Lookups);
                 if (settings.MetadataDirectory is { } metadataDirectory) AddMetadata(builder, metadataDirectory, metadataFile?.PluginSteps ?? [], logger);
                 builder.AddEntryMethods(configuration.Permissions.EntryPoints);
                 var projects = new List<LoadedProject>();
                 incomplete = await XrmMockup.PermissionAnalyzer.Workspace.SourceLoader.AddAsync(builder, settings, loggerFactory,
                     cancellationToken, collectIncompleteSource: true, projects: projects);
-                inputs = request.Format == ReportFormat.Json
+                inputs = request.Web || request.Format == ReportFormat.Json
                     ? AnalysisProvenance.Create(settings, configuration.Permissions, projects, noRoles) : null;
                 if (request.SaveSnapshot is { } savePath)
                 {
                     // Capture before adding query-specific entry methods/operations or evaluating any scope.
                     var artifact = AnalysisSnapshot.Create(builder,
                         AnalysisProvenance.Create(settings, configuration.Permissions, projects, noRoles: true),
-                        incomplete, roles, version, SarifManifestWriter.RepositoryPath(root));
+                        incomplete, roles, version, SarifManifestWriter.RepositoryPath(root), columns);
                     await artifact.SaveAsync(savePath, cancellationToken);
                     logger.LogInformation("Wrote complete analysis snapshot to {Path}", Path.GetFullPath(savePath));
                 }
+            }
+            // Extraction is required for the snapshot, but capture alone must not evaluate the
+            // graph, apply query-specific entry points, or generate a permission report.
+            if (request.CaptureOnly) return ExitCodes.Success;
+
+            if (request.Web)
+            {
+                var explorerConnection = DataverseRoleLookup.CreateConnectionConfiguration(request, configuration);
+                using var explorerConnectionLifetime = explorerConnection as IDisposable;
+                using var explorerUsers = new ExplorerUsers(roles, explorerConnection, loggerFactory);
+                var model = new SecurityModel(root, snapshot?.Graph ?? builder.Extracted(), incomplete, roles,
+                    configuration.Permissions, coverageOptions, inputs, request.NoRoles, columns, explorerUsers);
+                await SecurityWebHost.RunAsync(model, request.Port, logger, cancellationToken, address => BrowserLauncher.Open(address, logger));
+                return ExitCodes.Success;
             }
             builder.AddEntryMethods(configuration.Permissions.EntryPoints.Concat(request.EntryMethods).Distinct(StringComparer.Ordinal));
             if (request.Operation is { } operation) builder.AddOperation(operation.Message, operation.Table, operation.Columns);
@@ -191,6 +211,9 @@ internal static class AnalysisRunner
     /// <summary>
     /// The lookup columns and plugin steps of the metadata files, which are read together because they're large.
     /// </summary>
+    internal static IReadOnlyList<TableColumnCatalog> LoadExplorerColumns(AnalysisSnapshot snapshot, string metadataDirectory) =>
+        ColumnCatalog.Merge(snapshot.ColumnCatalog, MetadataFileLoader.Load(metadataDirectory).ColumnCatalog);
+
     private static MetadataFileContents LoadMetadataFile(string metadataDirectory, ILogger logger)
     {
         var contents = MetadataFileLoader.Load(metadataDirectory);

@@ -282,6 +282,7 @@ public class SnapshotTests
             var snapshot = AnalysisSnapshot.Read(snapshotPath);
             Assert.NotEmpty(snapshot.Inputs.Projects);
             Assert.Null(snapshot.Roles);
+            Assert.Empty(snapshot.ColumnCatalog!);
             Assert.DoesNotContain(snapshot.Graph.Entries, e => e.Kind == EntryPointKind.Operation);
             using (var captureReport = JsonDocument.Parse(await File.ReadAllTextAsync(report))) {
                 Assert.False(captureReport.RootElement.TryGetProperty("result", out _));
@@ -294,6 +295,33 @@ public class SnapshotTests
             await File.WriteAllTextAsync(config, """
                 { "XrmMockup": { "Permissions": { "Principals": { "App": { "Roles": ["Missing configured role"] } } } } }
                 """);
+            // Source + metadata + save-snapshot must only capture, even with stale configured roles.
+            // Run in a child process to check stdout without changing global Console.Out in xUnit.
+            var captureStart = new System.Diagnostics.ProcessStartInfo(
+                Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet") {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
+                WorkingDirectory = directory
+            };
+            foreach (var argument in new[] { typeof(AnalysisRunner).Assembly.Location,
+                "--solution", project, "--metadata", TestMetadata.DirectoryPath,
+                "--config", config, "--save-snapshot", snapshotPath })
+                captureStart.ArgumentList.Add(argument);
+            using (var captureProcess = System.Diagnostics.Process.Start(captureStart)!) {
+                var stdout = captureProcess.StandardOutput.ReadToEndAsync();
+                var stderr = captureProcess.StandardError.ReadToEndAsync();
+                await captureProcess.WaitForExitAsync();
+                Assert.True(captureProcess.ExitCode == ExitCodes.Success, await stderr);
+                Assert.Equal(string.Empty, await stdout);
+                Assert.Contains("Wrote complete analysis snapshot", await stderr);
+            }
+            var captured = AnalysisSnapshot.Read(snapshotPath);
+            Assert.NotEmpty(captured.Inputs.Projects);
+            Assert.NotEmpty(captured.Graph.Nodes);
+            Assert.NotEmpty(captured.RoleDefinitions()!);
+            var accountColumns = captured.ColumnCatalog!.Single(t => t.Table == "account").Columns;
+            Assert.Contains(accountColumns, c => c.LogicalName == "name");
+            Assert.Contains(accountColumns, c => c.LogicalName == "ownerid");
+
             var capture = new[] { "--solution", project, "--metadata", TestMetadata.DirectoryPath,
                 "--config", config, "--save-snapshot", snapshotPath, "--operation", "WhoAmI systemuser",
                 "--format", "json", "--output", report };
@@ -394,6 +422,40 @@ public class SnapshotTests
         var path = Path.GetTempFileName();
         try { File.WriteAllText(path, content); Assert.Contains(error, Assert.Throws<ToolException>(() => AnalysisSnapshot.Read(path)).Message); }
         finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("--solution App.csproj --metadata Metadata", true)]
+    [InlineData("--config appsettings.json --exclude *.Tests --plugin-solution Plugins.csproj", true)]
+    [InlineData("--no-roles", true)]
+    [InlineData("--explore", false)]
+    [InlineData("--format text", false)]
+    [InlineData("--format json", false)]
+    [InlineData("--output report.json", false)]
+    [InlineData("--detail normal", false)]
+    [InlineData("--table account", false)]
+    [InlineData("--privilege Write", false)]
+    [InlineData("--runs-as Caller", false)]
+    [InlineData("--plugin P", false)]
+    [InlineData("--custom-api ctx_Run", false)]
+    [InlineData("--function Sync", false)]
+    [InlineData("--entry App.Run", false)]
+    [InlineData("--operation \"Update account\"", false)]
+    [InlineData("--role Reader", false)]
+    [InlineData("--caller-role Reader", false)]
+    [InlineData("--user someone", false)]
+    [InlineData("--caller-user someone", false)]
+    [InlineData("--strict", false)]
+    [InlineData("--fail-on-missing", false)]
+    public void SaveSnapshotOnlyCapturesUnlessAQueryReportOrExplorerIsRequested(string extra, bool captureOnly)
+    {
+        var command = new RootCommand(); var options = new AnalysisOptions(); options.AddTo(command);
+        var parsed = command.Parse("--save-snapshot snapshot.json " + extra);
+        Assert.Empty(parsed.Errors);
+        Assert.Equal(captureOnly, options.Read(parsed).CaptureOnly);
+        Assert.False(options.Read(command.Parse("--snapshot snapshot.json")).CaptureOnly);
+        Assert.False(options.Read(command.Parse("")).CaptureOnly);
     }
 
     [Theory]
