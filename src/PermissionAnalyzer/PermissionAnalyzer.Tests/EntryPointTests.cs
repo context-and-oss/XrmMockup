@@ -318,7 +318,7 @@ public class EntryPointTests
 
         var actForUser = manifest.Entry("function:Test/ActForUser");
         Assert.Equal("TimerTrigger", actForUser.Trigger?.Binding);
-        Assert.Equal(["contact:Delete as ImpersonatedCaller"], actForUser.RequirementsWithIdentity());
+        Assert.Equal(["contact:Delete as ApplicationUser", "contact:Delete as ImpersonatedCaller"], actForUser.RequirementsWithIdentity());
     }
 
     [Fact]

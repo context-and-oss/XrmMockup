@@ -46,8 +46,8 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
             new("The identity the operation runs as has no roles to check against. Map it to roles with --role, --caller-role, XrmMockup:Permissions:Principals or XrmMockup:Permissions:Users."),
             new("note")),
         new("unverifiable", "Unverifiable",
-            new("A privilege not tied to a table can't be checked"),
-            new("The role metadata was generated before privileges not tied to a table were downloaded. Regenerate it."),
+            new("A privilege cannot be verified against the role metadata"),
+            new("The role metadata lacks the table or global privilege data needed for coverage. Regenerate it."),
             new("note")),
     ];
 
@@ -72,7 +72,8 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
         var document = new SarifDocument(
             "https://json.schemastore.org/sarif-2.1.0.json",
             "2.1.0",
-            [new RunDocument(new ToolDocument(new DriverDocument("xrmmockup-permissions", version, "https://github.com/delegateas/XrmMockup", Rules)), results)]);
+            [new RunDocument(new ToolDocument(new DriverDocument("xrmmockup-permissions", version, "https://github.com/delegateas/XrmMockup", Rules)), results,
+                LiveRoleSources.Of(manifest, coverage) is { } liveRoles ? new RunProperties(liveRoles) : null)]);
 
         writer.Write(JsonSerializer.Serialize(document, Options));
         writer.Write('\n');
@@ -118,7 +119,7 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
                 {
                     CoverageStatus.Missing or CoverageStatus.Suppressed => ((int?)MissingRule, $"{what} is missing from {roles?.Roles}, needed as {identity}"),
                     CoverageStatus.NotChecked => (NotCheckedRule, $"{what} as {identity} isn't checked ({roles?.Note ?? "no roles"})"),
-                    CoverageStatus.Unverifiable => (UnverifiableRule, $"{what} can't be checked against {roles?.Roles} for {identity} (the role metadata predates privileges not tied to a table)"),
+                    CoverageStatus.Unverifiable => (UnverifiableRule, $"{what} can't be checked against {roles?.Roles} for {identity} ({result.Reason ?? "role metadata is incomplete"})"),
                     _ => (null, ""),
                 };
                 if (rule is not { } index) continue;
@@ -212,7 +213,9 @@ internal sealed class SarifManifestWriter(ReportFilter? filter = null, string so
         string Version,
         IReadOnlyList<RunDocument> Runs);
 
-    private sealed record RunDocument(ToolDocument Tool, IReadOnlyList<ResultDocument> Results);
+    private sealed record RunDocument(ToolDocument Tool, IReadOnlyList<ResultDocument> Results, RunProperties? Properties);
+
+    private sealed record RunProperties(IReadOnlyList<string> LiveRoles);
 
     private sealed record ToolDocument(DriverDocument Driver);
 

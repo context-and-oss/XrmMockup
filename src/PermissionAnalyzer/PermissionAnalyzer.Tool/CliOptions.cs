@@ -12,11 +12,23 @@ internal static class CliOptions
         public const string Description = "Solution (.sln or .slnx) or project (.csproj) to analyze. A project is analyzed with the projects it references. Default: XrmMockup:Permissions:Solution, else the single solution in the current directory";
     }
 
+    internal static class Snapshot
+    {
+        public const string Primary = "--snapshot";
+        public const string Description = "Query a saved analysis snapshot without loading source. --metadata replaces only its role catalog";
+    }
+
+    internal static class SaveSnapshot
+    {
+        public const string Primary = "--save-snapshot";
+        public const string Description = "Save the complete extracted graph and analysis metadata for later queries. Requirements-only by default; explicit role/user or failure options enable coverage";
+    }
+
     internal static class Metadata
     {
         public const string Primary = "--metadata";
         public const string Alias = "-m";
-        public const string Description = "XrmMockup metadata folder. Default: XrmMockup:Permissions:MetadataDirectory, else XrmMockup:Metadata:OutputDirectory, else ./Metadata next to the configuration when it exists";
+        public const string Description = "XrmMockup metadata folder. Default: XrmMockup:Permissions:MetadataDirectory, else XrmMockup:Metadata:OutputDirectory, else ./Metadata next to the configuration when it exists. With --snapshot, reads only SecurityRoles and overrides the embedded role catalog";
     }
 
     internal static class Exclude
@@ -95,6 +107,33 @@ internal static class CliOptions
         public const string Primary = "--role";
         public const string Alias = "-r";
         public const string Description = "Security role of the caller and the application user, by name. Repeatable; roles combine. Replaces XrmMockup:Permissions:Principals";
+    }
+
+    internal static class User
+    {
+        public const string Primary = "--user";
+        public const string Description = "Check caller and application-user privileges against a Dataverse user's direct and team roles, by UPN or email";
+    }
+
+    internal static class CallerUser
+    {
+        public const string Primary = "--caller-user";
+        public const string Description = "Dataverse user that app code impersonates through CallerId, by UPN or email";
+    }
+
+    internal static class DataverseUrl
+    {
+        public const string Primary = "--dataverse-url";
+        public const string Alias = "-u";
+        public const string Description = "Dataverse environment URL; overrides DataverseUrl in configuration";
+    }
+
+    internal static class CredentialType
+    {
+        public const string Primary = "--credential-type";
+        public const string Alias = "-t";
+        public const string Description = "Azure credential: browser (default), devicecode or azcli";
+        public static readonly string[] AllowedValues = ["browser", "devicecode", "azcli"];
     }
 
     internal static class CallerRole

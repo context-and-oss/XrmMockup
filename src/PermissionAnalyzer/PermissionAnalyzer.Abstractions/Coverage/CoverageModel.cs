@@ -13,7 +13,7 @@ public enum CoverageStatus
     Granted,
 
     /// <summary>
-    /// No security role in the metadata mentions the table, so XrmMockup allows every operation on it.
+    /// Legacy status retained for compatibility. Missing table metadata is now Unverifiable.
     /// </summary>
     NotGoverned,
 
@@ -38,8 +38,7 @@ public enum CoverageStatus
     System,
 
     /// <summary>
-    /// A privilege not tied to a table, which the role metadata doesn't have: it was generated before those privileges
-    /// were downloaded.
+    /// Required table or global privilege metadata is unavailable, so coverage cannot be verified.
     /// </summary>
     Unverifiable,
 }

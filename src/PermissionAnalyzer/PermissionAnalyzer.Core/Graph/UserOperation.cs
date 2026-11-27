@@ -71,7 +71,8 @@ internal sealed record UserOperation(string Message, string Table, IReadOnlyList
         /// </summary>
         public TableResolution Lookups(string member, TableShape shape)
         {
-            if (member != primary || operation.Columns is null) return TableResolution.Empty;
+            if (member != primary || operation.Columns is null)
+                return TableResolution.Unresolved($"lookup contents of {member} are unknown; specify the operation's attributes");
 
             var targets = operation.Columns.Select(c => lookups.TargetsOf(operation.Table, c)).Where(t => t.Count > 0).ToList();
             if (targets.Count == 0) return TableResolution.Empty;

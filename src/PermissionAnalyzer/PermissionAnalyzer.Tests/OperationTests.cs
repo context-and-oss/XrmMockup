@@ -113,7 +113,7 @@ public class OperationTests
     {
         var operation = Run("QualifyLead", "lead");
 
-        Assert.Equal(["account:Create", "contact:Create", "lead:Write", "opportunity:Create"], operation.Requirements());
+        Assert.Equal(["account:Create", "account:Append", "contact:Create", "contact:Append", "lead:Write", "lead:AppendTo", "opportunity:Create", "opportunity:Append"], operation.Requirements());
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class OperationTests
 
         // Not Create on the incident: the request creates the resolution, which is another member
         Assert.Equal(["incident:Write"], operation.Requirements());
-        var unresolved = Assert.Single(operation.Unresolved);
+        var unresolved = Assert.Single(operation.Unresolved, u => u.Privileges.Contains(Privilege.Create));
         Assert.Equal("IncidentResolution of the CloseIncident request isn't known", unresolved.Reason);
         Assert.Equal([Privilege.Create], unresolved.Privileges);
     }
@@ -162,7 +162,8 @@ public class OperationTests
         Assert.Equal(["prvMerge"], merge.GlobalRequirements.Select(r => r.Privilege));
 
         var send = Run("SendEmail", "email");
-        Assert.Contains(send.Assumptions, a => a.Reason.StartsWith("SendEmail sends the email as the calling user", StringComparison.Ordinal));
+        Assert.Contains(send.Unresolved, u => u.Reason.Contains("runtime regarding"));
+        Assert.Contains(merge.Assumptions, a => a.Reason.Contains("XrmMockup does not enforce"));
     }
 
     [Fact]

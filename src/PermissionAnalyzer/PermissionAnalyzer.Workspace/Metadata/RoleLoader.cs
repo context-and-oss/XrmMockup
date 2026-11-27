@@ -58,7 +58,7 @@ internal static class RoleLoader
             globalPrivileges = new SortedDictionary<string, PrivilegeDepth>(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, privilege) in globals) globalPrivileges[name] = ToDepth(privilege.PrivilegeDepth);
         }
-        return new RoleDefinition(role.Name, privileges, globalPrivileges);
+        return new RoleDefinition(role.Name, privileges, globalPrivileges, role.RoleId == Guid.Empty ? null : role.RoleId);
     }
 
     internal static Privilege? ToPrivilege(AccessRights right) => right switch

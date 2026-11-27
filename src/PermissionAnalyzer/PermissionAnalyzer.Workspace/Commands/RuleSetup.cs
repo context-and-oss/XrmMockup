@@ -32,6 +32,7 @@ internal static class RuleSetup
             Requests = Blank(rule.Requests),
             GlobalPrivileges = GlobalPrivileges(rule.GlobalPrivileges, setting),
             Assumption = Blank(rule.Assumption),
+            Unresolved = rule.Unresolved.Select(r => Blank(r) ?? throw new ToolException($"{setting} has an empty Unresolved entry")).Distinct(StringComparer.Ordinal).OrderBy(r => r, StringComparer.Ordinal).ToList(),
             Enforced = rule.Enforced ?? true,
             FiresOn = Blank(rule.FiresOn)?.ToLowerInvariant(),
             StepMessage = Blank(rule.StepMessage),

@@ -44,10 +44,10 @@ namespace DG.Tools.XrmMockup
             if (user == null) throw new ArgumentNullException(nameof(user));
             if (user.LogicalName != "systemuser" || user.Id == Guid.Empty || !security.HasLocalUser(user.Id))
                 throw new ArgumentException($"Invalid local system user: {user.LogicalName} {user.Id}.", nameof(user));
-            return CheckPermissions(analysis, scope, security.GetPermissionCheckRoles(user.Id), $"user {user.Id} (direct and team roles)");
+            return CheckPermissions(analysis, scope, security.GetPermissionCheckRoles(user.Id), $"user {user.Id} (direct and team roles)", security.GetPermissionCheckRoles(user.Id, directOnly: true));
         }
 
-        private PermissionCheckResult CheckPermissions(PermissionAnalysis analysis, PermissionScope scope, IEnumerable<SecurityRole> roles, string origin)
+        private PermissionCheckResult CheckPermissions(PermissionAnalysis analysis, PermissionScope scope, IEnumerable<SecurityRole> roles, string origin, IEnumerable<SecurityRole> directRoles = null)
         {
             if (analysis == null) throw new ArgumentNullException(nameof(analysis));
             if (scope == null) throw new ArgumentNullException(nameof(scope));
@@ -71,9 +71,9 @@ namespace DG.Tools.XrmMockup
             foreach (var identity in manifest.AllRequirements.Select(r => r.RunsAs).Concat(manifest.AllGlobalRequirements.Select(r => r.RunsAs)))
             {
                 if (identity.Kind == RunsAsKind.User && Guid.TryParse(identity.UserId, out var id) && security.HasLocalUser(id))
-                    users[identity.UserId] = RoleSet.Combine(security.GetPermissionCheckRoles(id).Select(PermissionRole), $"user {id} (direct and team roles)");
+                    users[identity.UserId] = RoleSet.Combine(security.GetPermissionCheckRoles(id).Select(PermissionRole), $"user {id} (direct and team roles)", security.GetPermissionCheckRoles(id, directOnly: true).Select(PermissionRole));
             }
-            var primaryRoles = RoleSet.Combine(roles.Select(PermissionRole), origin);
+            var primaryRoles = RoleSet.Combine(roles.Select(PermissionRole), origin, (directRoles ?? roles).Select(PermissionRole));
             var coverage = CoverageEvaluator.EvaluateForPermissionCheck(manifest, new CoverageOptions(primaryRoles, users));
             return new PermissionCheckResult(manifest, coverage, primaryRoles);
         }

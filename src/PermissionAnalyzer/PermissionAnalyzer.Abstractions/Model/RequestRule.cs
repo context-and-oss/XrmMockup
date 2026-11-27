@@ -24,6 +24,9 @@ public sealed record RequestRule(string Message)
     /// </summary>
     public string? Assumption { get; init; }
 
+    /// <summary>Runtime-dependent checks not resolved by this rule; these make analysis incomplete.</summary>
+    public IReadOnlyList<string> Unresolved { get; init; } = [];
+
     /// <summary>
     /// Messages whose checks this request makes as well, such as <c>Create</c> and <c>Update</c> for <c>Upsert</c>.
     /// </summary>

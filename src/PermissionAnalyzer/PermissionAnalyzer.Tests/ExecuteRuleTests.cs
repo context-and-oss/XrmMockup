@@ -100,7 +100,7 @@ public class ExecuteRuleTests
             """);
 
         Assert.Equal(["account:Write", "contact:Delete"], method.Requirements());
-        Assert.Empty(method.Unresolved);
+        Assert.Contains(method.Unresolved, u => u.Privileges.Contains(Privilege.AppendTo));
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public class ExecuteRuleTests
             """);
 
         Assert.Equal(["account:Create", "contact:Create", "contact:Write"], method.Requirements());
-        Assert.Empty(method.Unresolved);
+        Assert.Contains(method.Unresolved, u => u.Privileges.Contains(Privilege.AppendTo));
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class ExecuteRuleTests
             }
             """);
 
-        Assert.Equal(["contact:Create", "lead:Write"], method.Requirements());
+        Assert.Equal(["contact:Create", "contact:Append", "lead:Write", "lead:AppendTo"], method.Requirements());
     }
 
     [Fact]

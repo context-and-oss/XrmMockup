@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tests" />
+    <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tool" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PermissionAnalyzer.Abstractions\PermissionAnalyzer.Abstractions.csproj" />

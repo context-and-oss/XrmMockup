@@ -103,7 +103,7 @@ public class ContextTests
             """);
 
         Assert.Equal(["account:Create", "contact:Read", "contact:Write", "lead:Delete"], method.Requirements());
-        Assert.Empty(method.Unresolved);
+        Assert.Contains(method.Unresolved, u => u.Operation == "UpdateObject" && u.Privileges.Contains(Privilege.AppendTo));
     }
 
     [Fact]

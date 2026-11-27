@@ -25,7 +25,10 @@
     <ProjectReference Include="..\PermissionAnalyzer.Workspace\PermissionAnalyzer.Workspace.csproj" />
     <ProjectReference Include="..\..\ToolsCommon\ToolsCommon.csproj" />
   </ItemGroup>
-  <ItemGroup><PackageReference Include="System.CommandLine" Version="2.0.0" /></ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0" />
+    <PackageReference Include="DataverseConnection" Version="1.2.6" />
+  </ItemGroup>
   <ItemGroup>
     <!-- Icon is included by Directory.Build.props, license via PackageLicenseExpression -->
     <None Include="README.md" Pack="true" PackagePath="" />

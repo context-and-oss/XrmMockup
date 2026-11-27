@@ -15,7 +15,7 @@ namespace XrmMockup.PermissionAnalyzer.Tool.Output;
 /// any and the missing privileges no matching requirement is missing; the result counts stay those of the whole
 /// analysis.
 /// </summary>
-internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifestWriter
+internal sealed class JsonManifestWriter(ReportFilter? filter = null, AnalysisProvenance? inputs = null) : IManifestWriter
 {
     private readonly ReportFilter _filter = filter ?? ReportFilter.None;
 
@@ -41,6 +41,9 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
     {
         (IReadOnlyList<MissingPrivilege> Missing, IReadOnlyList<MissingGlobalPrivilege> MissingGlobal)? missing = coverage is null ? null : _filter.Missing(manifest, coverage);
         var document = new ManifestDocument(
+            1,
+            new AnalysisDocument(manifest.Incomplete, manifest.Sections.Where(s => s.Truncated).Select(s => s.Id).ToList(),
+                manifest.EntryPoints.Select(e => e.Id).ToList(), _filter.IsEmpty ? null : _filter.ToString(), "whole-analysis", inputs),
             manifest.EntryPoints.Where(e => _filter.IsEmpty || _filter.Matches(e)).Select(e => new EntryPointDocument(
                 e.Id,
                 e.Kind,
@@ -63,13 +66,14 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
                 Assumptions(m.Assumptions),
                 Roles(coverage?.For(m))))
                 .ToList(),
-            manifest.NotRoleGoverned,
+            manifest.TablesWithoutRoleMetadata,
             missing?.Missing.Select(m => Missing(m.Table, m.Privilege.ToString(), m.RunsAs, m.Roles, m.In))
                 .Concat(missing.Value.MissingGlobal.Select(m => Missing(null, m.Privilege, m.RunsAs, m.Roles, m.In)))
                 .ToList(),
             coverage?.Summary is { } summary
                 ? new ResultDocument(summary.Granted, summary.NotGoverned, summary.Missing, summary.Suppressed, summary.NotChecked, summary.System, summary.Unresolved, summary.UnresolvedNoRule, summary.UnresolvedCustomApi, summary.UnresolvedWorkflow, summary.Unverifiable, summary.Truncated, summary.Incomplete)
-                : null);
+                : null,
+            LiveRoleSources.Of(manifest, coverage));
 
         writer.Write(JsonSerializer.Serialize(document, Options));
         writer.Write('\n');
@@ -116,11 +120,16 @@ internal sealed class JsonManifestWriter(ReportFilter? filter = null) : IManifes
         location is null ? null : new LocationDocument(location.File, location.Line, location.Column);
 
     private sealed record ManifestDocument(
+        int SchemaVersion,
+        AnalysisDocument Analysis,
         IReadOnlyList<EntryPointDocument> EntryPoints,
         IReadOnlyList<MethodDocument> Unreached,
-        IReadOnlyList<string>? NotRoleGoverned,
+        IReadOnlyList<string>? TablesWithoutRoleMetadata,
         IReadOnlyList<MissingDocument>? Missing,
-        ResultDocument? Result);
+        ResultDocument? Result,
+        IReadOnlyList<string>? LiveRoles);
+
+    private sealed record AnalysisDocument(bool Incomplete, IReadOnlyList<string> TruncatedSections, IReadOnlyList<string> Scope, string? ReportFilter, string CountScope, AnalysisProvenance? Inputs);
 
     private sealed record MissingDocument(
         string? Table,

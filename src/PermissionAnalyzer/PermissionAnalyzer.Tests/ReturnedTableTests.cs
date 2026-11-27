@@ -1,3 +1,5 @@
+using XrmMockup.PermissionAnalyzer.Core.Model;
+
 namespace XrmMockup.PermissionAnalyzer.Tests;
 
 /// <summary>
@@ -220,7 +222,7 @@ public class ReturnedTableTests
             }
             """);
 
-        Assert.Equal("entity comes from field '_pending'", Assert.Single(method.Unresolved).Reason);
+        Assert.Equal("entity comes from field '_pending'", Assert.Single(method.Unresolved, u => u.Privileges.Contains(Privilege.Create)).Reason);
     }
 
     [Fact]

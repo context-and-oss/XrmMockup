@@ -39,7 +39,7 @@ public sealed class PermissionCheckResult(Manifest manifest, CoverageReport cove
             }
             foreach (var unresolved in entry.Unresolved.Where(u => u.RunsAs.Kind != RunsAsKind.System))
                 message.AppendLine().Append($"  Unresolved: {unresolved.Operation}: {unresolved.Reason}, {unresolved.RunsAs}, at {unresolved.Source.Location}");
-            if (entry.Truncated) message.AppendLine().Append("  Analysis truncated at the call limit.");
+            if (entry.Truncated) message.AppendLine().Append("  Analysis truncated at a call or resolution-depth limit.");
         }
         throw new PermissionCheckException(message.ToString(), this);
     }

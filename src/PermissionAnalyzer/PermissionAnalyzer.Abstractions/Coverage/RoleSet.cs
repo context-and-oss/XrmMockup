@@ -33,6 +33,29 @@ public sealed class RoleSet
     /// </summary>
     public string Origin { get; }
 
+    internal LiveRoleSource? LiveSource { get; private set; }
+
+    private RoleSet? _directRoles;
+
+    /// <summary>Delegation cannot be inherited from teams. Explicit role lists represent direct assignments.</summary>
+    public PrivilegeDepth? DirectGlobalDepth(string privilege) => (_directRoles ?? this).GlobalDepth(privilege);
+    public bool KnowsDirectGlobalPrivileges => (_directRoles ?? this).KnowsGlobalPrivileges;
+
+    /// <summary>Combines all assignments while retaining the directly assigned roles for delegation checks.</summary>
+    public static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, IEnumerable<RoleDefinition> directRoles)
+    {
+        var set = Combine(roles, origin);
+        set._directRoles = Combine(directRoles, origin);
+        return set;
+    }
+
+    internal static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin, LiveRoleSource source, IEnumerable<RoleDefinition> directRoles)
+    {
+        var set = Combine(roles, origin, directRoles);
+        set.LiveSource = source;
+        return set;
+    }
+
     public static RoleSet Combine(IEnumerable<RoleDefinition> roles, string origin)
     {
         var names = new SortedSet<string>(StringComparer.Ordinal);
@@ -83,5 +106,12 @@ public sealed class RoleSet
     public PrivilegeDepth? GlobalDepth(string privilege) =>
         _globalPrivileges is not null && _globalPrivileges.TryGetValue(privilege, out var depth) ? depth : null;
 
-    public override string ToString() => $"{string.Join(", ", Names)} ({Origin})";
+    // Group by the live identity independently of its concise display label.
+    internal string Key => LiveSource is { } source
+        ? $"{string.Join(", ", Names)}; {source.EnvironmentUrl}; {source.UserId:D}; {source.IsCaller}"
+        : ToString();
+
+    public override string ToString() => LiveSource is not null
+        ? string.Join(", ", Names)
+        : $"{string.Join(", ", Names)} ({Origin})";
 }

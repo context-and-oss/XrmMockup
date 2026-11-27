@@ -44,11 +44,11 @@ internal static class ConfigReader
         var permissions = configuration.GetSection(PermissionsConfiguration.SectionPath).Get<PermissionsConfiguration>()
             ?? new PermissionsConfiguration();
 
-        return new LoadedConfiguration(directory, permissions, configuration[MetadataOutputDirectoryKey]);
+        return new LoadedConfiguration(directory, permissions, configuration[MetadataOutputDirectoryKey], configuration);
     }
 }
 
 /// <param name="Directory">The folder that relative paths in the configuration are relative to.</param>
 /// <param name="Permissions">The <c>XrmMockup:Permissions</c> section.</param>
 /// <param name="MetadataOutputDirectory">The metadata tool's output folder, when configured.</param>
-internal sealed record LoadedConfiguration(string Directory, PermissionsConfiguration Permissions, string? MetadataOutputDirectory);
+internal sealed record LoadedConfiguration(string Directory, PermissionsConfiguration Permissions, string? MetadataOutputDirectory, IConfiguration? ConnectionConfiguration = null);

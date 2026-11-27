@@ -87,7 +87,7 @@ public class CascadeTests
             """ + Plugins);
 
         Assert.Equal(
-            ["contact:Delete as ImpersonatedCaller", "task:Delete as ImpersonatedCaller"],
+            ["contact:Delete as ApplicationUser", "contact:Delete as ImpersonatedCaller", "task:Delete as ApplicationUser", "task:Delete as ImpersonatedCaller"],
             manifest.Entry("function:Test/ActForUser").RequirementsWithIdentity());
     }
 

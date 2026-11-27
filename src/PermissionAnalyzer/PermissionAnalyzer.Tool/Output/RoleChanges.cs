@@ -25,7 +25,14 @@ internal static class RoleChanges
                 var identity = privilegeNeed.RunsAs with { Assumed = false };
                 if (BlockOf(identity, privilegeNeed.Coverage, sectionCoverage) is not { } key) continue;
                 var need = new Need(privilegeNeed.Name, privilegeNeed.TablePrivilege);
-                if (!blocks.TryGetValue(key, out var block)) blocks.Add(key, block = new Block());
+                if (!blocks.TryGetValue(key, out var block))
+                {
+                    var roles = sectionCoverage?.Identities.FirstOrDefault(i => i.RunsAs == identity)?.Roles;
+                    var headingKey = roles is not null && key.Kind != BlockKind.NotChecked
+                        ? roles.ToString()
+                        : key.Key;
+                    blocks.Add(key, block = new Block(headingKey));
+                }
                 block.Identities.Add(identity);
                 block.Needs.Add(need);
                 if (!block.Sections.TryGetValue(section.Id, out var sectionNeeds)) block.Sections.Add(section.Id, sectionNeeds = []);
@@ -40,9 +47,9 @@ internal static class RoleChanges
             var heading = kind switch
             {
                 BlockKind.Missing when coverage is null => $"{key} needs",
-                BlockKind.Missing => $"Missing from {key}, for {identities}",
+                BlockKind.Missing => $"Missing from {block.HeadingKey}, for {identities}",
                 BlockKind.NotChecked => key,
-                _ => $"Can't be checked against {key}, for {identities} (the role metadata predates privileges not tied to a table; regenerate it)",
+                _ => $"Can't be checked against {block.HeadingKey}, for {identities} (role metadata is incomplete; regenerate it)",
             };
             // Sections that need exactly the same privileges are one group, placed where its first section is
             var groups = block.Sections
@@ -75,9 +82,9 @@ internal static class RoleChanges
         return result?.Status switch
         {
             null => identity.Kind == RunsAsKind.System ? null : (BlockKind.Missing, identity.ToString()),
-            CoverageStatus.Missing => (BlockKind.Missing, roles!.Roles!.ToString()),
+            CoverageStatus.Missing => (BlockKind.Missing, roles!.Roles!.Key),
             CoverageStatus.NotChecked => (BlockKind.NotChecked, $"{identity} needs ({roles?.Note ?? "not checked"})"),
-            CoverageStatus.Unverifiable => (BlockKind.Unverifiable, roles!.Roles!.ToString()),
+            CoverageStatus.Unverifiable => (BlockKind.Unverifiable, roles!.Roles!.Key),
             _ => null,
         };
     }
@@ -95,8 +102,10 @@ internal static class RoleChanges
     /// <summary>
     /// What one block lacks: in all, and per entry point or unreached method.
     /// </summary>
-    private sealed class Block
+    private sealed class Block(string headingKey)
     {
+        public string HeadingKey { get; } = headingKey;
+
         public HashSet<RunsAs> Identities { get; } = [];
 
         public HashSet<Need> Needs { get; } = [];

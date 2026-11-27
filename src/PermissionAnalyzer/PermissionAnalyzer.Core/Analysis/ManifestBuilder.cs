@@ -18,7 +18,7 @@ namespace XrmMockup.PermissionAnalyzer.Core.Analysis;
 /// <param name="lookups">
 /// The lookup columns in the metadata, which give the tables a lookup can refer to when the code doesn't say.
 /// </param>
-public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null, IEnumerable<LookupColumn>? lookups = null)
+public sealed partial class ManifestBuilder(string rootDirectory, IEnumerable<RequestRule>? rules = null, IEnumerable<LookupColumn>? lookups = null)
 {
     /// <summary>Copies extracted source summaries, replacing check-time plugin and lookup metadata.
     /// The graph is read-only during Build. Loaded compilations and metadata-dependent summaries are reused;
@@ -199,7 +199,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
             .Distinct(StringComparer.Ordinal)
             .OrderBy(c => c, StringComparer.Ordinal)
             .ToList();
-        var operation = new UserOperation(_rules.MessageNamed(message.Trim()), table.Trim().ToLowerInvariant(), set is { Count: > 0 } ? set : null);
+        var operation = new UserOperation(_rules.MessageNamed(message.Trim()), table.Trim().ToLowerInvariant(), set);
         var id = EntryPointIds.Operation(operation.Display, operation.Columns);
         _operations[id] = operation;
     }
@@ -564,8 +564,13 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
         ResolvedHits hits,
         RunsAs impersonator)
     {
-        hits.Globals.AddRange(hits.Requirements
-            .Where(h => h.RunsAs.Kind == RunsAsKind.ImpersonatedCaller)
+        // CallerId uses the intersection of the two identities' privileges, not only the end user's.
+        var impersonatedRequirements = hits.Requirements.Where(h => h.RunsAs.Kind == RunsAsKind.ImpersonatedCaller).ToList();
+        var impersonatedGlobals = hits.Globals.Where(h => h.RunsAs.Kind == RunsAsKind.ImpersonatedCaller).ToList();
+        hits.Requirements.AddRange(impersonatedRequirements.Select(h => h with { RunsAs = impersonator }));
+        hits.Globals.AddRange(impersonatedGlobals.Select(h => h with { RunsAs = impersonator }));
+        hits.Globals.AddRange(impersonatedGlobals.Select(h => new GlobalHit(GlobalRequirement.ActOnBehalfOfAnotherUser, impersonator, h.Basis, h.Source)));
+        hits.Globals.AddRange(impersonatedRequirements
             .Select(h => new GlobalHit(GlobalRequirement.ActOnBehalfOfAnotherUser, impersonator, h.Basis, h.Source)));
         hits.Globals.AddRange(hits.Unresolved
             .Where(h => h.RunsAs.Kind == RunsAsKind.ImpersonatedCaller)
@@ -620,7 +625,7 @@ public sealed class ManifestBuilder(string rootDirectory, IEnumerable<RequestRul
                 ?? globalRequirements.SelectMany(r => r.Sources).FirstOrDefault();
             if (location is not null)
             {
-                assumptions.Insert(0, new Assumption($"analysis stopped after {Evaluator.MaxVisits} calls; requirements may be incomplete", location));
+                assumptions.Insert(0, new Assumption($"analysis reached a call or resolution depth limit; requirements may be incomplete", location));
             }
         }
 
