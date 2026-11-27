@@ -5,6 +5,18 @@ namespace XrmMockup.PermissionAnalyzer.Tool;
 /// </summary>
 internal static class CliOptions
 {
+    internal static class Explore
+    {
+        public const string Primary = "--explore";
+        public const string Description = "Explore permissions interactively in your browser. Loads source or --snapshot once; Ctrl+C stops the server";
+    }
+
+    internal static class Port
+    {
+        public const string Primary = "--port";
+        public const string Description = "Local permission explorer port (default: 8765). Requires --explore";
+    }
+
     internal static class Solution
     {
         public const string Primary = "--solution";
@@ -21,7 +33,7 @@ internal static class CliOptions
     internal static class SaveSnapshot
     {
         public const string Primary = "--save-snapshot";
-        public const string Description = "Save the complete extracted graph and analysis metadata for later queries. Requirements-only by default; explicit role/user or failure options enable coverage";
+        public const string Description = "Save the complete extracted graph and analysis metadata for later queries, then stop. Explicit query/report options also produce a report; --explore starts the explorer";
     }
 
     internal static class Metadata

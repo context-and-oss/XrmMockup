@@ -20,6 +20,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="XrmMockup.PermissionAnalyzer.Tests" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PermissionAnalyzer.Workspace\PermissionAnalyzer.Workspace.csproj" />
@@ -34,4 +35,30 @@
     <None Include="README.md" Pack="true" PackagePath="" />
     <None Include="CHANGELOG.md" Pack="true" PackagePath="" />
   </ItemGroup>
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Web/Client/node_modules/**;Web/Client/dist/**</DefaultItemExcludes>
+    <PermissionWebClient>$(MSBuildProjectDirectory)/Web/Client</PermissionWebClient>
+  </PropertyGroup>
+  <ItemGroup>
+    <PermissionWebSource Include="Web/Client/src/**/*;Web/Client/public/**/*" />
+  </ItemGroup>
+  <Target Name="RestorePermissionWebUi"
+          Inputs="$(PermissionWebClient)/package.json;$(PermissionWebClient)/package-lock.json"
+          Outputs="$(PermissionWebClient)/node_modules/.xrmmockup-restored">
+    <Exec Command="npm ci --include=dev --no-audit --no-fund" WorkingDirectory="$(PermissionWebClient)" />
+    <Touch Files="$(PermissionWebClient)/node_modules/.xrmmockup-restored" AlwaysCreate="true" />
+  </Target>
+  <Target Name="BuildPermissionWebUi" DependsOnTargets="RestorePermissionWebUi"
+          Inputs="$(PermissionWebClient)/package.json;$(PermissionWebClient)/package-lock.json;$(PermissionWebClient)/index.html;$(PermissionWebClient)/tsconfig.json;$(PermissionWebClient)/vite.config.ts;@(PermissionWebSource)"
+          Outputs="$(PermissionWebClient)/dist/index.html;$(PermissionWebClient)/dist/app.js;$(PermissionWebClient)/dist/styles.css;$(PermissionWebClient)/dist/favicon.svg">
+    <Exec Command="npm run build" WorkingDirectory="$(PermissionWebClient)" />
+  </Target>
+  <Target Name="EmbedPermissionWebUi" BeforeTargets="AssignTargetPaths" DependsOnTargets="BuildPermissionWebUi">
+    <ItemGroup>
+      <EmbeddedResource Include="$(PermissionWebClient)/dist/index.html" LogicalName="XrmMockup.PermissionAnalyzer.Tool.Web.Assets.index.html" />
+      <EmbeddedResource Include="$(PermissionWebClient)/dist/app.js" LogicalName="XrmMockup.PermissionAnalyzer.Tool.Web.Assets.app.js" />
+      <EmbeddedResource Include="$(PermissionWebClient)/dist/styles.css" LogicalName="XrmMockup.PermissionAnalyzer.Tool.Web.Assets.styles.css" />
+      <EmbeddedResource Include="$(PermissionWebClient)/dist/favicon.svg" LogicalName="XrmMockup.PermissionAnalyzer.Tool.Web.Assets.favicon.svg" />
+    </ItemGroup>
+  </Target>
 </Project>

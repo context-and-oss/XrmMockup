@@ -85,4 +85,4 @@ Diagnostics identify roles, identities and source locations.
 
 There is no permissive SDK mode, suppression option, automatic CRUD check, runtime tracing,
 live role lookup or role suggestion. CLI behavior and configuration are documented in the
-[CLI reference](../src/PermissionAnalyzer/PermissionAnalyzer.Tool/README.md).
+[CLI reference](permission-analyzer-reference.md).

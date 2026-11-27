@@ -1,0 +1,42 @@
+.rolePicker {
+  min-width: 0;
+  border: 0;
+  padding: 12px 0 0;
+  margin: 12px 0 0;
+
+  legend {
+    font-size: 12px;
+    font-weight: 500;
+  }
+}
+
+.roleOptions {
+  max-height: 180px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.roleOption {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 12px;
+  min-height: 36px;
+
+  span {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}
+
+.rolePickerFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--grey);
+  font-weight: 400;
+}
